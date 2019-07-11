@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -462,14 +463,16 @@ func (c *Client) msgGetDate(queue bool) {
 		Error(TAG, "Error while sending GetDateMessage")
 	}
 }
-func (c *Client) msgCreateSession(config *SessionConfig, queue bool) {
+func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug(TAG|PROTOCOL, "Sending CreateSessionMessage")
 	c.messageStream.Reset()
 	config.writeToMessage(c.messageStream)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
 		Error(TAG, "Error while sending CreateSessionMessage.")
+		return err
 	}
+	return err
 }
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
 	Debug(TAG|PROTOCOL, "Sending DestLookupMessage.")
@@ -530,30 +533,42 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 		Error(TAG, "Error while sending SendMessageMessage")
 	}
 }
-func (c *Client) Connect() {
+func (c *Client) Connect() error {
 	Info(0, "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.host"])
 	err := c.tcp.Connect()
 	if err != nil {
-		panic(err)
+		//panic(err)
+		return err
 	}
 	c.outputStream.Reset()
 	c.outputStream.WriteByte(I2CP_PROTOCOL_INIT)
 	_, err = c.tcp.Send(c.outputStream)
+	if err != nil {
+		return err
+	}
 	Debug(PROTOCOL, "Sending protocol byte message")
 	c.msgGetDate(false)
-	c.recvMessage(I2CP_MSG_SET_DATE, c.messageStream, true)
+	err = c.recvMessage(I2CP_MSG_SET_DATE, c.messageStream, true)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (c *Client) CreateSession(sess *Session) {
+func (c *Client) CreateSession(sess *Session) error {
 	if c.n_sessions == I2CP_MAX_SESSIONS_PER_CLIENT {
 		Warning(TAG, "Maximum number of session per client connection reached.")
-		return
+		return fmt.Errorf("%d %s", TAG, "Maximum number of session per client connection reached.")
 	}
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY, "none")
-	c.msgCreateSession(sess.config, false)
+	err := c.msgCreateSession(sess.config, false)
+	if err != nil {
+		return err
+	}
 	c.currentSession = sess
 	c.recvMessage(I2CP_MSG_ANY, c.messageStream, true)
+	return nil
 }
 
 func (c *Client) ProcessIO() error {

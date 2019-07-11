@@ -8,6 +8,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"math/big"
@@ -88,7 +89,7 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 	bites := stream.Bytes()
 	rs = r.Bytes()
 	if len(rs) > 21 {
-		Fatal(tAG|FATAL, "DSA digest r > %21 bytes")
+		Fatal(tAG|FATAL, "DSA digest r > 21 bytes")
 	} else if len(rs) > 20 {
 		copy(bites[:20], rs[len(rs)-20:])
 	} else if len(rs) == 20 {
@@ -98,7 +99,7 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 	}
 	ss = s.Bytes()
 	if len(ss) > 21 {
-		Fatal(tAG|FATAL, "DSA digest r > %21 bytes")
+		Fatal(tAG|FATAL, "DSA digest r > 21 bytes")
 	} else if len(ss) > 20 {
 		copy(bites[20:], ss[len(ss)-20:])
 	} else if len(ss) == 20 {
@@ -139,18 +140,29 @@ func (c *Crypto) WritePublicSignatureToStream(sgk *SignatureKeyPair, stream *Str
 
 // Write Signature keypair to stream
 func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
+	if sgk == nil {
+		Fatal(tAG|FATAL, "Error signature cannot be nil")
+		return fmt.Errorf("Error, signature cannot be nil")
+	}
+	if stream == nil {
+		Fatal(tAG|FATAL, "Error, stream cannot be nil")
+		return fmt.Errorf("Error, stream cannot be nil")
+	}
 	if sgk.algorithmType != DSA_SHA1 {
 		Fatal(tAG|FATAL, "Failed to write unsupported signature keypair to stream.")
+		return fmt.Errorf("Failed to write unsupported signature keypair to stream.")
 	}
 	var n int
 	err = stream.WriteUint32(sgk.algorithmType)
 	n, err = stream.Write(sgk.priv.X.Bytes())
 	if n != 20 {
 		Fatal(tAG|FATAL, "Failed to export signature because publickey != 20 bytes")
+		return err
 	}
 	n, err = stream.Write(sgk.pub.Y.Bytes())
 	if n != 128 {
 		Fatal(tAG|FATAL, "Failed to export signature because privatekey != 20 bytes")
+		return err
 	}
 	return
 }
