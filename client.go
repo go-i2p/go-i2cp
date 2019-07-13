@@ -136,11 +136,15 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 
 func (c *Client) setDefaultProperties() {
 	c.properties = defaultProperties
-	home := os.Getenv("HOME")
+	home := os.Getenv("I2CP_HOME")
 	if len(home) == 0 {
-		return
+		home = ""
 	}
-	config := home + defaultConfigFile
+	conf := os.Getenv("GO_I2CP_CONF")
+	if len(conf) == 0 {
+		conf = defaultConfigFile
+	}
+	config := home + conf
 	Debug(CLIENT, "Loading config file %s", config)
 	ParseConfig(config, c.SetProperty)
 }
