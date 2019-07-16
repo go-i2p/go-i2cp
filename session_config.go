@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"time"
+    "strings"
 )
 
 type SessionConfigProperty int
@@ -139,7 +140,9 @@ func (config *SessionConfig) SetProperty(prop SessionConfigProperty, value strin
 func ParseConfig(s string, cb func(string, string)) {
 	file, err := os.Open(s)
 	if err != nil {
-		Error(SESSION_CONFIG, err.Error())
+        if !strings.Contains(err.Error(), "no such file") {
+            Error(SESSION_CONFIG, err.Error())
+        }
 		return
 	}
 	Debug(SESSION_CONFIG, "Parsing config file '%s'", s)
