@@ -84,7 +84,7 @@ This library implements core I2P networking primitives. When using it:
 - Implement proper session isolation
 - Consider timing attack mitigations
 - Use TLS for I2CP connections when remote
-- Rotate destinations regularly
+- Rotate destinations if necessary
 - Monitor tunnel health
 
 ## Testing
@@ -106,13 +106,6 @@ go test -v ./...
 3. Commit changes (`git commit -m 'Add enhancement'`)
 4. Push to branch (`git push origin feature/enhancement`) 
 5. Open a Pull Request
-
-Please ensure:
-- Full test coverage
-- Privacy-preserving error handling
-- Clear documentation
-- No clearnet dependencies
-- Clean Go code style
 
 ## License
 
