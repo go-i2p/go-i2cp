@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-const tag = DESTINATION
-const PUB_KEY_SIZE = 256
-const DIGEST_SIZE = 40
-const DEST_SIZE = 4096
-
 type Destination struct {
 	cert       *Certificate
 	sgk        SignatureKeyPair
@@ -136,7 +131,7 @@ func (dest *Destination) WriteToStream(stream *Stream) (err error) {
 	return
 }
 
-//Doesn't seem to be used anywhere??
+// Doesn't seem to be used anywhere??
 func (dest *Destination) Verify() (verified bool, err error) {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToMessage(stream)

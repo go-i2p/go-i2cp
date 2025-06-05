@@ -1,12 +1,5 @@
 package go_i2cp
 
-const (
-	CERTIFICATE_NULL     uint8 = iota
-	CERTIFICATE_HASHCASH uint8 = iota
-	CERTIFICATE_SIGNED   uint8 = iota
-	CERTIFICATE_MULTIPLE uint8 = iota
-)
-
 type Certificate struct {
 	certType uint8
 	data     []byte

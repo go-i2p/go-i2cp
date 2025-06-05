@@ -12,36 +12,6 @@ import (
 	"sync"
 )
 
-const I2CP_CLIENT_VERSION = "0.9.33"
-const TAG = CLIENT
-const I2CP_PROTOCOL_INIT uint8 = 0x2a
-const I2CP_MESSAGE_SIZE = 0xffff
-const I2CP_MAX_SESSIONS = 0xffff
-const I2CP_MAX_SESSIONS_PER_CLIENT = 32
-
-const I2CP_MSG_ANY uint8 = 0
-const I2CP_MSG_BANDWIDTH_LIMITS uint8 = 23
-const I2CP_MSG_CREATE_LEASE_SET uint8 = 4
-const I2CP_MSG_CREATE_SESSION uint8 = 1
-const I2CP_MSG_DEST_LOOKUP uint8 = 34
-const I2CP_MSG_DEST_REPLY uint8 = 35
-const I2CP_MSG_DESTROY_SESSION uint8 = 3
-const I2CP_MSG_DISCONNECT uint8 = 30
-const I2CP_MSG_GET_BANDWIDTH_LIMITS uint8 = 8
-const I2CP_MSG_GET_DATE uint8 = 32
-const I2CP_MSG_HOST_LOOKUP uint8 = 38
-const I2CP_MSG_HOST_REPLY uint8 = 39
-const I2CP_MSG_MESSAGE_STATUS uint8 = 22
-const I2CP_MSG_PAYLOAD_MESSAGE uint8 = 31
-const I2CP_MSG_REQUEST_LEASESET uint8 = 21
-const I2CP_MSG_REQUEST_VARIABLE_LEASESET uint8 = 37
-const I2CP_MSG_SEND_MESSAGE uint8 = 5
-const I2CP_MSG_SESSION_STATUS uint8 = 20
-const I2CP_MSG_SET_DATE uint8 = 33
-
-/* Router capabilities */
-const ROUTER_CAN_HOST_LOOKUP uint32 = 1
-
 type ClientProperty int
 
 const (
@@ -51,15 +21,6 @@ const (
 	CLIENT_PROP_USERNAME
 	CLIENT_PROP_PASSWORD
 	NR_OF_I2CP_CLIENT_PROPERTIES
-)
-const (
-	PROTOCOL_STREAMING    = 6
-	PROTOCOL_DATAGRAM     = 17
-	PROTOCOL_RAW_DATAGRAM = 18
-)
-const (
-	HOST_LOOKUP_TYPE_HASH = iota
-	HOST_LOOKUP_TYPE_HOST = iota
 )
 
 var defaultProperties = map[string]string{
@@ -80,21 +41,6 @@ var defaultProperties = map[string]string{
 	"i2cp.SSL":                       "",
 	"i2cp.tcp.host":                  "127.0.0.1",
 	"i2cp.tcp.port":                  "7654",
-}
-
-type ClientCallBacks struct {
-	opaque       *interface{}
-	onDisconnect func(*Client, string, *interface{})
-	onLog        func(*Client, LoggerTags, string)
-}
-type LookupEntry struct {
-	address string
-	session *Session
-}
-type RouterInfo struct {
-	date         uint64
-	version      Version
-	capabilities uint32
 }
 
 type Client struct {

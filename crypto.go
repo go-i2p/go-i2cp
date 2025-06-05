@@ -9,45 +9,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"hash"
-	"io"
 	"math/big"
 )
-
-const tAG = CRYPTO
-
-// Supported Hash algorithms
-const (
-	HASH_SHA1   uint8 = iota
-	HASH_SHA256 uint8 = iota
-)
-
-// Supported signature algorithms
-const (
-	DSA_SHA1   uint32 = iota
-	DSA_SHA256 uint32 = iota
-)
-
-// Supported codec algorithms
-const (
-	CODEC_BASE32 uint8 = iota
-	CODEC_BASE64 uint8 = iota
-)
-
-type SignatureKeyPair struct {
-	algorithmType uint32
-	pub           dsa.PublicKey
-	priv          dsa.PrivateKey
-}
-
-type Crypto struct {
-	b64    *base64.Encoding
-	b32    *base32.Encoding
-	rng    io.Reader
-	params dsa.Parameters
-	sh1    hash.Hash
-	sh256  hash.Hash
-}
 
 var singleton = Crypto{
 	b64:   base64.StdEncoding,
@@ -125,7 +88,7 @@ func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified b
 	return
 }
 
-//  Write public signature key to stream
+// Write public signature key to stream
 func (c *Crypto) WritePublicSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 	if sgk.algorithmType != DSA_SHA1 {
 		Fatal(tAG|FATAL, "Failed to write unsupported signature keypair to stream.")
@@ -167,7 +130,7 @@ func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (
 	return
 }
 
-//  Read and initialize signature keypair from stream
+// Read and initialize signature keypair from stream
 func (c *Crypto) SignatureKeyPairFromStream(stream *Stream) (sgk SignatureKeyPair, err error) {
 	var typ uint32
 	typ, err = stream.ReadUint32()
