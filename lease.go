@@ -10,13 +10,22 @@ func NewLeaseFromStream(stream *Stream) (l *Lease, err error) {
 	l = &Lease{}
 	stream.Read(l.tunnelGateway[:])
 	l.tunnelId, err = stream.ReadUint32()
+	if err != nil {
+		return nil, err
+	}
 	l.endDate, err = stream.ReadUint64()
 	return
 }
 
 func (l *Lease) WriteToMessage(stream *Stream) (err error) {
 	_, err = stream.Write(l.tunnelGateway[:])
+	if err != nil {
+		return err
+	}
 	err = stream.WriteUint32(l.tunnelId)
+	if err != nil {
+		return err
+	}
 	err = stream.WriteUint64(l.endDate)
 	return
 }

@@ -20,6 +20,9 @@ func NewCertificate(typ uint8) (cert Certificate) {
 
 func NewCertificateFromMessage(stream *Stream) (cert Certificate, err error) {
 	cert.certType, err = stream.ReadByte()
+	if err != nil {
+		return
+	}
 	cert.length, err = stream.ReadUint16()
 	if err != nil {
 		return
@@ -49,6 +52,9 @@ func (cert *Certificate) Copy() (newCert Certificate) {
 
 func (cert *Certificate) WriteToMessage(stream *Stream) (err error) {
 	err = stream.WriteByte(cert.certType)
+	if err != nil {
+		return
+	}
 	err = stream.WriteUint16(cert.length)
 	if cert.length > 0 {
 		_, err = stream.Write(cert.data)

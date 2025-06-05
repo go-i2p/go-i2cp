@@ -54,6 +54,9 @@ func (s *Stream) WriteUint64(i uint64) (err error) {
 
 func (stream *Stream) WriteLenPrefixedString(s string) (err error) {
 	err = stream.WriteByte(uint8(len(s)))
+	if err != nil {
+		return
+	}
 	_, err = stream.WriteString(s)
 	return
 }
@@ -75,6 +78,9 @@ func (stream *Stream) WriteMapping(m map[string]string) (err error) {
 		buf.WriteByte(byte(';'))
 	}
 	err = stream.WriteUint16(uint16(buf.Len()))
+	if err != nil {
+		return
+	}
 	_, err = stream.Write(buf.Bytes())
 	return
 }
