@@ -3,7 +3,7 @@ package go_i2cp
 func NewSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	sess = &Session{}
 	sess.client = client
-	dest, _ := NewDestination()
+	dest, _ := NewDestination(client.crypto)
 	sess.config = &SessionConfig{destination: dest}
 	sess.callbacks = &callbacks
 	return

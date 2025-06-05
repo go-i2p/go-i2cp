@@ -5,13 +5,14 @@ import "testing"
 func TestRandomDestination(t *testing.T) {
 	var destOne, destTwo *Destination
 	var err error
-	destOne, err = NewDestination()
+	crypto := NewCrypto()
+	destOne, err = NewDestination(crypto)
 	var stream = NewStream(make([]byte, 4096))
 	destOne.WriteToStream(stream)
 	if err != nil {
 		t.Fatalf("Could not create first test destination with error %s", err.Error())
 	}
-	destTwo, err = NewDestination()
+	destTwo, err = NewDestination(crypto)
 	if err != nil {
 		t.Fatalf("Could not create second test destination with error %s", err.Error())
 	}
@@ -22,13 +23,14 @@ func TestRandomDestination(t *testing.T) {
 
 func TestNewDestinationFromMessage(t *testing.T) {
 	stream := NewStream(make([]byte, 0, 4096))
-	randDest, err := NewDestination()
+	crypto := NewCrypto()
+	randDest, err := NewDestination(crypto)
 	if err != nil {
 		t.Fatal("Could not create random destination.")
 	}
 	initialB32 := randDest.b32
 	randDest.WriteToMessage(stream)
-	secDest, err := NewDestinationFromMessage(stream)
+	secDest, err := NewDestinationFromMessage(stream, crypto)
 	if err != nil {
 		t.Fatalf("Failed to create destination from message: '%s'", err.Error())
 	}
@@ -39,12 +41,13 @@ func TestNewDestinationFromMessage(t *testing.T) {
 }
 
 func TestNewDestinationFromBase64(t *testing.T) {
-	randDest, err := NewDestination()
+	crypto := NewCrypto()
+	randDest, err := NewDestination(crypto)
 	if err != nil {
 		t.Fatal("Could not create random destination.")
 	}
 	initialB64 := randDest.b64
-	secDest, err := NewDestinationFromBase64(initialB64)
+	secDest, err := NewDestinationFromBase64(initialB64, crypto)
 	if err != nil {
 		t.Fatalf("Failed to create destination from message: '%s'", err.Error())
 	}

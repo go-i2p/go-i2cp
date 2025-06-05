@@ -16,26 +16,27 @@ type Destination struct {
 	digest     [DIGEST_SIZE]byte
 	b32        string
 	b64        string
+	crypto     *Crypto
 }
 
-func NewDestination() (dest *Destination, err error) {
-	dest = &Destination{}
+func NewDestination(crypto *Crypto) (dest *Destination, err error) {
+	dest = &Destination{crypto: crypto}
 	nullCert := NewCertificate(CERTIFICATE_NULL)
 	dest.cert = &nullCert
-	dest.sgk, err = GetCryptoInstance().SignatureKeygen(DSA_SHA1)
+	dest.sgk, err = crypto.SignatureKeygen(DSA_SHA1)
 	dest.signPubKey = dest.sgk.pub.Y
 	dest.generateB32()
 	dest.generateB64()
 	return
 }
 
-func NewDestinationFromMessage(stream *Stream) (dest *Destination, err error) {
-	dest = &Destination{}
+func NewDestinationFromMessage(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
+	dest = &Destination{crypto: crypto}
 	_, err = stream.Read(dest.pubKey[:])
 	if err != nil {
 		return
 	}
-	dest.signPubKey, err = GetCryptoInstance().PublicKeyFromStream(DSA_SHA1, stream)
+	dest.signPubKey, err = crypto.PublicKeyFromStream(DSA_SHA1, stream)
 	if err != nil {
 		return
 	}
@@ -53,13 +54,13 @@ func NewDestinationFromMessage(stream *Stream) (dest *Destination, err error) {
 	return dest, err
 }
 
-func NewDestinationFromStream(stream *Stream) (dest *Destination, err error) {
+func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
 	var cert Certificate
 	var pubKeyLen uint16
-	dest = &Destination{}
+	dest = &Destination{crypto: crypto}
 	cert, err = NewCertificateFromStream(stream)
 	dest.cert = &cert
-	dest.sgk, err = GetCryptoInstance().SignatureKeyPairFromStream(stream)
+	dest.sgk, err = crypto.SignatureKeyPairFromStream(stream)
 	pubKeyLen, err = stream.ReadUint16()
 	if pubKeyLen != PUB_KEY_SIZE {
 		Fatal(tag, "Failed to load pub key len, %d != %d", pubKeyLen, PUB_KEY_SIZE)
@@ -70,7 +71,7 @@ func NewDestinationFromStream(stream *Stream) (dest *Destination, err error) {
 	return
 }
 
-func NewDestinationFromBase64(base64 string) (dest *Destination, err error) {
+func NewDestinationFromBase64(base64 string, crypto *Crypto) (dest *Destination, err error) {
 	/* Same as decode, except from a filesystem / URL friendly set of characters,
 	*  replacing / with ~, and + with -
 	 */
@@ -85,14 +86,14 @@ func NewDestinationFromBase64(base64 string) (dest *Destination, err error) {
 	replaced = strings.Replace(replaced, "-", "+", -1)
 	stream := NewStream([]byte(replaced))
 	var decoded *Stream
-	decoded, err = GetCryptoInstance().DecodeStream(CODEC_BASE64, stream)
-	return NewDestinationFromMessage(decoded)
+	decoded, err = crypto.DecodeStream(CODEC_BASE64, stream)
+	return NewDestinationFromMessage(decoded, crypto)
 }
 
-func NewDestinationFromFile(file *os.File) (*Destination, error) {
+func NewDestinationFromFile(file *os.File, crypto *Crypto) (*Destination, error) {
 	var stream Stream
 	stream.loadFile(file)
-	return NewDestinationFromStream(&stream)
+	return NewDestinationFromStream(&stream, crypto)
 }
 func (dest *Destination) Copy() (newDest Destination) {
 	newDest.cert = dest.cert
@@ -102,6 +103,7 @@ func (dest *Destination) Copy() (newDest Destination) {
 	newDest.b32 = dest.b32
 	newDest.b64 = dest.b64
 	newDest.digest = dest.digest
+	newDest.crypto = dest.crypto
 	return
 }
 func (dest *Destination) WriteToFile(filename string) (err error) {
@@ -125,7 +127,7 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 }
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
 	err = dest.cert.WriteToStream(stream)
-	err = GetCryptoInstance().WriteSignatureToStream(&dest.sgk, stream)
+	err = dest.crypto.WriteSignatureToStream(&dest.sgk, stream)
 	err = stream.WriteUint16(PUB_KEY_SIZE)
 	_, err = stream.Write(dest.pubKey[:])
 	return
@@ -136,15 +138,14 @@ func (dest *Destination) Verify() (verified bool, err error) {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToMessage(stream)
 	stream.Write(dest.digest[:])
-	return GetCryptoInstance().VerifyStream(&dest.sgk, stream)
+	return dest.crypto.VerifyStream(&dest.sgk, stream)
 }
 
 func (dest *Destination) generateB32() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToMessage(stream)
-	cpt := GetCryptoInstance()
-	hash := cpt.HashStream(HASH_SHA256, stream)
-	b32 := cpt.EncodeStream(CODEC_BASE32, hash)
+	hash := dest.crypto.HashStream(HASH_SHA256, stream)
+	b32 := dest.crypto.EncodeStream(CODEC_BASE32, hash)
 	length := b32.Len()
 	_ = length
 	dest.b32 = string(b32.Bytes())
@@ -154,11 +155,10 @@ func (dest *Destination) generateB32() {
 func (dest *Destination) generateB64() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToMessage(stream)
-	cpt := GetCryptoInstance()
 	if stream.Len() > 0 {
 		fmt.Printf("Stream len %d \n", stream.Len())
 	}
-	b64B := cpt.EncodeStream(CODEC_BASE64, stream)
+	b64B := dest.crypto.EncodeStream(CODEC_BASE64, stream)
 	replaced := strings.Replace(string(b64B.Bytes()), "/", "~", -1)
 	replaced = strings.Replace(replaced, "/", "~", -1)
 	dest.b64 = replaced

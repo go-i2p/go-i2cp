@@ -75,7 +75,7 @@ func TestSessionSendMessage(t *testing.T) {
 	session := NewSession(client, callbacks)
 
 	// Create test destination
-	testDest, err := NewDestination()
+	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSessionDispatchDestination(t *testing.T) {
 	session := NewSession(client, callbacks)
 
 	// Create test destination
-	testDest, err := NewDestination()
+	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}

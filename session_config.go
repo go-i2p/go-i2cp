@@ -72,16 +72,16 @@ type SessionConfig struct {
 	destination *Destination
 }
 
-func NewSessionConfigFromDestinationFile(filename string) (config SessionConfig) {
+func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (config SessionConfig) {
 	var home string
 	if file, err := os.Open(filename); err == nil {
-		config.destination, err = NewDestinationFromFile(file)
+		config.destination, err = NewDestinationFromFile(file, crypto)
 		if err != nil {
 			Warning(SESSION_CONFIG, "Failed to load destination from file '%s', a new destination will be generated.", filename)
 		}
 	}
 	if config.destination == nil {
-		config.destination, _ = NewDestination()
+		config.destination, _ = NewDestination(crypto)
 	}
 	if len(filename) > 0 {
 		config.destination.WriteToFile(filename)
@@ -97,11 +97,11 @@ func NewSessionConfigFromDestinationFile(filename string) (config SessionConfig)
 	}
 	return config
 }
-func (config *SessionConfig) writeToMessage(stream *Stream) {
+func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto) {
 	config.destination.WriteToMessage(stream)
 	config.writeMappingToMessage(stream)
 	stream.WriteUint64(uint64(time.Now().Unix() * 1000))
-	GetCryptoInstance().WriteSignatureToStream(&config.destination.sgk, stream)
+	crypto.WriteSignatureToStream(&config.destination.sgk, stream)
 }
 func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
 	m := make(map[string]string)

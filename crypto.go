@@ -12,14 +12,19 @@ import (
 	"math/big"
 )
 
-var singleton = Crypto{
-	b64:   base64.StdEncoding,
-	b32:   base32.StdEncoding,
-	rng:   rand.Reader,
-	sh1:   sha1.New(),
-	sh256: sha256.New(),
+// NewCrypto creates a new Crypto instance
+func NewCrypto() *Crypto {
+	c := &Crypto{
+		b64:   base64.StdEncoding,
+		b32:   base32.StdEncoding,
+		rng:   rand.Reader,
+		sh1:   sha1.New(),
+		sh256: sha256.New(),
+	}
+	// Initialize DSA parameters on first use for performance
+	dsa.GenerateParameters(&c.params, c.rng, dsa.L1024N160)
+	return c
 }
-var first = 0
 
 // Sign a stream using the specified algorithm
 func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {

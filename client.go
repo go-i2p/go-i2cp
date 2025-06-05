@@ -60,6 +60,7 @@ type Client struct {
 	connected       bool
 	currentSession  *Session // *opaque in the C lib
 	lookupRequestId uint32
+	crypto          *Crypto
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -68,6 +69,7 @@ var defaultConfigFile = "/.i2cp.conf"
 func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c = new(Client)
 	c.callbacks = callbacks
+	c.crypto = NewCrypto()
 	LogInit(nil, ERROR)
 	c.outputStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
 	c.messageStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
@@ -341,13 +343,13 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 	var requestId uint32
 	Debug(TAG|PROTOCOL, "Received DestReply message.")
 	if stream.Len() != 32 {
-		destination, err = NewDestinationFromMessage(stream)
+		destination, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
 			Fatal(TAG|FATAL, "Failed to construct destination from stream")
 		}
 		b32 = destination.b32
 	} else {
-		bits := GetCryptoInstance().EncodeStream(CODEC_BASE32, stream)
+		bits := c.crypto.EncodeStream(CODEC_BASE32, stream)
 		b32 = string(bits.Bytes()) + ".b32.i2p"
 		Debug(TAG, "Could not resolve destination")
 	}
@@ -422,7 +424,7 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	requestId, err = stream.ReadUint32()
 	result, err = stream.ReadByte()
 	if result == 0 {
-		dest, err = NewDestinationFromMessage(stream)
+		dest, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
 			Fatal(TAG|FATAL, "Failed to construct destination from stream.")
 		}
@@ -460,12 +462,12 @@ func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Le
 	//Build leaseset stream and sign it
 	dest.WriteToMessage(leaseSet)
 	leaseSet.Write(nullbytes[:256])
-	GetCryptoInstance().WritePublicSignatureToStream(sgk, leaseSet)
+	c.crypto.WritePublicSignatureToStream(sgk, leaseSet)
 	leaseSet.WriteByte(tunnels)
 	for i := uint8(0); i < tunnels; i++ {
 		leases[i].WriteToMessage(leaseSet)
 	}
-	GetCryptoInstance().SignStream(sgk, leaseSet)
+	c.crypto.SignStream(sgk, leaseSet)
 	c.messageStream.Write(leaseSet.Bytes())
 	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
 		Error(TAG, "Error while sending CreateLeaseSet")
@@ -491,7 +493,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug(TAG|PROTOCOL, "Sending CreateSessionMessage")
 	c.messageStream.Reset()
-	config.writeToMessage(c.messageStream)
+	config.writeToMessage(c.messageStream, c.crypto)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
 		Error(TAG, "Error while sending CreateSessionMessage.")
 		return err
@@ -633,7 +635,7 @@ func (c *Client) DestinationLookup(session *Session, address string) (requestId 
 		Debug(TAG, "Lookup of b32 address detected, decode and use hash for faster lookup.")
 		host := address[:strings.Index(address, ".")]
 		in.Write([]byte(host))
-		out, _ = GetCryptoInstance().DecodeStream(CODEC_BASE32, in)
+		out, _ = c.crypto.DecodeStream(CODEC_BASE32, in)
 		if out.Len() == 0 {
 			Warning(TAG, "Failed to decode hash of address '%s'", address)
 		}

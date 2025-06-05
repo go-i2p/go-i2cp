@@ -2,7 +2,6 @@ package go_i2cp
 
 import (
 	"bufio"
-	"crypto/dsa"
 	"os"
 	"regexp"
 	"strings"
@@ -115,11 +114,7 @@ func ParseConfig(s string, cb func(string, string)) {
 // Crypto utility functions
 // Moved from: crypto.go
 
-// GetCryptoInstance returns the global crypto instance
-func GetCryptoInstance() *Crypto {
-	if first == 0 {
-		dsa.GenerateParameters(&singleton.params, singleton.rng, dsa.L1024N160)
-	}
-	first++
-	return &singleton
+// NewCryptoInstance creates a new crypto instance
+func NewCryptoInstance() *Crypto {
+	return NewCrypto()
 }
