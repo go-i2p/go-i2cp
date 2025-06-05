@@ -3,7 +3,6 @@ package go_i2cp
 import (
 	"bufio"
 	"crypto/dsa"
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -38,57 +37,47 @@ func LogInit(callbacks *LoggerCallbacks, level int) {
 // Debug logs a debug message with optional arguments
 func Debug(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.Debug(tags|DEBUG, message)
+		logInstance.Debug(message)
 		return
 	}
-	// combine the message and the args
-	out := fmt.Sprintf(message, args...)
-	logInstance.Debug(tags|DEBUG, out)
+	logInstance.Debugf(message, args...)
 }
 
 // Info logs an info message with optional arguments
 func Info(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.Warn(tags|INFO, message)
+		logInstance.Warn(message)
 		return
 	}
-	// combine the message and the args
-	out := fmt.Sprintf(message, args...)
-	logInstance.Warn(tags|INFO, out)
+	logInstance.Warnf(message, args...)
 }
 
 // Warning logs a warning message with optional arguments
 func Warning(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.Warn(tags|WARNING, message)
+		logInstance.Warn(message)
 		return
 	}
-	// combine the message and the args
-	out := fmt.Sprintf(message, args...)
-	logInstance.Warn(tags|WARNING, out)
+	logInstance.Warnf(message, args...)
 }
 
 // Error logs an error message with optional arguments
 func Error(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.Error(tags|ERROR, message)
+		logInstance.Error(message)
 		return
 	}
-	// combine the message and the args
-	out := fmt.Sprintf(message, args...)
-	logInstance.Error(tags|ERROR, out)
+	logInstance.Errorf(message, args...)
 }
 
 // Fatal logs a fatal message with optional arguments
 func Fatal(tags LoggerTags, message string, args ...interface{}) {
 	os.Setenv("WARNFAIL_I2P", "true")
 	if len(args) == 0 {
-		logInstance.Error(tags|FATAL, message)
+		logInstance.Error(message)
 		return
 	}
-	// combine the message and the args
-	out := fmt.Sprintf(message, args...)
-	logInstance.Error(tags|FATAL, out)
+	logInstance.Errorf(message, args...)
 }
 
 // Config parsing utility functions
