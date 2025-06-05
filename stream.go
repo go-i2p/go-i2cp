@@ -3,6 +3,7 @@ package go_i2cp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"sort"
 )
@@ -93,6 +94,15 @@ func (s *Stream) loadFile(f *os.File) (err error) {
 func (s *Stream) ChLen(len int) {
 	byt := s.Bytes()
 	byt = byt[:len]
+}
+
+func (s *Stream) Seek(offset int64, whence int) (int64, error) {
+	// Reset buffer to beginning and advance by offset
+	if whence == 0 && offset == 0 {
+		s.Reset()
+		return 0, nil
+	}
+	return 0, fmt.Errorf("seek operation not fully implemented")
 }
 
 /*type Stream struct {

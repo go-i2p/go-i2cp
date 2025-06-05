@@ -123,25 +123,99 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	i, err = c.tcp.Receive(firstFive)
 	if i == 0 {
 		c.callbacks.onDisconnect(c, "Didn't receive anything", nil)
+		return fmt.Errorf("no data received from router")
 	}
+	if err != nil {
+		Error(PROTOCOL, "Failed to receive message header: %s", err.Error())
+		return err
+	}
+
 	length, err = firstFive.ReadUint32()
+	if err != nil {
+		Error(PROTOCOL, "Failed to read message length: %s", err.Error())
+		return err
+	}
+
 	msgType, err = firstFive.ReadByte()
-	if (typ == I2CP_MSG_SET_DATE) && (length > 0xffff) {
-		Fatal(PROTOCOL, "Unexpected response, check that your router SSL settings match the ~/.i2cp.conf configuration")
+	if err != nil {
+		Error(PROTOCOL, "Failed to read message type: %s", err.Error())
+		return err
 	}
-	if length > 0xffff && typ != I2CP_MSG_DISCONNECT {
-		Fatal(PROTOCOL, "unexpected message length, length > 0xffff")
+
+	// Enhanced message length validation with type-specific handling
+	if msgType == I2CP_MSG_SET_DATE && length > 0xffff {
+		Fatal(PROTOCOL, "Unexpected response for SetDate message, check that your router SSL settings match the ~/.i2cp.conf configuration")
+		return fmt.Errorf("invalid SetDate message length: %d", length)
 	}
-	if (typ != 0) && (msgType != typ) {
-		Error(PROTOCOL, "expected message type %d, received %d", typ, msgType)
+
+	// Allow larger messages for specific message types that legitimately need them
+	maxAllowedLength := uint32(I2CP_MESSAGE_SIZE)
+	switch msgType {
+	case I2CP_MSG_CREATE_LEASE_SET, I2CP_MSG_SEND_MESSAGE, I2CP_MSG_PAYLOAD_MESSAGE:
+		// These message types can be larger due to embedded data/leasesets
+		maxAllowedLength = uint32(0x100000) // 1MB limit for data messages
+	case I2CP_MSG_DISCONNECT:
+		// Disconnect messages can contain arbitrary length reason strings
+		maxAllowedLength = uint32(0x10000) // 64KB limit for disconnect reasons
 	}
-	// receive rest
-	i, err = c.tcp.Receive(stream)
+
+	if length > maxAllowedLength {
+		Error(PROTOCOL, "Message length %d exceeds maximum allowed %d for message type %d", length, maxAllowedLength, msgType)
+		return fmt.Errorf("message too large: %d bytes (max %d for type %d)", length, maxAllowedLength, msgType)
+	}
+
+	// Validate expected message type if specified
+	if (typ != I2CP_MSG_ANY) && (msgType != typ) {
+		Error(PROTOCOL, "Expected message type %d, received %d", typ, msgType)
+		return fmt.Errorf("unexpected message type: expected %d, got %d", typ, msgType)
+	}
+
+	// Allocate appropriately sized buffer for message body
+	if length > 0 {
+		messageBody := NewStream(make([]byte, length))
+		totalReceived := 0
+
+		// Handle partial reads for large messages
+		for totalReceived < int(length) {
+			remaining := int(length) - totalReceived
+			tempBuffer := NewStream(make([]byte, remaining))
+
+			i, err = c.tcp.Receive(tempBuffer)
+			if err != nil {
+				Error(PROTOCOL, "Failed to receive message body: %s", err.Error())
+				return err
+			}
+			if i == 0 {
+				Error(PROTOCOL, "Connection closed while reading message body")
+				return fmt.Errorf("connection closed during message receive")
+			}
+
+			// Copy received data to main message buffer
+			tempBuffer.Seek(0, 0) // Reset to beginning
+			receivedData := make([]byte, i)
+			tempBuffer.Read(receivedData)
+			messageBody.Write(receivedData)
+			totalReceived += i
+
+			Debug(PROTOCOL, "Received %d/%d bytes of message body", totalReceived, length)
+		}
+
+		// Reset stream position for message processing
+		messageBody.Seek(0, 0)
+		stream.Reset()
+		stream.Write(messageBody.Bytes())
+		stream.Seek(0, 0)
+	} else {
+		// Empty message body
+		stream.Reset()
+	}
+
+	Debug(PROTOCOL, "Received message type %d with %d bytes", msgType, length)
 
 	if dispatch {
 		c.onMessage(msgType, stream)
 	}
-	return
+	return nil
 }
 
 func (c *Client) onMessage(msgType uint8, stream *Stream) {

@@ -5,13 +5,18 @@ A low-level Go implementation of the I2P Client Protocol (I2CP) focused on devel
 ## Features
 
 - Pure Go I2CP client implementation with minimal dependencies
-- Complete I2CP client
+- Core I2CP client functionality (session management, messaging, destination lookup)
 - Secure session establishment and management
-- Cryptographic operations (DSA/SHA1/SHA256)
+- Cryptographic operations (DSA/SHA1/SHA256, Ed25519, X25519, ChaCha20-Poly1305)
 - Stream-based encrypted messaging 
 - Anonymous addressing (Base32/Base64)
 - Comprehensive test coverage
-- TLS support for I2CP connections
+- I2CP connections (TLS support available)
+
+## Requirements
+
+- Go 1.19+
+- Running I2P router with I2CP enabled (default port 7654)
 
 ## Installation
 
@@ -22,102 +27,76 @@ go get github.com/go-i2p/go-i2cp
 ## Basic Usage
 
 ```go
-// Create I2CP client with default settings
-client := go_i2cp.NewClient(nil)
+package main
 
-// Connect to local I2P router
-if err := client.Connect(); err != nil {
-    log.Fatal(err)
-}
-defer client.Disconnect()
+import (
+    "log"
+    go_i2cp "github.com/go-i2p/go-i2cp"
+)
 
-// Create session with callbacks
-session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{
-    onDestination: func(session *go_i2cp.Session, requestId uint32, 
-                       address string, dest *go_i2cp.Destination) {
-        // Handle destination lookups
-    },
-    onStatus: func(session *go_i2cp.Session, status go_i2cp.SessionStatus) {
-        // Handle session status changes
-    },
-    onMessage: func(session *go_i2cp.Session, protocol uint8,
-                    srcPort, destPort uint16, payload *go_i2cp.Stream) {
-        // Handle incoming messages
-    },
-})
+func main() {
+    // Create I2CP client with callbacks
+    client := go_i2cp.NewClient(&go_i2cp.ClientCallBacks{})
 
-// Configure session
-session.config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "example")
-session.config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "4")
+    // Connect to local I2P router
+    if err := client.Connect(); err != nil {
+        log.Fatal(err)
+    }
+    defer client.Disconnect()
 
-// Generate destination
-if session.config.destination, err = go_i2cp.NewDestination(); err != nil {
-    log.Fatal(err)
-}
+    // Create session with callbacks
+    session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{})
 
-// Create session
-if err := client.CreateSession(session); err != nil {
-    log.Fatal(err) 
+    // Configure session properties
+    session.Destination().config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "example")
+    session.Destination().config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "4")
+
+    // Create session
+    if err := client.CreateSession(session); err != nil {
+        log.Fatal(err) 
+    }
+
+    // Process I/O
+    for {
+        if err := client.ProcessIO(); err != nil {
+            break
+        }
+    }
 }
 ```
 
-## Security Configuration
+## Session Configuration
 
-The library supports extensive session configuration for privacy tuning:
+Configure session properties for privacy tuning:
 
 ```go
 // Security settings
-config.SetProperty(SESSION_CONFIG_PROP_INBOUND_LENGTH, "3")          // Tunnel length
-config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "3")         
-config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "4")        // Number of tunnels
-config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "4")
-config.SetProperty(SESSION_CONFIG_PROP_INBOUND_BACKUP_QUANTITY, "2") // Backup tunnels
-config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_BACKUP_QUANTITY, "2")
+config := session.Destination().config
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_INBOUND_LENGTH, "3")          // Tunnel length
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "3")         
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_INBOUND_QUANTITY, "4")        // Number of tunnels
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "4")
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_INBOUND_BACKUP_QUANTITY, "2") // Backup tunnels
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_BACKUP_QUANTITY, "2")
 ```
 
-## Privacy Considerations 
+## Current Implementation Status
 
-This library implements core I2P networking primitives. When using it:
+### Implemented Features
+- ✅ Basic I2CP client connection and authentication
+- ✅ Session creation and management
+- ✅ Message sending and receiving
+- ✅ Destination lookup (both hash and hostname)
+- ✅ Stream-based messaging with compression
+- ✅ DSA/SHA1/SHA256 cryptographic operations
+- ✅ Base32/Base64 destination encoding
+- ✅ Session configuration properties
 
-- Never mix I2P and clearnet traffic
-- Use appropriate tunnel lengths for your threat model
-- Handle all errors privately without leaking metadata
-- Implement proper session isolation
-- Consider timing attack mitigations
-- Use TLS for I2CP connections when remote
-- Rotate destinations if necessary
-- Monitor tunnel health
-
-## Roadmap
-
-### Core I2CP Protocol Features
-- [ ] **Message Priority Support** - Implement priority levels for I2CP messages (SendMessageExpires with priority flags)
-- [ ] **Bandwidth Limiting** - Add support for bandwidth limiting properties (i2cp.inboundBytesPerSecond, i2cp.outboundBytesPerSecond)
-- [ ] **LS2 Support** - Implement LeaseSet2 format for enhanced metadata and multiple signature types
-- [ ] **ECIES-X25519 Encryption** - Add support for modern ECIES encryption alongside existing ElGamal
-- [ ] **Ed25519 Signatures** - Implement Ed25519 signature support for improved performance and security
-- [ ] **BlindedInfo Support** - Add support for blinded destinations and encrypted leaseset publishing
-- [ ] **Meta LeaseSet Support** - Implement support for multi-destination meta leaseset format
-
-### Extended I2CP Features  
-- [ ] **Session Persistence** - Implement session state saving/loading for graceful restart
-- [ ] **Advanced Tunnel Configuration** - Support for tunnel variance, randomization options
-- [ ] **Client Authentication** - Implement I2CP client authentication mechanisms
-- [ ] **Streaming Support** - Add higher-level streaming protocol implementation over I2CP
-- [ ] **Datagram Support** - Implement repliable datagram messaging
-- [ ] **Destination Lookup Caching** - Add intelligent caching for destination resolution
-
-### Modern Crypto & Protocol
-- [ ] **RedDSA Signatures** - Support for RedDSA signature algorithm
-- [ ] **ChaCha20/Poly1305** - Modern AEAD cipher support for tunnel encryption
-- [ ] **SipHash** - Implement SipHash for improved hash table security
-- [ ] **Noise Protocol** - Add Noise-based handshakes for enhanced forward secrecy
-
-### Quality & Performance
-- [ ] **Connection Pooling** - Implement I2CP connection pooling for better resource usage
-- [ ] **Async Message Handling** - Non-blocking message processing with goroutine pools
-- [ ] **Metrics & Monitoring** - Add comprehensive metrics collection and health monitoring
-- [ ] **Zero-Copy Operations** - Optimize buffer management to reduce memory allocations
+### In Development
+- 🔄 Modern cryptographic algorithms (Ed25519, X25519, ChaCha20-Poly1305)
+- 🔄 TLS support for I2CP connections
+- 🔄 Enhanced session persistence
+- 🔄 Advanced tunnel configuration
 
 ## Testing
 
@@ -125,11 +104,7 @@ This library implements core I2P networking primitives. When using it:
 go test -v ./...
 ```
 
-## Requirements
-
-- Go 1.16+
-- Running I2P router with I2CP enabled (default port 7654)
-- SAM API v3.3 enabled in router
+Note: Tests require a running I2P router with I2CP enabled on localhost:7654.
 
 ## Contributing
 
