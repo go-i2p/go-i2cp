@@ -3,7 +3,7 @@
 === RUN   TestClient_CreateSession
 Stream len 387 
 Stream len 387 
---- PASS: TestClient_CreateSession (0.24s)
+--- PASS: TestClient_CreateSession (0.22s)
 === RUN   TestRandomDestination
 Stream len 387 
 Stream len 387 
@@ -43,4 +43,4 @@ Stream len 387
 Stream len 387 
 --- PASS: TestSessionConfigIntegration (0.00s)
 PASS
-ok  	github.com/go-i2p/go-i2cp	0.251s
+ok  	github.com/go-i2p/go-i2cp	0.229s

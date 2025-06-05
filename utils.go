@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/go-i2p/logger"
 )
 
 // Moved from: session_config.go
@@ -17,6 +19,9 @@ var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
 // LogInit initializes the logger with callbacks and level
 // TODO filter
 func LogInit(callbacks *LoggerCallbacks, level int) {
+	// Initialize go-i2p/logger
+	logger.InitializeGoI2PLogger()
+
 	switch level {
 	case DEBUG:
 		os.Setenv("DEBUG_I2P", "debug")
