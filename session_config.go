@@ -1,10 +1,7 @@
 package go_i2cp
 
 import (
-	"bufio"
 	"os"
-	"regexp"
-	"strings"
 	"time"
 )
 
@@ -68,7 +65,6 @@ var sessionOptions = [NR_OF_SESSION_CONFIG_PROPERTIES]string{
 	"outbound.priority",
 	"outbound.quantity",
 }
-var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
 
 type SessionConfig struct {
 	properties  [NR_OF_SESSION_CONFIG_PROPERTIES]string
@@ -136,26 +132,4 @@ func (config *SessionConfig) propFromString(name string) SessionConfigProperty {
 }
 func (config *SessionConfig) SetProperty(prop SessionConfigProperty, value string) {
 	config.properties[prop] = value
-}
-func ParseConfig(s string, cb func(string, string)) {
-	file, err := os.Open(s)
-	if err != nil {
-		if !strings.Contains(err.Error(), "no such file") {
-			Error(SESSION_CONFIG, err.Error())
-		}
-		return
-	}
-	Debug(SESSION_CONFIG, "Parsing config file '%s'", s)
-	scan := bufio.NewScanner(file)
-	for scan.Scan() {
-		line := scan.Text()
-		groups := configRegex.FindStringSubmatch(line)
-		if len(groups) != 3 {
-			continue
-		}
-		cb(groups[1], groups[2])
-	}
-	if err := scan.Err(); err != nil {
-		Error(SESSION_CONFIG, "reading input from %s config %s", s, err.Error())
-	}
 }

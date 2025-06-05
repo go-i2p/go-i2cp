@@ -21,14 +21,6 @@ var singleton = Crypto{
 }
 var first = 0
 
-func GetCryptoInstance() *Crypto {
-	if first == 0 {
-		dsa.GenerateParameters(&singleton.params, singleton.rng, dsa.L1024N160)
-	}
-	first++
-	return &singleton
-}
-
 // Sign a stream using the specified algorithm
 func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 	var r, s *big.Int
