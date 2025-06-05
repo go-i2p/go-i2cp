@@ -49,12 +49,12 @@ func Debug(tags LoggerTags, message string, args ...interface{}) {
 // Info logs an info message with optional arguments
 func Info(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.Debug(tags|INFO, message)
+		logInstance.Warn(tags|INFO, message)
 		return
 	}
 	// combine the message and the args
 	out := fmt.Sprintf(message, args...)
-	logInstance.Debug(tags|DEBUG, out)
+	logInstance.Warn(tags|INFO, out)
 }
 
 // Warning logs a warning message with optional arguments
@@ -88,7 +88,7 @@ func Fatal(tags LoggerTags, message string, args ...interface{}) {
 	}
 	// combine the message and the args
 	out := fmt.Sprintf(message, args...)
-	logInstance.Errorln(tags|DEBUG, out)
+	logInstance.Error(tags|FATAL, out)
 }
 
 // Config parsing utility functions
