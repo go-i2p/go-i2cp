@@ -16,9 +16,9 @@ func (l *Logger) log(tags LoggerTags, format string, args ...interface{}) {
 		return
 	}
 	if l.callbacks == nil {
-		fmt.Printf(format + "\n")
+		fmt.Println(format)
 	} else {
-		l.callbacks.onLog(l, tags, fmt.Sprintf(format))
+		l.callbacks.onLog(l, tags, format)
 	}
 }
 

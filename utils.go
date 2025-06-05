@@ -3,14 +3,11 @@ package go_i2cp
 import (
 	"bufio"
 	"crypto/dsa"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
 )
-
-// Global variables
-// Moved from: logger.go
-var logInstance = &Logger{}
 
 // Moved from: session_config.go
 var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
@@ -21,53 +18,77 @@ var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
 // LogInit initializes the logger with callbacks and level
 // TODO filter
 func LogInit(callbacks *LoggerCallbacks, level int) {
-	logInstance = &Logger{callbacks: callbacks}
-	logInstance.setLogLevel(level)
+	switch level {
+	case DEBUG:
+		os.Setenv("DEBUG_I2P", "debug")
+	case INFO:
+		os.Setenv("DEBUG_I2P", "debug")
+	case WARNING:
+		os.Setenv("DEBUG_I2P", "warn")
+	case ERROR:
+		os.Setenv("DEBUG_I2P", "error")
+	case FATAL:
+		os.Setenv("DEBUG_I2P", "fatal")
+		os.Setenv("WARNFAIL_I2P", "true")
+	default:
+		os.Setenv("DEBUG_I2P", "debug")
+	}
 }
 
 // Debug logs a debug message with optional arguments
 func Debug(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.log(tags|DEBUG, message)
+		logInstance.Debug(tags|DEBUG, message)
 		return
 	}
-	logInstance.log(tags|DEBUG, message, args...)
+	// combine the message and the args
+	out := fmt.Sprintf(message, args...)
+	logInstance.Debug(tags|DEBUG, out)
 }
 
 // Info logs an info message with optional arguments
 func Info(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.log(tags|INFO, message)
+		logInstance.Debug(tags|INFO, message)
 		return
 	}
-	logInstance.log(tags|INFO, message, args...)
+	// combine the message and the args
+	out := fmt.Sprintf(message, args...)
+	logInstance.Debug(tags|DEBUG, out)
 }
 
 // Warning logs a warning message with optional arguments
 func Warning(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.log(tags|WARNING, message)
+		logInstance.Warn(tags|WARNING, message)
 		return
 	}
-	logInstance.log(tags|WARNING, message, args...)
+	// combine the message and the args
+	out := fmt.Sprintf(message, args...)
+	logInstance.Warn(tags|WARNING, out)
 }
 
 // Error logs an error message with optional arguments
 func Error(tags LoggerTags, message string, args ...interface{}) {
 	if len(args) == 0 {
-		logInstance.log(tags|ERROR, message)
+		logInstance.Error(tags|ERROR, message)
 		return
 	}
-	logInstance.log(tags|ERROR, message, args...)
+	// combine the message and the args
+	out := fmt.Sprintf(message, args...)
+	logInstance.Error(tags|ERROR, out)
 }
 
 // Fatal logs a fatal message with optional arguments
 func Fatal(tags LoggerTags, message string, args ...interface{}) {
+	os.Setenv("WARNFAIL_I2P", "true")
 	if len(args) == 0 {
-		logInstance.log(tags|FATAL, message)
+		logInstance.Error(tags|FATAL, message)
 		return
 	}
-	logInstance.log(tags|FATAL, message, args...)
+	// combine the message and the args
+	out := fmt.Sprintf(message, args...)
+	logInstance.Errorln(tags|DEBUG, out)
 }
 
 // Config parsing utility functions
@@ -78,7 +99,7 @@ func ParseConfig(s string, cb func(string, string)) {
 	file, err := os.Open(s)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no such file") {
-			Error(SESSION_CONFIG, err.Error())
+			Error(SESSION_CONFIG, "%s", err.Error())
 		}
 		return
 	}
