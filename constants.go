@@ -74,8 +74,9 @@ const (
 // Signature Algorithm Constants
 // Moved from: crypto.go
 const (
-	DSA_SHA1   uint32 = iota
-	DSA_SHA256 uint32 = iota
+	DSA_SHA1       uint32 = iota
+	DSA_SHA256     uint32 = iota
+	ED25519_SHA256 uint32 = 7
 )
 
 // Codec Algorithm Constants
@@ -83,6 +84,16 @@ const (
 const (
 	CODEC_BASE32 uint8 = iota
 	CODEC_BASE64 uint8 = iota
+)
+
+// Key Exchange Algorithm Constants
+const (
+	X25519 uint32 = 3
+)
+
+// Encryption Algorithm Constants
+const (
+	CHACHA20_POLY1305 uint32 = 4
 )
 
 // TLS Constants

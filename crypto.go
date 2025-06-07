@@ -72,8 +72,9 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 
 // Verify Stream
 func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified bool, err error) {
-	if stream.Len() > 30 {
+	if stream.Len() < 40 {
 		Fatal(tAG|FATAL, "Stream length < 40 bytes (signature length)")
+		return false, fmt.Errorf("stream too short for signature verification")
 	}
 	var r, s big.Int
 	message := stream.Bytes()[:stream.Len()-40]
@@ -121,10 +122,18 @@ func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (
 	}
 	n, err = stream.Write(sgk.pub.Y.Bytes())
 	if n != 128 {
-		Fatal(tAG|FATAL, "Failed to export signature because privatekey != 20 bytes")
+		Fatal(tAG|FATAL, "Failed to export signature because privatekey != 128 bytes")
 		return err
 	}
 	return
+}
+
+// WriteEd25519SignatureToStream writes an Ed25519 signature keypair to stream
+func (c *Crypto) WriteEd25519SignatureToStream(kp *Ed25519KeyPair, stream *Stream) error {
+	if kp == nil {
+		return fmt.Errorf("Ed25519 keypair cannot be nil")
+	}
+	return kp.WriteToStream(stream)
 }
 
 // Read and initialize signature keypair from stream
@@ -159,18 +168,38 @@ func (c *Crypto) PublicKeyFromStream(keyType uint32, stream *Stream) (key *big.I
 
 // Generate a signature keypair
 func (c *Crypto) SignatureKeygen(algorithmTyp uint32) (sgk SignatureKeyPair, err error) {
-	var pkey dsa.PrivateKey
-	pkey.G = c.params.G
-	pkey.Q = c.params.Q
-	pkey.P = c.params.P
-	err = dsa.GenerateKey(&pkey, c.rng)
-	sgk.priv = pkey
-	sgk.pub.G = pkey.G
-	sgk.pub.P = pkey.P
-	sgk.pub.Q = pkey.Q
-	sgk.pub.Y = pkey.Y
-	sgk.algorithmType = DSA_SHA1
+	switch algorithmTyp {
+	case DSA_SHA1:
+		var pkey dsa.PrivateKey
+		pkey.G = c.params.G
+		pkey.Q = c.params.Q
+		pkey.P = c.params.P
+		err = dsa.GenerateKey(&pkey, c.rng)
+		sgk.priv = pkey
+		sgk.pub.G = pkey.G
+		sgk.pub.P = pkey.P
+		sgk.pub.Q = pkey.Q
+		sgk.pub.Y = pkey.Y
+		sgk.algorithmType = DSA_SHA1
+	default:
+		err = fmt.Errorf("unsupported signature algorithm type: %d", algorithmTyp)
+	}
 	return
+}
+
+// Ed25519SignatureKeygen generates a new Ed25519 signature key pair
+func (c *Crypto) Ed25519SignatureKeygen() (*Ed25519KeyPair, error) {
+	return NewEd25519KeyPair()
+}
+
+// X25519KeyExchangeKeygen generates a new X25519 key exchange key pair
+func (c *Crypto) X25519KeyExchangeKeygen() (*X25519KeyPair, error) {
+	return NewX25519KeyPair()
+}
+
+// ChaCha20Poly1305CipherKeygen generates a new ChaCha20-Poly1305 cipher
+func (c *Crypto) ChaCha20Poly1305CipherKeygen() (*ChaCha20Poly1305Cipher, error) {
+	return NewChaCha20Poly1305Cipher()
 }
 
 func (c *Crypto) HashStream(algorithmTyp uint8, src *Stream) *Stream {
