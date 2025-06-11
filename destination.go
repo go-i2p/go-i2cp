@@ -95,6 +95,7 @@ func NewDestinationFromFile(file *os.File, crypto *Crypto) (*Destination, error)
 	stream.loadFile(file)
 	return NewDestinationFromStream(&stream, crypto)
 }
+
 func (dest *Destination) Copy() (newDest Destination) {
 	newDest.cert = dest.cert
 	newDest.signPubKey = dest.signPubKey
@@ -106,6 +107,7 @@ func (dest *Destination) Copy() (newDest Destination) {
 	newDest.crypto = dest.crypto
 	return
 }
+
 func (dest *Destination) WriteToFile(filename string) (err error) {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToStream(stream)
@@ -115,16 +117,18 @@ func (dest *Destination) WriteToFile(filename string) (err error) {
 	file.Close()
 	return
 }
+
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	lena := len(dest.pubKey)
 	_ = lena
 	_, err = stream.Write(dest.pubKey[:])
-	_, err = stream.Write(dest.signPubKey.Bytes()) //GetCryptoInstance().WriteSignatureToStream(&dest.sgk, stream)
+	_, err = stream.Write(dest.signPubKey.Bytes()) // GetCryptoInstance().WriteSignatureToStream(&dest.sgk, stream)
 	err = dest.cert.WriteToMessage(stream)
 	lenb := stream.Len()
 	_ = lenb
 	return
 }
+
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
 	err = dest.cert.WriteToStream(stream)
 	err = dest.crypto.WriteSignatureToStream(&dest.sgk, stream)
@@ -152,6 +156,7 @@ func (dest *Destination) generateB32() {
 	dest.b32 += ".b32.i2p"
 	Debug(tag, "New destination %s", dest.b32)
 }
+
 func (dest *Destination) generateB64() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
 	dest.WriteToMessage(stream)

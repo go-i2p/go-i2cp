@@ -118,3 +118,33 @@ func ParseConfig(s string, cb func(string, string)) {
 func NewCryptoInstance() *Crypto {
 	return NewCrypto()
 }
+
+// parseIntWithDefault parses an integer string with a default value if parsing fails
+func parseIntWithDefault(s string, defaultValue int) int {
+	if s == "" {
+		return defaultValue
+	}
+
+	// Simple integer parsing without external dependencies
+	result := 0
+	negative := false
+	start := 0
+
+	if len(s) > 0 && s[0] == '-' {
+		negative = true
+		start = 1
+	}
+
+	for i := start; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return defaultValue // Invalid character, return default
+		}
+		result = result*10 + int(s[i]-'0')
+	}
+
+	if negative {
+		result = -result
+	}
+
+	return result
+}

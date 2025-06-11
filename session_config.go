@@ -97,12 +97,14 @@ func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (confi
 	}
 	return config
 }
+
 func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto) {
 	config.destination.WriteToMessage(stream)
 	config.writeMappingToMessage(stream)
 	stream.WriteUint64(uint64(time.Now().Unix() * 1000))
 	crypto.WriteSignatureToStream(&config.destination.sgk, stream)
 }
+
 func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
 	m := make(map[string]string)
 	for i := 0; i < int(NR_OF_SESSION_CONFIG_PROPERTIES); i++ {
@@ -119,9 +121,11 @@ func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
 	Debug(SESSION_CONFIG, "Writing %d options to mapping table", len(m))
 	return stream.WriteMapping(m)
 }
+
 func (config *SessionConfig) configOptLookup(property SessionConfigProperty) string {
 	return sessionOptions[property]
 }
+
 func (config *SessionConfig) propFromString(name string) SessionConfigProperty {
 	for i := 0; SessionConfigProperty(i) < NR_OF_SESSION_CONFIG_PROPERTIES; i++ {
 		if sessionOptions[i] == name {
@@ -130,6 +134,7 @@ func (config *SessionConfig) propFromString(name string) SessionConfigProperty {
 	}
 	return SessionConfigProperty(-1)
 }
+
 func (config *SessionConfig) SetProperty(prop SessionConfigProperty, value string) {
 	config.properties[prop] = value
 }

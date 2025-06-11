@@ -4,6 +4,7 @@ package go_i2cp
 // Moved from: client.go
 type ClientCallBacks struct {
 	opaque       *interface{}
+	onConnect    func(*Client)
 	onDisconnect func(*Client, string, *interface{})
 	onLog        func(*Client, LoggerTags, string)
 }

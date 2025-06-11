@@ -7,7 +7,7 @@ func TestRandomDestination(t *testing.T) {
 	var err error
 	crypto := NewCrypto()
 	destOne, err = NewDestination(crypto)
-	var stream = NewStream(make([]byte, 4096))
+	stream := NewStream(make([]byte, 4096))
 	destOne.WriteToStream(stream)
 	if err != nil {
 		t.Fatalf("Could not create first test destination with error %s", err.Error())

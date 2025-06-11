@@ -202,6 +202,21 @@ func (c *Crypto) ChaCha20Poly1305CipherKeygen() (*ChaCha20Poly1305Cipher, error)
 	return NewChaCha20Poly1305Cipher()
 }
 
+// Random32 generates a cryptographically secure random uint32 value
+// Used for I2CP message nonces and request IDs per protocol specification
+func (c *Crypto) Random32() uint32 {
+	var bytes [4]byte
+	_, err := c.rng.Read(bytes[:])
+	if err != nil {
+		// Fallback to a simpler method if crypto/rand fails
+		// This should rarely happen in practice
+		Fatal(tAG|ERROR, "Failed to generate random uint32: %v", err)
+		return 0
+	}
+	// Convert big-endian bytes to uint32
+	return uint32(bytes[0])<<24 | uint32(bytes[1])<<16 | uint32(bytes[2])<<8 | uint32(bytes[3])
+}
+
 func (c *Crypto) HashStream(algorithmTyp uint8, src *Stream) *Stream {
 	if algorithmTyp == HASH_SHA256 {
 		c.sh256.Reset()
@@ -211,6 +226,7 @@ func (c *Crypto) HashStream(algorithmTyp uint8, src *Stream) *Stream {
 		return nil
 	}
 }
+
 func (c *Crypto) EncodeStream(algorithmTyp uint8, src *Stream) (dst *Stream) {
 	switch algorithmTyp {
 	case CODEC_BASE32:
@@ -222,6 +238,7 @@ func (c *Crypto) EncodeStream(algorithmTyp uint8, src *Stream) (dst *Stream) {
 	}
 	return
 }
+
 func (c *Crypto) DecodeStream(algorithmTyp uint8, src *Stream) (dst *Stream, err error) {
 	switch algorithmTyp {
 	case CODEC_BASE32:

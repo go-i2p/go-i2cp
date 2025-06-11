@@ -11,7 +11,7 @@ type Version struct {
 }
 
 func parseVersion(str string) Version {
-	var v = Version{}
+	v := Version{}
 	segments := strings.Split(str, ".")
 	n := len(segments)
 	if n > 0 {

@@ -131,11 +131,20 @@ func (kp *Ed25519KeyPair) VerifyStream(stream *Stream) (bool, error) {
 		return false, fmt.Errorf("stream too short for Ed25519 signature")
 	}
 
-	// Extract message and signature
-	data := stream.Bytes()
-	messageLen := len(data) - ed25519.SignatureSize
-	message := data[:messageLen]
-	signature := data[messageLen:]
+	// Reset stream to beginning to ensure we read all data correctly
+	stream.Seek(0, 0)
+
+	// Extract all data from stream
+	allData := make([]byte, stream.Len())
+	n, err := stream.Read(allData)
+	if err != nil || n != stream.Len() {
+		return false, fmt.Errorf("failed to read stream data: %w", err)
+	}
+
+	// Extract message and signature from the complete data
+	messageLen := len(allData) - ed25519.SignatureSize
+	message := allData[:messageLen]
+	signature := allData[messageLen:]
 
 	return kp.Verify(message, signature), nil
 }

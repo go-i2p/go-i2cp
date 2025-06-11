@@ -18,8 +18,10 @@ const (
 	NR_OF_TCP_PROPERTIES
 )
 
-var CAFile = "/etc/ssl/certs/ca-certificates.crt"
-var defaultRouterAddress = "127.0.0.1:7654"
+var (
+	CAFile               = "/etc/ssl/certs/ca-certificates.crt"
+	defaultRouterAddress = "127.0.0.1:7654"
+)
 
 func (tcp *Tcp) Init() (err error) {
 	tcp.address, err = net.ResolveTCPAddr("tcp", defaultRouterAddress)
@@ -100,6 +102,7 @@ func (tcp *Tcp) IsConnected() bool {
 func (tcp *Tcp) SetProperty(property TcpProperty, value string) {
 	tcp.properties[property] = value
 }
+
 func (tcp *Tcp) GetProperty(property TcpProperty) string {
 	return tcp.properties[property]
 }

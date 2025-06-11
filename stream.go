@@ -15,18 +15,21 @@ type Stream struct {
 func NewStream(buf []byte) (s *Stream) {
 	return &Stream{bytes.NewBuffer(buf)}
 }
+
 func (s *Stream) ReadUint16() (r uint16, err error) {
 	bts := make([]byte, 2)
 	_, err = s.Read(bts)
 	r = binary.BigEndian.Uint16(bts)
 	return
 }
+
 func (s *Stream) ReadUint32() (r uint32, err error) {
 	bts := make([]byte, 4)
 	_, err = s.Read(bts)
 	r = binary.BigEndian.Uint32(bts)
 	return
 }
+
 func (s *Stream) ReadUint64() (r uint64, err error) {
 	bts := make([]byte, 8)
 	_, err = s.Read(bts)
@@ -40,12 +43,14 @@ func (s *Stream) WriteUint16(i uint16) (err error) {
 	_, err = s.Write(bts)
 	return
 }
+
 func (s *Stream) WriteUint32(i uint32) (err error) {
 	bts := make([]byte, 4)
 	binary.BigEndian.PutUint32(bts, i)
 	_, err = s.Write(bts)
 	return
 }
+
 func (s *Stream) WriteUint64(i uint64) (err error) {
 	bts := make([]byte, 8)
 	binary.BigEndian.PutUint64(bts, i)
@@ -84,6 +89,77 @@ func (stream *Stream) WriteMapping(m map[string]string) (err error) {
 	}
 	_, err = stream.Write(buf.Bytes())
 	return
+}
+
+// ReadMapping reads a mapping from the stream in the format written by WriteMapping
+func (stream *Stream) ReadMapping() (map[string]string, error) {
+	// Read the length of the mapping data
+	mappingLength, err := stream.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read mapping length: %w", err)
+	}
+
+	if mappingLength == 0 {
+		return make(map[string]string), nil
+	}
+
+	// Read the mapping data
+	mappingData := make([]byte, mappingLength)
+	n, err := stream.Read(mappingData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read mapping data: %w", err)
+	}
+	if n != int(mappingLength) {
+		return nil, fmt.Errorf("incomplete mapping data: expected %d bytes, got %d", mappingLength, n)
+	}
+
+	// Parse the mapping data
+	result := make(map[string]string)
+	dataStream := NewStream(mappingData)
+
+	for dataStream.Len() > 0 {
+		// Read key length and key
+		keyLen, err := dataStream.ReadByte()
+		if err != nil {
+			break // End of data
+		}
+
+		keyBytes := make([]byte, keyLen)
+		n, err := dataStream.Read(keyBytes)
+		if err != nil || n != int(keyLen) {
+			return nil, fmt.Errorf("failed to read key data")
+		}
+		key := string(keyBytes)
+
+		// Read '=' separator
+		sep, err := dataStream.ReadByte()
+		if err != nil || sep != '=' {
+			return nil, fmt.Errorf("expected '=' separator, got %c", sep)
+		}
+
+		// Read value length and value
+		valueLen, err := dataStream.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read value length")
+		}
+
+		valueBytes := make([]byte, valueLen)
+		n, err = dataStream.Read(valueBytes)
+		if err != nil || n != int(valueLen) {
+			return nil, fmt.Errorf("failed to read value data")
+		}
+		value := string(valueBytes)
+
+		// Read ';' separator
+		sep, err = dataStream.ReadByte()
+		if err != nil || sep != ';' {
+			return nil, fmt.Errorf("expected ';' separator, got %c", sep)
+		}
+
+		result[key] = value
+	}
+
+	return result, nil
 }
 
 func (s *Stream) loadFile(f *os.File) (err error) {
