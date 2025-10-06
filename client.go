@@ -386,7 +386,7 @@ func (c *Client) onMsgStatus(stream *Stream) {
 		return
 	}
 	Debug(TAG|PROTOCOL, "Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
-	
+
 	// Find session and dispatch status if available
 	sess := c.sessions[sessionId]
 	if sess != nil {
@@ -502,23 +502,55 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	var lup LookupEntry
 	var err error
 	Debug(TAG|PROTOCOL, "Received HostReply message.")
+	
+	// Parse message fields
 	sessionId, err = stream.ReadUint16()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read session ID from HostReply: %v", err)
+		return
+	}
 	requestId, err = stream.ReadUint32()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read request ID from HostReply: %v", err)
+		return
+	}
 	result, err = stream.ReadByte()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read result code from HostReply: %v", err)
+		return
+	}
+	
+	// Parse destination if lookup succeeded (result == 0)
 	if result == 0 {
 		dest, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
-			Fatal(TAG|FATAL, "Failed to construct destination from stream.")
+			Error(TAG|PROTOCOL, "Failed to parse destination from HostReply: %v", err)
+			return
 		}
+		Debug(TAG|PROTOCOL, "HostReply lookup succeeded for request %d", requestId)
+	} else {
+		// Lookup failed - log the error code
+		Debug(TAG|PROTOCOL, "HostReply lookup failed for request %d with result code %d", requestId, result)
 	}
+	
+	// Find session
 	sess = c.sessions[sessionId]
 	if sess == nil {
-		Fatal(TAG|FATAL, "Session with id %d doesn't exist in client instance %p.", sessionId, c)
+		Error(TAG|PROTOCOL, "Session with id %d doesn't exist for HostReply", sessionId)
+		return
 	}
+	
+	// Get and remove lookup entry
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
+	
+	if lup.address == "" {
+		Warning(TAG|PROTOCOL, "No lookup entry found for request ID %d", requestId)
+		return
+	}
+	
+	// Dispatch destination (may be nil if lookup failed)
 	sess.dispatchDestination(requestId, lup.address, dest)
-	_ = err // currently unused
 }
 
 // onMsgReconfigureSession handles ReconfigureSessionMessage (type 2) for dynamic session updates
