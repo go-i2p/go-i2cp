@@ -3,6 +3,7 @@ package go_i2cp
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -34,12 +35,15 @@ func (tcp *Tcp) Connect() (err error) {
 		tcp.tlsConn, err = tls.Dial("tcp", tcp.address.String(), &tls.Config{RootCAs: roots})
 	} else {
 		tcp.conn, err = net.DialTCP("tcp", nil, tcp.address)
-		if err == nil {
-			err = tcp.conn.SetKeepAlive(true)
+		if err != nil {
+			return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
+		}
+		if err = tcp.conn.SetKeepAlive(true); err != nil {
+			// Non-fatal but should log
+			Warning(TCP, "Failed to set TCP keepalive for %s: %v", tcp.address, err)
 		}
 	}
-	_ = err // currently unused
-	return
+	return nil
 }
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {

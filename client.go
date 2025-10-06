@@ -291,7 +291,6 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	var sessionId, srcPort, destPort uint16
 	var messageId, payloadSize uint32
 	var err error
-	var ret int
 	Debug(TAG|PROTOCOL, "Received PayloadMessage message")
 	sessionId, err = stream.ReadUint16()
 	messageId, err = stream.ReadUint32()
@@ -312,20 +311,48 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	var payload = bytes.NewBuffer(make([]byte, 0xffff))
 	var decompress io.ReadCloser
 	decompress, err = zlib.NewReader(msgStream)
-	io.Copy(payload, decompress)
-	decompress.Close()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to create zlib reader for message payload: %v", err)
+		return
+	}
+	_, err = io.Copy(payload, decompress)
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to decompress message payload: %v", err)
+		decompress.Close()
+		return
+	}
+	if err = decompress.Close(); err != nil {
+		Error(TAG|PROTOCOL, "Failed to close decompressor: %v", err)
+		return
+	}
 	if payload.Len() > 0 {
 		// finish reading header
 		// skip gzip flags
-		_, err = stream.ReadByte()
-		srcPort, err = stream.ReadUint16()
-		destPort, err = stream.ReadUint16()
-		_, err = stream.ReadByte()
-		protocol, err = stream.ReadByte()
+		if _, err = stream.ReadByte(); err != nil {
+			Error(TAG|PROTOCOL, "Failed to read gzip flags from payload header: %v", err)
+			return
+		}
+		if srcPort, err = stream.ReadUint16(); err != nil {
+			Error(TAG|PROTOCOL, "Failed to read source port from payload header: %v", err)
+			return
+		}
+		if destPort, err = stream.ReadUint16(); err != nil {
+			Error(TAG|PROTOCOL, "Failed to read dest port from payload header: %v", err)
+			return
+		}
+		if _, err = stream.ReadByte(); err != nil {
+			Error(TAG|PROTOCOL, "Failed to read protocol byte from payload header: %v", err)
+			return
+		}
+		if protocol, err = stream.ReadByte(); err != nil {
+			Error(TAG|PROTOCOL, "Failed to read protocol from payload header: %v", err)
+			return
+		}
+		Debug(TAG|PROTOCOL, "Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
 		session.dispatchMessage(protocol, srcPort, destPort, &Stream{payload})
+	} else {
+		Debug(TAG|PROTOCOL, "Empty payload received for session %d", sessionId)
 	}
-	_ = err // currently unused
-	_ = ret // currently unused
 }
 func (c *Client) onMsgStatus(stream *Stream) {
 	var status uint8
@@ -334,12 +361,40 @@ func (c *Client) onMsgStatus(stream *Stream) {
 	var err error
 	Debug(TAG|PROTOCOL, "Received MessageStatus message")
 	sessionId, err = stream.ReadUint16()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read session ID from MessageStatus: %v", err)
+		return
+	}
 	messageId, err = stream.ReadUint32()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read message ID from MessageStatus: %v", err)
+		return
+	}
 	status, err = stream.ReadByte()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read status from MessageStatus: %v", err)
+		return
+	}
 	size, err = stream.ReadUint32()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read size from MessageStatus: %v", err)
+		return
+	}
 	nonce, err = stream.ReadUint32()
-	_ = err // currently unused
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read nonce from MessageStatus: %v", err)
+		return
+	}
 	Debug(TAG|PROTOCOL, "Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
+	
+	// Find session and dispatch status if available
+	sess := c.sessions[sessionId]
+	if sess != nil {
+		// TODO: Add dispatchMessageStatus callback to Session when message tracking is implemented
+		Debug(TAG|PROTOCOL, "MessageStatus for session %d: message %d status %d", sessionId, messageId, status)
+	} else {
+		Warning(TAG|PROTOCOL, "MessageStatus received for unknown session %d", sessionId)
+	}
 }
 func (c *Client) onMsgDestReply(stream *Stream) {
 	var b32 string
@@ -379,8 +434,16 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var err error
 	Debug(TAG|PROTOCOL, "Received SessionStatus message.")
 	sessionID, err = stream.ReadUint16()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read session ID from SessionStatus: %v", err)
+		return
+	}
 	sessionStatus, err = stream.ReadByte()
-	_ = err // currently unused
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read session status from SessionStatus for session %d: %v", sessionID, err)
+		return
+	}
+	Debug(TAG|PROTOCOL, "SessionStatus for session %d: status %d", sessionID, sessionStatus)
 	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_CREATED {
 		if c.currentSession == nil {
 			Error(TAG, "Received session status created without waiting for it %p", c)
@@ -405,17 +468,30 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	var err error
 	Debug(TAG|PROTOCOL, "Received RequestVariableLeaseSet message.")
 	sessionId, err = stream.ReadUint16()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read session ID from RequestVariableLeaseSet: %v", err)
+		return
+	}
 	tunnels, err = stream.ReadByte()
+	if err != nil {
+		Error(TAG|PROTOCOL, "Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
+		return
+	}
 	sess = c.sessions[sessionId]
 	if sess == nil {
-		Fatal(TAG|FATAL, "Session with id %d doesn't exist in client instance %p.", sessionId, c)
+		Error(TAG|PROTOCOL, "Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
+		return
 	}
 	leases = make([]*Lease, tunnels)
 	for i := uint8(0); i < tunnels; i++ {
 		leases[i], err = NewLeaseFromStream(stream)
+		if err != nil {
+			Error(TAG|PROTOCOL, "Failed to parse lease %d/%d for session %d: %v", i+1, tunnels, sessionId, err)
+			return
+		}
 	}
+	Debug(TAG|PROTOCOL, "Parsed %d leases for session %d", tunnels, sessionId)
 	c.msgCreateLeaseSet(sess, tunnels, leases, true)
-	_ = err // currently unused
 }
 func (c *Client) onMsgHostReply(stream *Stream) {
 	var result uint8
@@ -734,6 +810,30 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 	}
 	return nil
 }
+
+// msgReconfigureSession sends ReconfigureSessionMessage (type 2) for dynamic session updates
+// per I2CP specification section 7.1 - implements runtime tunnel and crypto parameter changes
+func (c *Client) msgReconfigureSession(session *Session, properties map[string]string, queue bool) error {
+	Debug(TAG|PROTOCOL, "Sending ReconfigureSessionMessage for session %d with %d properties", session.id, len(properties))
+
+	c.messageStream.Reset()
+	c.messageStream.WriteUint16(session.id)
+
+	// Write properties mapping to message
+	if err := c.messageStream.WriteMapping(properties); err != nil {
+		Error(TAG|PROTOCOL, "Failed to write properties mapping to ReconfigureSessionMessage: %v", err)
+		return fmt.Errorf("failed to write properties mapping: %w", err)
+	}
+
+	if err := c.sendMessage(I2CP_MSG_RECONFIGURE_SESSION, c.messageStream, queue); err != nil {
+		Error(TAG, "Error while sending ReconfigureSessionMessage: %v", err)
+		return fmt.Errorf("failed to send ReconfigureSessionMessage: %w", err)
+	}
+
+	Debug(TAG|PROTOCOL, "Successfully sent ReconfigureSessionMessage for session %d", session.id)
+	return nil
+}
+
 func (c *Client) msgGetBandwidthLimits(queue bool) {
 	Debug(TAG|PROTOCOL, "Sending GetBandwidthLimitsMessage.")
 	c.messageStream.Reset()
