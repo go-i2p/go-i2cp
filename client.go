@@ -250,6 +250,7 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 		Info(TAG, "%s", "recieved unhandled i2cp message.")
 	}
 }
+
 func (c *Client) onMsgSetDate(stream *Stream) {
 	Debug(TAG|PROTOCOL, "Received SetDate message.")
 	var err error
@@ -267,10 +268,11 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
 	}
 }
+
 func (c *Client) onMsgDisconnect(stream *Stream) {
 	var err error
 	Debug(TAG|PROTOCOL, "Received Disconnect message")
-	//size, err = stream.ReadByte()
+	// size, err = stream.ReadByte()
 	strbuf := make([]byte, stream.Len())
 	lens := stream.Len()
 	_ = lens
@@ -284,8 +286,9 @@ func (c *Client) onMsgDisconnect(stream *Stream) {
 		c.callbacks.onDisconnect(c, string(strbuf), nil)
 	}
 }
+
 func (c *Client) onMsgPayload(stream *Stream) {
-	var gzipHeader = [3]byte{0x1f, 0x8b, 0x08}
+	gzipHeader := [3]byte{0x1f, 0x8b, 0x08}
 	var testHeader [3]byte
 	var protocol uint8
 	var sessionId, srcPort, destPort uint16
@@ -302,13 +305,13 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	payloadSize, err = stream.ReadUint32()
 	_ = payloadSize // currently unused
 	// validate gzip header
-	var msgStream = bytes.NewBuffer(stream.Bytes())
+	msgStream := bytes.NewBuffer(stream.Bytes())
 	_, err = stream.Read(testHeader[:])
 	if testHeader != gzipHeader {
 		Warning(TAG, "Payload validation failed, skipping payload")
 		return
 	}
-	var payload = bytes.NewBuffer(make([]byte, 0xffff))
+	payload := bytes.NewBuffer(make([]byte, 0xffff))
 	var decompress io.ReadCloser
 	decompress, err = zlib.NewReader(msgStream)
 	if err != nil {
@@ -354,6 +357,7 @@ func (c *Client) onMsgPayload(stream *Stream) {
 		Debug(TAG|PROTOCOL, "Empty payload received for session %d", sessionId)
 	}
 }
+
 func (c *Client) onMsgStatus(stream *Stream) {
 	var status uint8
 	var sessionId uint16
@@ -396,6 +400,7 @@ func (c *Client) onMsgStatus(stream *Stream) {
 		Warning(TAG|PROTOCOL, "MessageStatus received for unknown session %d", sessionId)
 	}
 }
+
 func (c *Client) onMsgDestReply(stream *Stream) {
 	var b32 string
 	var destination *Destination
@@ -424,9 +429,11 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 		lup.session.dispatchDestination(requestId, b32, destination)
 	}
 }
+
 func (c *Client) onMsgBandwithLimit(stream *Stream) {
 	Debug(TAG|PROTOCOL, "Received BandwidthLimits message.")
 }
+
 func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var sess *Session
 	var sessionID uint16
@@ -460,6 +467,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		sess.dispatchStatus(SessionStatus(sessionStatus))
 	}
 }
+
 func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	var sessionId uint16
 	var tunnels uint8
@@ -493,6 +501,7 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	Debug(TAG|PROTOCOL, "Parsed %d leases for session %d", tunnels, sessionId)
 	c.msgCreateLeaseSet(sess, tunnels, leases, true)
 }
+
 func (c *Client) onMsgHostReply(stream *Stream) {
 	var result uint8
 	var sessionId uint16
@@ -502,7 +511,7 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	var lup LookupEntry
 	var err error
 	Debug(TAG|PROTOCOL, "Received HostReply message.")
-	
+
 	// Parse message fields
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
@@ -519,7 +528,7 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 		Error(TAG|PROTOCOL, "Failed to read result code from HostReply: %v", err)
 		return
 	}
-	
+
 	// Parse destination if lookup succeeded (result == 0)
 	if result == 0 {
 		dest, err = NewDestinationFromMessage(stream, c.crypto)
@@ -532,23 +541,23 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 		// Lookup failed - log the error code
 		Debug(TAG|PROTOCOL, "HostReply lookup failed for request %d with result code %d", requestId, result)
 	}
-	
+
 	// Find session
 	sess = c.sessions[sessionId]
 	if sess == nil {
 		Error(TAG|PROTOCOL, "Session with id %d doesn't exist for HostReply", sessionId)
 		return
 	}
-	
+
 	// Get and remove lookup entry
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
-	
+
 	if lup.address == "" {
 		Warning(TAG|PROTOCOL, "No lookup entry found for request ID %d", requestId)
 		return
 	}
-	
+
 	// Dispatch destination (may be nil if lookup failed)
 	sess.dispatchDestination(requestId, lup.address, dest)
 }
@@ -697,7 +706,7 @@ func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Le
 	c.messageStream.WriteUint16(session.id)
 	c.messageStream.Write(nullbytes[:20])
 	c.messageStream.Write(nullbytes[:256])
-	//Build leaseset stream and sign it
+	// Build leaseset stream and sign it
 	dest.WriteToMessage(leaseSet)
 	leaseSet.Write(nullbytes[:256])
 	c.crypto.WritePublicSignatureToStream(sgk, leaseSet)
@@ -805,6 +814,7 @@ func (c *Client) msgGetDate(queue bool) {
 		Error(TAG, "Error while sending GetDateMessage")
 	}
 }
+
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug(TAG|PROTOCOL, "Sending CreateSessionMessage")
@@ -816,6 +826,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	}
 	return err
 }
+
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
 	Debug(TAG|PROTOCOL, "Sending DestLookupMessage.")
 	c.messageStream.Reset()
@@ -824,6 +835,7 @@ func (c *Client) msgDestLookup(hash []byte, queue bool) {
 		Error(TAG, "Error while sending DestLookupMessage.")
 	}
 }
+
 func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uint8, data []byte, queue bool) error {
 	var sessionId uint16
 	Debug(TAG|PROTOCOL, "Sending HostLookupMessage.")
@@ -873,6 +885,7 @@ func (c *Client) msgGetBandwidthLimits(queue bool) {
 		Error(TAG, "Error while sending GetBandwidthLimitsMessage")
 	}
 }
+
 func (c *Client) msgDestroySession(sess *Session, queue bool) {
 	Debug(TAG|PROTOCOL, "Sending DestroySessionMessage")
 	c.messageStream.Reset()
@@ -881,6 +894,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) {
 		Error(TAG, "Error while sending DestroySessionMessage")
 	}
 }
+
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
 	Debug(TAG|PROTOCOL, "Sending SendMessageMessage")
 	out := bytes.NewBuffer(make([]byte, 0xffff))
@@ -930,11 +944,12 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	}
 	return nil
 }
+
 func (c *Client) Connect() error {
 	Info(0, "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.host"])
 	err := c.tcp.Connect()
 	if err != nil {
-		//panic(err)
+		// panic(err)
 		return err
 	}
 	c.outputStream.Reset()
