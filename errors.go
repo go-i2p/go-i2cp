@@ -102,6 +102,14 @@ var (
 	// ErrInvalidSignature indicates a cryptographic signature verification failed.
 	// This typically indicates data corruption or a security issue.
 	ErrInvalidSignature = errors.New("i2cp: invalid signature")
+
+	// ErrMaxSessionsReached indicates the maximum number of sessions per client has been reached.
+	// I2CP spec: Maximum sessions per client is defined by I2CP_MAX_SESSIONS_PER_CLIENT
+	ErrMaxSessionsReached = errors.New("i2cp: maximum sessions per client reached")
+
+	// ErrClientClosed indicates an operation was attempted on a closed client.
+	// All operations will fail after Close() has been called.
+	ErrClientClosed = errors.New("i2cp: client is closed")
 )
 
 // MessageError represents an error related to I2CP message processing.

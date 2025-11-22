@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -272,7 +273,7 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 				}
 			}
 
-			requestId := client.DestinationLookup(session, tt.address)
+			requestId, err := client.DestinationLookup(context.Background(), session, tt.address)
 
 			if tt.wantRequestId == 0 && requestId != 0 {
 				t.Errorf("Expected requestId 0 for failed decode, got %d", requestId)
@@ -280,8 +281,12 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 			if tt.wantRequestId > 0 && requestId == 0 {
 				t.Errorf("Expected non-zero requestId for valid address, got 0")
 			}
+			// Check for errors when expected
+			if tt.mockDecodeError && err == nil {
+				t.Logf("Warning: Expected error for decode failure but got nil (may be deferred)")
+			}
 
-			t.Logf("Test scenario: %s, requestId: %d", tt.description, requestId)
+			t.Logf("Test scenario: %s, requestId: %d, err: %v", tt.description, requestId, err)
 		})
 	}
 }

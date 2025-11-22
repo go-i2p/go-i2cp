@@ -48,8 +48,14 @@ func (tcp *Tcp) Connect() (err error) {
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
 	if USE_TLS {
+		if tcp.tlsConn == nil {
+			return 0, fmt.Errorf("TLS connection not established")
+		}
 		i, err = tcp.tlsConn.Write(buf.Bytes())
 	} else {
+		if tcp.conn == nil {
+			return 0, fmt.Errorf("TCP connection not established")
+		}
 		i, err = tcp.conn.Write(buf.Bytes())
 	}
 	return
@@ -99,9 +105,13 @@ func (tcp *Tcp) CanRead() bool {
 
 func (tcp *Tcp) Disconnect() {
 	if USE_TLS {
-		tcp.tlsConn.Close()
+		if tcp.tlsConn != nil {
+			tcp.tlsConn.Close()
+		}
 	} else {
-		tcp.conn.Close()
+		if tcp.conn != nil {
+			tcp.conn.Close()
+		}
 	}
 }
 

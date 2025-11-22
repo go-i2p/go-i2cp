@@ -1,19 +1,20 @@
 package go_i2cp
 
 import (
+	"context"
 	"testing"
 )
 
 func TestClient(t *testing.T) {
 	client := NewClient(nil)
-	client.Connect()
+	client.Connect(context.Background())
 	client.Disconnect()
 }
 
 func TestClient_CreateSession(t *testing.T) {
 	client := NewClient(nil)
 
-	err := client.Connect()
+	err := client.Connect(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,7 @@ func TestClient_CreateSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.CreateSession(session)
+	err = client.CreateSession(context.Background(), session)
 	if err != nil {
 		t.Fatal(err)
 	}

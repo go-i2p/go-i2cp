@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type ClientProperty int
@@ -61,6 +63,8 @@ type Client struct {
 	currentSession  *Session // *opaque in the C lib
 	lookupRequestId uint32
 	crypto          *Crypto
+	shutdown        chan struct{}  // Channel to signal shutdown
+	wg              sync.WaitGroup // WaitGroup for goroutine tracking
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -78,6 +82,7 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c.lookupReq = make(map[uint32]LookupEntry, 1000)
 	c.sessions = make(map[uint16]*Session)
 	c.outputQueue = make([]*Stream, 0)
+	c.shutdown = make(chan struct{})
 	c.tcp.Init()
 	return
 }
@@ -945,77 +950,224 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	return nil
 }
 
-func (c *Client) Connect() error {
-	Info(0, "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.host"])
+// Connect establishes a connection to the I2P router with context support.
+// The context can be used to cancel the connection attempt or set a timeout.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//	defer cancel()
+//	err := client.Connect(ctx)
+func (c *Client) Connect(ctx context.Context) error {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before connect: %w", err)
+	}
+
+	Info(0, "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
+
+	// Establish TCP connection
 	err := c.tcp.Connect()
 	if err != nil {
-		// panic(err)
-		return err
+		return fmt.Errorf("failed to connect TCP: %w", err)
 	}
+
+	// Set up cleanup on error
+	success := false
+	defer func() {
+		if !success {
+			c.tcp.Disconnect()
+		}
+	}()
+
+	// Check context after TCP connect
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled after TCP connect: %w", err)
+	}
+
+	// Send protocol initialization byte
 	c.outputStream.Reset()
 	c.outputStream.WriteByte(I2CP_PROTOCOL_INIT)
 	_, err = c.tcp.Send(c.outputStream)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send protocol init: %w", err)
 	}
+
 	Debug(PROTOCOL, "Sending protocol byte message")
+
+	// Send GetDate message
 	c.msgGetDate(false)
-	err = c.recvMessage(I2CP_MSG_SET_DATE, c.messageStream, true)
-	if err != nil {
-		return err
+
+	// Receive SetDate response with context checking
+	type result struct {
+		err error
 	}
+	resultChan := make(chan result, 1)
+
+	go func() {
+		err := c.recvMessage(I2CP_MSG_SET_DATE, c.messageStream, true)
+		resultChan <- result{err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled during SetDate receive: %w", ctx.Err())
+	case res := <-resultChan:
+		if res.err != nil {
+			return fmt.Errorf("failed to receive SetDate: %w", res.err)
+		}
+	}
+
+	c.connected = true
+	success = true
 	return nil
 }
 
-func (c *Client) CreateSession(sess *Session) error {
+// CreateSession creates a new I2P session with context support.
+// The context can be used to cancel the session creation or set a timeout.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	err := client.CreateSession(ctx, session)
+func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before session creation: %w", err)
+	}
+
 	if c.n_sessions == I2CP_MAX_SESSIONS_PER_CLIENT {
 		Warning(TAG, "Maximum number of session per client connection reached.")
-		return fmt.Errorf("%d %s", TAG, "Maximum number of session per client connection reached.")
+		return ErrMaxSessionsReached
 	}
+
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY, "none")
+
 	err := c.msgCreateSession(sess.config, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send CreateSession message: %w", err)
 	}
+
 	c.currentSession = sess
-	c.recvMessage(I2CP_MSG_ANY, c.messageStream, true)
+
+	// Receive session status response with context checking
+	type result struct {
+		err error
+	}
+	resultChan := make(chan result, 1)
+
+	go func() {
+		err := c.recvMessage(I2CP_MSG_ANY, c.messageStream, true)
+		resultChan <- result{err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled during session creation: %w", ctx.Err())
+	case res := <-resultChan:
+		if res.err != nil {
+			return fmt.Errorf("failed to receive session status: %w", res.err)
+		}
+	}
+
 	return nil
 }
 
-func (c *Client) ProcessIO() error {
+// ProcessIO processes pending I/O operations with context support.
+// This method processes the output queue and receives messages from the router.
+// It respects context cancellation and shutdown signals.
+//
+// Example:
+//
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	err := client.ProcessIO(ctx)
+func (c *Client) ProcessIO(ctx context.Context) error {
+	// Check context before processing
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before ProcessIO: %w", err)
+	}
+
+	// Check shutdown signal
+	select {
+	case <-c.shutdown:
+		return ErrClientClosed
+	default:
+	}
+
+	// Process output queue
 	c.lock.Lock()
 	for _, stream := range c.outputQueue {
+		// Check context during queue processing
+		if err := ctx.Err(); err != nil {
+			c.lock.Unlock()
+			return fmt.Errorf("context cancelled during output queue processing: %w", err)
+		}
+
 		Debug(TAG|PROTOCOL, "Sending %d bytes message", stream.Len())
 		ret, err := c.tcp.Send(stream)
 		if ret < 0 {
 			c.lock.Unlock()
-			return err
+			return fmt.Errorf("failed to send queued message: %w", err)
 		}
 		if ret == 0 {
 			break
 		}
 	}
+	// Clear processed messages from queue
+	c.outputQueue = make([]*Stream, 0)
 	c.lock.Unlock()
+
+	// Process incoming messages
 	var err error
 	for c.tcp.CanRead() {
+		// Check context during message receive loop
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during message receive: %w", err)
+		}
+
+		// Check shutdown signal
+		select {
+		case <-c.shutdown:
+			return ErrClientClosed
+		default:
+		}
+
 		if err = c.recvMessage(I2CP_MSG_ANY, c.messageStream, true); err != nil {
-			return err
+			return fmt.Errorf("failed to receive message: %w", err)
 		}
 	}
+
 	return err
 }
 
-func (c *Client) DestinationLookup(session *Session, address string) (requestId uint32) {
+// DestinationLookup performs a destination lookup with context support.
+// The context can be used to cancel the lookup or set a timeout.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	requestId, err := client.DestinationLookup(ctx, session, "example.i2p")
+func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("context cancelled before lookup: %w", err)
+	}
+
 	var out *Stream
 	var lup LookupEntry
 	b32Len := 52 + 8
 	defaultTimeout := uint32(30000)
 	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+
 	if !routerCanHostLookup && len(address) != b32Len {
 		Warning(TAG, "Address '%s' is not a b32 address %d.", address, len(address))
-		return
+		return 0, ErrInvalidDestination
 	}
+
 	in := NewStream(make([]byte, 512))
 	if len(address) == b32Len {
 		Debug(TAG, "Lookup of b32 address detected, decode and use hash for faster lookup.")
@@ -1026,26 +1178,95 @@ func (c *Client) DestinationLookup(session *Session, address string) (requestId 
 			Warning(TAG, "Failed to decode hash of address '%s'", address)
 		}
 	}
+
 	lup = LookupEntry{address: address, session: session}
 	c.lookupRequestId += 1
-	requestId = c.lookupRequestId
+	requestId := c.lookupRequestId
 	c.lookupReq[requestId] = lup
+
+	// Check context before sending lookup
+	if err := ctx.Err(); err != nil {
+		delete(c.lookupReq, requestId)
+		return 0, fmt.Errorf("context cancelled before sending lookup: %w", err)
+	}
+
 	if routerCanHostLookup {
+		var err error
 		if out == nil || out.Len() == 0 {
-			c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOST, []byte(address), true)
+			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOST, []byte(address), true)
 		} else {
-			c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, out.Bytes(), true)
+			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, out.Bytes(), true)
+		}
+		if err != nil {
+			delete(c.lookupReq, requestId)
+			return 0, fmt.Errorf("failed to send host lookup: %w", err)
 		}
 	} else {
 		c.lookup[address] = requestId
 		c.msgDestLookup(out.Bytes(), true)
 	}
-	return requestId
+
+	return requestId, nil
 }
 
-func (c *Client) Disconnect() {
-	Info(TAG, "Disconnection client %p", c)
+// Close performs a graceful shutdown of the client.
+// It destroys all sessions, waits for pending operations to complete,
+// and closes the TCP connection. The shutdown has a 5 second timeout.
+//
+// Example:
+//
+//	defer client.Close()
+func (c *Client) Close() error {
+	Info(TAG, "Closing client %p", c)
+
+	// Signal shutdown to all operations
+	select {
+	case <-c.shutdown:
+		// Already closed
+		return ErrClientClosed
+	default:
+		close(c.shutdown)
+	}
+
+	// Destroy all sessions (only if connected)
+	if c.tcp.IsConnected() {
+		c.lock.Lock()
+		for sessionId, sess := range c.sessions {
+			Debug(TAG, "Destroying session %d during shutdown", sessionId)
+			c.msgDestroySession(sess, false)
+		}
+		c.lock.Unlock()
+	}
+
+	// Wait for pending operations with timeout
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		Debug(TAG, "All pending operations completed")
+	case <-time.After(5 * time.Second):
+		Warning(TAG, "Shutdown timeout - forcing close")
+	}
+
+	// Close TCP connection
 	c.tcp.Disconnect()
+	c.connected = false
+
+	Info(TAG, "Client %p closed successfully", c)
+	return nil
+}
+
+// Disconnect is deprecated. Use Close() instead.
+// Kept for backward compatibility.
+func (c *Client) Disconnect() {
+	Info(TAG, "Disconnection client %p (deprecated - use Close instead)", c)
+	if err := c.Close(); err != nil && err != ErrClientClosed {
+		Error(TAG, "Error during disconnect: %v", err)
+	}
 }
 
 func (c *Client) SetProperty(name, value string) {

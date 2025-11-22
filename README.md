@@ -30,40 +30,45 @@ go get github.com/go-i2p/go-i2cp
 package main
 
 import (
+    "context"
     "log"
+    "time"
     go_i2cp "github.com/go-i2p/go-i2cp"
 )
 
 func main() {
-    // Create I2CP client with callbacks
-    client := go_i2cp.NewClient(&go_i2cp.ClientCallBacks{})
+    // Create I2CP client
+    client := go_i2cp.NewClient(nil)
 
-    // Connect to local I2P router
-    if err := client.Connect(); err != nil {
+    // Connect to local I2P router with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    
+    if err := client.Connect(ctx); err != nil {
         log.Fatal(err)
     }
-    defer client.Disconnect()
-
-    // Create session with callbacks
-    session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{})
-
-    // Configure session properties
-    session.Destination().config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "example")
-    session.Destination().config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "4")
+    defer client.Close() // Graceful shutdown
 
     // Create session
-    if err := client.CreateSession(session); err != nil {
+    session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{})
+    
+    if err := client.CreateSession(ctx, session); err != nil {
         log.Fatal(err) 
     }
 
-    // Process I/O
+    // Process I/O with context support
     for {
-        if err := client.ProcessIO(); err != nil {
-            break
+        if err := client.ProcessIO(ctx); err != nil {
+            if err == go_i2cp.ErrClientClosed {
+                break
+            }
+            log.Printf("ProcessIO error: %v", err)
         }
     }
 }
 ```
+
+For more examples, see the [examples/](examples/) directory.
 
 ## Session Configuration
 
@@ -138,15 +143,26 @@ See `errors.go` for the complete list of error types and utilities.
 - ✅ DSA/SHA1/SHA256 cryptographic operations
 - ✅ Base32/Base64 destination encoding
 - ✅ Session configuration properties
-- ✅ **NEW:** Comprehensive error handling with 20+ error types (96.2% test coverage)
+- ✅ Comprehensive error handling with 20+ error types (96.2% test coverage)
+- ✅ Context-aware operations with cancellation and timeout support
+- ✅ Graceful shutdown with cleanup
 
 ### In Development
 
-- 🔄 Modern cryptographic algorithms (Ed25519, X25519, ChaCha20-Poly1305)
+- 🔄 Modern cryptographic algorithms (Ed25519, X25519, ChaCha20-Poly1305) - implemented, testing in progress
 - 🔄 TLS support for I2CP connections
 - 🔄 Enhanced session persistence
 - 🔄 Advanced tunnel configuration
-- 🔄 Context-aware operations with cancellation support
+- 🔄 Resource cleanup and lifecycle management
+
+## Examples
+
+Complete working examples are available in the [examples/](examples/) directory:
+
+- **[context_usage.go](examples/context_usage.go)** - Demonstrates context-aware operations, timeouts, cancellation, and graceful shutdown
+- **[modern_crypto_demo.go](examples/modern_crypto_demo.go)** - Shows modern cryptographic algorithms (Ed25519, X25519, ChaCha20-Poly1305)
+
+See the [examples README](examples/README.md) for detailed documentation and usage patterns.
 
 ## Testing
 
