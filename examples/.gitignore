@@ -1,0 +1,6 @@
+# Ignore compiled binaries in subdirectories
+context-usage/context-usage
+modern-crypto/modern-crypto
+
+# Ignore test binaries
+*.test
