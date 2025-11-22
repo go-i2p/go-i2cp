@@ -16,7 +16,7 @@ import (
 func NewCrypto() *Crypto {
 	c := &Crypto{
 		b64:   base64.StdEncoding,
-		b32:   base32.StdEncoding,
+		b32:   base32.StdEncoding.WithPadding(base32.NoPadding),
 		rng:   rand.Reader,
 		sh1:   sha1.New(),
 		sh256: sha256.New(),

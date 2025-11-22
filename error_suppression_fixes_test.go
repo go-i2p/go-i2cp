@@ -233,14 +233,14 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 	}{
 		{
 			name:            "invalid b32 address - decode fails",
-			address:         "invalid-b32-address!@#$%^&*().b32.i2p",
+			address:         "invalid!@#$%^&*invalid!@#$%^&*invalid!@#$%^&*invalid.b32.i2p", // 52 chars + .b32.i2p but invalid base32
 			mockDecodeError: true,
 			wantRequestId:   0, // Should return 0 on decode failure
 			description:     "Should return 0 and log warning when b32 decode fails",
 		},
 		{
 			name:            "valid b32 address format",
-			address:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.b32.i2p",
+			address:         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.b32.i2p", // 52 valid base32 chars + .b32.i2p
 			mockDecodeError: false,
 			wantRequestId:   1, // Should return valid request ID
 			description:     "Should handle valid b32 address",
@@ -263,14 +263,6 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 			session := &Session{
 				id:        1,
 				callbacks: &SessionCallbacks{},
-			}
-
-			// Create mock crypto that can simulate decode errors
-			if tt.mockDecodeError {
-				client.crypto = &Crypto{
-					// This would need to be implemented to return specific errors
-					// For now, we'll test the actual implementation
-				}
 			}
 
 			requestId, err := client.DestinationLookup(context.Background(), session, tt.address)

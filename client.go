@@ -1172,14 +1172,16 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 		return 0, ErrInvalidDestination
 	}
 
-	in := NewStream(make([]byte, 512))
+	in := NewStream(make([]byte, 0, 512))
 	if len(address) == b32Len {
 		Debug(TAG, "Lookup of b32 address detected, decode and use hash for faster lookup.")
 		host := address[:strings.Index(address, ".")]
 		in.Write([]byte(host))
-		out, _ = c.crypto.DecodeStream(CODEC_BASE32, in)
-		if out.Len() == 0 {
+		var decodeErr error
+		out, decodeErr = c.crypto.DecodeStream(CODEC_BASE32, in)
+		if decodeErr != nil || out.Len() == 0 {
 			Warning(TAG, "Failed to decode hash of address '%s'", address)
+			return 0, fmt.Errorf("failed to decode b32 address: %w", decodeErr)
 		}
 	}
 
