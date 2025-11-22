@@ -231,16 +231,24 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 		c.onMsgSetDate(stream)
 	case I2CP_MSG_DISCONNECT:
 		c.onMsgDisconnect(stream)
+	case I2CP_MSG_RECEIVE_MESSAGE_BEGIN:
+		c.onMsgReceiveMessageBegin(stream)
+	case I2CP_MSG_RECEIVE_MESSAGE_END:
+		c.onMsgReceiveMessageEnd(stream)
 	case I2CP_MSG_PAYLOAD_MESSAGE:
 		c.onMsgPayload(stream)
 	case I2CP_MSG_MESSAGE_STATUS:
 		c.onMsgStatus(stream)
 	case I2CP_MSG_DEST_REPLY:
 		c.onMsgDestReply(stream)
+	case I2CP_MSG_REQUEST_LEASESET:
+		c.onMsgRequestLeaseSet(stream)
 	case I2CP_MSG_BANDWIDTH_LIMITS:
 		c.onMsgBandwithLimit(stream)
 	case I2CP_MSG_SESSION_STATUS:
 		c.onMsgSessionStatus(stream)
+	case I2CP_MSG_REPORT_ABUSE:
+		c.onMsgReportAbuse(stream)
 	case I2CP_MSG_REQUEST_VARIABLE_LEASESET:
 		c.onMsgReqVariableLease(stream)
 	case I2CP_MSG_HOST_REPLY:
@@ -435,8 +443,175 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 	}
 }
 
+// onMsgReceiveMessageBegin handles deprecated ReceiveMessageBeginMessage (type 6)
+// DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
+// per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
+func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
+	Warning(TAG, "Received deprecated ReceiveMessageBeginMessage - fastReceive mode should be used")
+
+	// Read session ID
+	sessionID, err := stream.ReadUint16()
+	if err != nil {
+		Error(TAG, "Failed to read session ID from ReceiveMessageBegin: %v", err)
+		return
+	}
+
+	// Read message ID
+	messageID, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read message ID from ReceiveMessageBegin: %v", err)
+		return
+	}
+
+	Debug(TAG|PROTOCOL, "ReceiveMessageBegin for session %d, message %d (legacy mode)",
+		sessionID, messageID)
+
+	// In legacy slow-receive mode, the client would need to send an acknowledgment
+	// However, since fastReceive is default since 0.9.4, we just log this
+	// Modern clients should use MessagePayloadMessage (type 31) instead
+}
+
+// onMsgReceiveMessageEnd handles deprecated ReceiveMessageEndMessage (type 7)
+// DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
+// per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
+func (c *Client) onMsgReceiveMessageEnd(stream *Stream) {
+	Warning(TAG, "Received deprecated ReceiveMessageEndMessage - fastReceive mode should be used")
+
+	// Read session ID
+	sessionID, err := stream.ReadUint16()
+	if err != nil {
+		Error(TAG, "Failed to read session ID from ReceiveMessageEnd: %v", err)
+		return
+	}
+
+	// Read message ID
+	messageID, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read message ID from ReceiveMessageEnd: %v", err)
+		return
+	}
+
+	Debug(TAG|PROTOCOL, "ReceiveMessageEnd for session %d, message %d (legacy mode)",
+		sessionID, messageID)
+
+	// In legacy mode, this signals the end of a message transfer
+	// Modern clients receive complete messages via MessagePayloadMessage
+}
+
+// onMsgRequestLeaseSet handles deprecated RequestLeaseSetMessage (type 21)
+// DEPRECATED: Use RequestVariableLeaseSetMessage (type 37) for clients 0.9.7+
+// per I2CP specification 0.6.x - 0.9.6 - fixed-expiration lease sets
+func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
+	Warning(TAG, "Received deprecated RequestLeaseSetMessage - converting to variable lease set format")
+
+	// Read session ID
+	sessionID, err := stream.ReadUint16()
+	if err != nil {
+		Error(TAG, "Failed to read session ID from RequestLeaseSet: %v", err)
+		return
+	}
+
+	// Legacy RequestLeaseSet uses fixed expiration time
+	// Read lease count
+	leaseCount, err := stream.ReadByte()
+	if err != nil {
+		Error(TAG, "Failed to read lease count from RequestLeaseSet: %v", err)
+		return
+	}
+
+	Debug(TAG|PROTOCOL, "RequestLeaseSet for session %d with %d leases (converting to variable format)",
+		sessionID, leaseCount)
+
+	// Convert to variable lease set format by calling the modern handler
+	// In legacy format, expiration was fixed; modern format allows variable expiration
+	// We delegate to onMsgReqVariableLease which handles the actual lease set creation
+	c.onMsgReqVariableLease(stream)
+}
+
+// onMsgReportAbuse handles deprecated ReportAbuseMessage (type 29)
+// DEPRECATED: Never fully implemented in I2P, unsupported
+// per I2CP specification - reserved for abuse reporting (unused)
+func (c *Client) onMsgReportAbuse(stream *Stream) {
+	Warning(TAG, "Received deprecated ReportAbuseMessage - ignoring (never implemented)")
+
+	// This message type was reserved but never fully implemented in I2P
+	// Routers do not send this message, and clients should not expect it
+	// We simply log and ignore it for protocol completeness
+	Debug(TAG|PROTOCOL, "ReportAbuse message ignored - unsupported legacy feature")
+}
+
+// onMsgBandwithLimit handles BandwidthLimitsMessage (type 23) from router
+// per I2CP specification - reports bandwidth limits and burst parameters
+// Note: 9 fields are undefined in the spec and reserved for future use
 func (c *Client) onMsgBandwithLimit(stream *Stream) {
 	Debug(TAG|PROTOCOL, "Received BandwidthLimits message.")
+	var err error
+
+	// Read client bandwidth limits (bytes/second)
+	clientInbound, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read client inbound limit: %v", err)
+		return
+	}
+
+	clientOutbound, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read client outbound limit: %v", err)
+		return
+	}
+
+	// Read router bandwidth limits (bytes/second)
+	routerInbound, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read router inbound limit: %v", err)
+		return
+	}
+
+	routerInboundBurst, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read router inbound burst: %v", err)
+		return
+	}
+
+	routerOutbound, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read router outbound limit: %v", err)
+		return
+	}
+
+	routerOutboundBurst, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read router outbound burst: %v", err)
+		return
+	}
+
+	burstTime, err := stream.ReadUint32()
+	if err != nil {
+		Error(TAG, "Failed to read burst time: %v", err)
+		return
+	}
+
+	// Read 9 undefined/reserved fields (uint32 each)
+	// These are reserved for future protocol extensions
+	undefined := make([]uint32, 9)
+	for i := 0; i < 9; i++ {
+		undefined[i], err = stream.ReadUint32()
+		if err != nil {
+			Error(TAG, "Failed to read undefined field %d: %v", i, err)
+			return
+		}
+	}
+
+	Debug(TAG|PROTOCOL, "BandwidthLimits - Client: in=%d out=%d, Router: in=%d(%d) out=%d(%d) burst=%d",
+		clientInbound, clientOutbound,
+		routerInbound, routerInboundBurst,
+		routerOutbound, routerOutboundBurst,
+		burstTime)
+
+	// TODO: Add bandwidth limits callback to ClientCallBacks
+	// if c.callbacks.onBandwidthLimits != nil {
+	//     c.callbacks.onBandwidthLimits(c, clientInbound, clientOutbound, ...)
+	// }
 }
 
 func (c *Client) onMsgSessionStatus(stream *Stream) {
