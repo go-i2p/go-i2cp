@@ -140,10 +140,20 @@ func (c *Crypto) WriteEd25519SignatureToStream(kp *Ed25519KeyPair, stream *Strea
 func (c *Crypto) SignatureKeyPairFromStream(stream *Stream) (sgk SignatureKeyPair, err error) {
 	var typ uint32
 	typ, err = stream.ReadUint32()
+	if err != nil {
+		return sgk, fmt.Errorf("failed to read signature type: %w", err)
+	}
 	if typ == DSA_SHA1 {
 		keys := make([]byte, 20+128)
 		_, err = stream.Read(keys)
+		if err != nil {
+			return sgk, fmt.Errorf("failed to read signature keys: %w", err)
+		}
 		sgk.algorithmType = typ
+		// Initialize big.Int pointers before calling SetBytes
+		sgk.priv.X = new(big.Int)
+		sgk.priv.Y = new(big.Int)
+		sgk.pub.Y = new(big.Int)
 		sgk.priv.X.SetBytes(keys[:20])
 		sgk.priv.Y.SetBytes(keys[20:128])
 		sgk.pub.Y.SetBytes(keys[20:128])

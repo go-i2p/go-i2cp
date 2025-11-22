@@ -67,6 +67,9 @@ func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
 func (tcp *Tcp) CanRead() bool {
 	var one []byte
 	if USE_TLS {
+		if tcp.tlsConn == nil {
+			return false
+		}
 		tcp.tlsConn.SetReadDeadline(time.Now())
 		if _, err := tcp.tlsConn.Read(one); err == io.EOF {
 			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())
@@ -78,6 +81,9 @@ func (tcp *Tcp) CanRead() bool {
 			return tcp.tlsConn.ConnectionState().HandshakeComplete
 		}
 	} else {
+		if tcp.conn == nil {
+			return false
+		}
 		tcp.conn.SetReadDeadline(time.Now())
 		if _, err := tcp.conn.Read(one); err == io.EOF {
 			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())

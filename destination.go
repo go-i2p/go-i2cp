@@ -59,13 +59,26 @@ func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination
 	var pubKeyLen uint16
 	dest = &Destination{crypto: crypto}
 	cert, err = NewCertificateFromStream(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate: %w", err)
+	}
 	dest.cert = &cert
 	dest.sgk, err = crypto.SignatureKeyPairFromStream(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read signature keypair: %w", err)
+	}
+	dest.signPubKey = dest.sgk.pub.Y
 	pubKeyLen, err = stream.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read public key length: %w", err)
+	}
 	if pubKeyLen != PUB_KEY_SIZE {
-		Fatal(tag, "Failed to load pub key len, %d != %d", pubKeyLen, PUB_KEY_SIZE)
+		return nil, fmt.Errorf("invalid public key length: got %d, expected %d", pubKeyLen, PUB_KEY_SIZE)
 	}
 	_, err = stream.Read(dest.pubKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read public key: %w", err)
+	}
 	dest.generateB32()
 	dest.generateB64()
 	return
@@ -110,61 +123,95 @@ func (dest *Destination) Copy() (newDest Destination) {
 
 func (dest *Destination) WriteToFile(filename string) (err error) {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
-	dest.WriteToStream(stream)
+	if err = dest.WriteToStream(stream); err != nil {
+		return fmt.Errorf("failed to write destination to stream: %w", err)
+	}
 	var file *os.File
-	file, err = os.Open(filename)
-	stream.WriteTo(file)
-	file.Close()
-	return
+	file, err = os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close destination file: %w", closeErr)
+		}
+	}()
+
+	if _, err = stream.WriteTo(file); err != nil {
+		return fmt.Errorf("failed to write stream to file: %w", err)
+	}
+	return nil
 }
 
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
-	lena := len(dest.pubKey)
-	_ = lena
-	_, err = stream.Write(dest.pubKey[:])
-	_, err = stream.Write(dest.signPubKey.Bytes()) // GetCryptoInstance().WriteSignatureToStream(&dest.sgk, stream)
-	err = dest.cert.WriteToMessage(stream)
-	lenb := stream.Len()
-	_ = lenb
-	return
+	if _, err = stream.Write(dest.pubKey[:]); err != nil {
+		return fmt.Errorf("failed to write public key: %w", err)
+	}
+	if _, err = stream.Write(dest.signPubKey.Bytes()); err != nil {
+		return fmt.Errorf("failed to write signing public key: %w", err)
+	}
+	if err = dest.cert.WriteToMessage(stream); err != nil {
+		return fmt.Errorf("failed to write certificate: %w", err)
+	}
+	return nil
 }
 
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
-	err = dest.cert.WriteToStream(stream)
-	err = dest.crypto.WriteSignatureToStream(&dest.sgk, stream)
-	err = stream.WriteUint16(PUB_KEY_SIZE)
-	_, err = stream.Write(dest.pubKey[:])
-	return
+	if err = dest.cert.WriteToStream(stream); err != nil {
+		return fmt.Errorf("failed to write certificate to stream: %w", err)
+	}
+	if err = dest.crypto.WriteSignatureToStream(&dest.sgk, stream); err != nil {
+		return fmt.Errorf("failed to write signature to stream: %w", err)
+	}
+	if err = stream.WriteUint16(PUB_KEY_SIZE); err != nil {
+		return fmt.Errorf("failed to write public key size: %w", err)
+	}
+	if _, err = stream.Write(dest.pubKey[:]); err != nil {
+		return fmt.Errorf("failed to write public key: %w", err)
+	}
+	return nil
 }
 
 // Doesn't seem to be used anywhere??
 func (dest *Destination) Verify() (verified bool, err error) {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
-	dest.WriteToMessage(stream)
-	stream.Write(dest.digest[:])
+	if err = dest.WriteToMessage(stream); err != nil {
+		return false, fmt.Errorf("failed to write destination to message: %w", err)
+	}
+	if _, err = stream.Write(dest.digest[:]); err != nil {
+		return false, fmt.Errorf("failed to write digest: %w", err)
+	}
 	return dest.crypto.VerifyStream(&dest.sgk, stream)
 }
 
 func (dest *Destination) generateB32() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
-	dest.WriteToMessage(stream)
+	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
+	// If it fails, the b32 address will be incomplete, but this is logged for debugging
+	if err := dest.WriteToMessage(stream); err != nil {
+		Error(tag, "Failed to generate b32 address: %v", err)
+		return
+	}
 	hash := dest.crypto.HashStream(HASH_SHA256, stream)
 	b32 := dest.crypto.EncodeStream(CODEC_BASE32, hash)
-	length := b32.Len()
-	_ = length
-	dest.b32 = string(b32.Bytes())
+	dest.b32 = b32.String()
 	dest.b32 += ".b32.i2p"
 	Debug(tag, "New destination %s", dest.b32)
 }
 
 func (dest *Destination) generateB64() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
-	dest.WriteToMessage(stream)
+	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
+	// If it fails, the b64 address will be incomplete, but this is logged for debugging
+	if err := dest.WriteToMessage(stream); err != nil {
+		Error(tag, "Failed to generate b64 address: %v", err)
+		return
+	}
 	if stream.Len() > 0 {
 		fmt.Printf("Stream len %d \n", stream.Len())
 	}
 	b64B := dest.crypto.EncodeStream(CODEC_BASE64, stream)
-	replaced := strings.Replace(string(b64B.Bytes()), "/", "~", -1)
+	replaced := strings.Replace(b64B.String(), "/", "~", -1)
 	replaced = strings.Replace(replaced, "/", "~", -1)
 	dest.b64 = replaced
 }
