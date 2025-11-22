@@ -234,6 +234,7 @@ func (session *Session) SetPrimarySession(primary *Session) error {
 
 // Close gracefully closes the session and releases resources
 // per I2CP specification - implements proper session lifecycle management with cleanup
+// Sends DestroySession message to router and waits for cleanup completion
 func (session *Session) Close() error {
 	session.mu.Lock()
 	defer session.mu.Unlock()
@@ -243,6 +244,15 @@ func (session *Session) Close() error {
 	}
 
 	Debug(SESSION, "Closing session %d", session.id)
+
+	// Send DestroySession message to router if client is connected
+	if session.client != nil && session.client.IsConnected() {
+		// Only send DestroySession for sessions that have been created by router
+		if session.id != 0 {
+			session.client.msgDestroySession(session, false)
+			Debug(SESSION, "Sent DestroySession message for session %d", session.id)
+		}
+	}
 
 	// Cancel context if we have one
 	if session.cancel != nil {

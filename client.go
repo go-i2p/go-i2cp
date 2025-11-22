@@ -952,6 +952,7 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 
 // Connect establishes a connection to the I2P router with context support.
 // The context can be used to cancel the connection attempt or set a timeout.
+// Implements proper error path cleanup with defer pattern per PLAN.md section 1.3.
 //
 // Example:
 //
@@ -972,11 +973,14 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to connect TCP: %w", err)
 	}
 
-	// Set up cleanup on error
+	// Set up cleanup on error - ensures TCP disconnects if any subsequent step fails
+	// This implements the defer cleanup pattern from PLAN.md section 1.3 task 2
 	success := false
 	defer func() {
 		if !success {
+			Debug(PROTOCOL, "Connect failed - cleaning up TCP connection")
 			c.tcp.Disconnect()
+			c.connected = false
 		}
 	}()
 
