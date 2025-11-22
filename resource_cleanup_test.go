@@ -11,11 +11,11 @@ import (
 // per PLAN.md section 1.3 - ensures proper cleanup with router notification
 func TestSessionCloseDestroysSession(t *testing.T) {
 	tests := []struct {
-		name           string
-		sessionID      uint16
-		clientConnect  bool
-		expectDestroy  bool
-		description    string
+		name          string
+		sessionID     uint16
+		clientConnect bool
+		expectDestroy bool
+		description   string
 	}{
 		{
 			name:          "created session sends destroy",
@@ -44,7 +44,7 @@ func TestSessionCloseDestroysSession(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create client
 			client := NewClient(&ClientCallBacks{})
-			
+
 			// Set connection state
 			client.connected = tt.clientConnect
 			if tt.clientConnect {
@@ -117,7 +117,7 @@ func TestSessionCloseWithContext(t *testing.T) {
 func TestConnectErrorCleanup(t *testing.T) {
 	t.Run("context cancelled before connect", func(t *testing.T) {
 		client := NewClient(&ClientCallBacks{})
-		
+
 		// Create pre-cancelled context
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -136,7 +136,7 @@ func TestConnectErrorCleanup(t *testing.T) {
 
 	t.Run("defer cleanup sets connected to false", func(t *testing.T) {
 		client := NewClient(&ClientCallBacks{})
-		
+
 		// This test verifies the defer cleanup pattern is in place
 		// Even if we can't reliably trigger TCP errors, we can verify
 		// the pattern exists by checking the code structure
