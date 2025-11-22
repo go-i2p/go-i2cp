@@ -28,7 +28,10 @@ const (
 	I2CP_MSG_HOST_REPLY                uint8 = 39
 	I2CP_MSG_MESSAGE_STATUS            uint8 = 22
 	I2CP_MSG_PAYLOAD_MESSAGE           uint8 = 31
+	I2CP_MSG_RECEIVE_MESSAGE_BEGIN     uint8 = 6 // DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
+	I2CP_MSG_RECEIVE_MESSAGE_END       uint8 = 7 // DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
 	I2CP_MSG_RECONFIGURE_SESSION       uint8 = 2
+	I2CP_MSG_REPORT_ABUSE              uint8 = 29 // DEPRECATED: Never fully implemented, unsupported
 	I2CP_MSG_REQUEST_LEASESET          uint8 = 21
 	I2CP_MSG_REQUEST_VARIABLE_LEASESET uint8 = 37
 	I2CP_MSG_SEND_MESSAGE              uint8 = 5
@@ -48,17 +51,17 @@ const (
 	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+)
 )
 
-// Host Lookup Result Codes
+// HostReply Error Codes (I2CP Proposal 167)
 // per I2CP specification for HostReplyMessage error handling
 const (
-	HOST_LOOKUP_RESULT_SUCCESS          uint8 = 0 // Lookup successful
-	HOST_LOOKUP_RESULT_NOT_FOUND        uint8 = 1 // Destination not found
-	HOST_LOOKUP_RESULT_TIMEOUT          uint8 = 2 // Lookup timed out
-	HOST_LOOKUP_RESULT_INVALID_KEY      uint8 = 3 // Invalid lookup key format
-	HOST_LOOKUP_RESULT_INVALID_SESSION  uint8 = 4 // Invalid session ID
-	HOST_LOOKUP_RESULT_UNSUPPORTED_TYPE uint8 = 5 // Unsupported lookup type
-	HOST_LOOKUP_RESULT_NETWORK_ERROR    uint8 = 6 // Network connectivity issue
-	HOST_LOOKUP_RESULT_GENERIC_ERROR    uint8 = 7 // Generic lookup failure
+	HOST_REPLY_SUCCESS                   uint8 = 0 // Lookup successful
+	HOST_REPLY_FAILURE                   uint8 = 1 // General lookup failure
+	HOST_REPLY_PASSWORD_REQUIRED         uint8 = 2 // Password required for encrypted LeaseSet (since 0.9.43)
+	HOST_REPLY_PRIVATE_KEY_REQUIRED      uint8 = 3 // Private key required for per-client auth (since 0.9.43)
+	HOST_REPLY_PASSWORD_AND_KEY_REQUIRED uint8 = 4 // Both password and key required (since 0.9.43)
+	HOST_REPLY_DECRYPTION_FAILURE        uint8 = 5 // Failed to decrypt LeaseSet (since 0.9.43)
+	HOST_REPLY_LEASESET_LOOKUP_FAILURE   uint8 = 6 // LeaseSet not found in network database (since 0.9.66)
+	HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED   uint8 = 7 // Lookup type not supported by router (since 0.9.66)
 )
 
 // LeaseSet Type Constants
@@ -193,33 +196,39 @@ const (
 	TAG = CLIENT
 )
 
-// Session Message Status Constants
-// Moved from: session.go
-type SessionMessageStatus int
-
+// MessageStatus Codes (I2CP MessageStatusMessage)
+// Complete status codes 0-23 per I2CP specification
+// Used in MessageStatusMessage (type 22) to report delivery status
 const (
-	I2CP_MSG_STATUS_AVAILABLE SessionMessageStatus = iota
-	I2CP_MSG_STATUS_ACCEPTED
-	I2CP_MSG_STATUS_BEST_EFFORT_SUCCESS
-	I2CP_MSG_STATUS_BEST_EFFORT_FAILURE
-	I2CP_MSG_STATUS_GUARANTEED_SUCCESS
-	I2CP_MSG_STATUS_GUARANTEED_FAILURE
-	I2CP_MSG_STATUS_LOCAL_SUCCESS
-	I2CP_MSG_STATUS_LOCAL_FAILURE
-	I2CP_MSG_STATUS_ROUTER_FAILURE
-	I2CP_MSG_STATUS_NETWORK_FAILURE
-	I2CP_MSG_STATUS_BAD_SESSION
-	I2CP_MSG_STATUS_BAD_MESSAGE
-	I2CP_MSG_STATUS_OVERFLOW_FAILURE
-	I2CP_MSG_STATUS_MESSAGE_EXPIRED
-	I2CP_MSG_STATUS_MESSAGE_BAD_LOCAL_LEASESET
-	I2CP_MSG_STATUS_MESSAGE_NO_LOCAL_TUNNELS
-	I2CP_MSG_STATUS_MESSAGE_UNSUPPORTED_ENCRYPTION
-	I2CP_MSG_STATUS_MESSAGE_BAD_DESTINATION
-	I2CP_MSG_STATUS_MESSAGE_BAD_LEASESET
-	I2CP_MSG_STATUS_MESSAGE_EXPIRED_LEASESET
-	I2CP_MSG_STATUS_MESSAGE_NO_LEASESET
+	MSG_STATUS_AVAILABLE                uint8 = 0  // DEPRECATED: Message available for pickup
+	MSG_STATUS_ACCEPTED                 uint8 = 1  // Message accepted by router
+	MSG_STATUS_BEST_EFFORT_SUCCESS      uint8 = 2  // Best-effort delivery succeeded
+	MSG_STATUS_BEST_EFFORT_FAILURE      uint8 = 3  // Best-effort delivery failed
+	MSG_STATUS_GUARANTEED_SUCCESS       uint8 = 4  // Guaranteed delivery succeeded
+	MSG_STATUS_GUARANTEED_FAILURE       uint8 = 5  // Guaranteed delivery failed
+	MSG_STATUS_LOCAL_SUCCESS            uint8 = 6  // Local delivery succeeded
+	MSG_STATUS_LOCAL_FAILURE            uint8 = 7  // Local delivery failed
+	MSG_STATUS_ROUTER_FAILURE           uint8 = 8  // Router error
+	MSG_STATUS_NETWORK_FAILURE          uint8 = 9  // Network error
+	MSG_STATUS_BAD_SESSION              uint8 = 10 // Invalid session ID
+	MSG_STATUS_BAD_MESSAGE              uint8 = 11 // Malformed message
+	MSG_STATUS_OVERFLOW_FAILURE         uint8 = 12 // Queue overflow
+	MSG_STATUS_MESSAGE_EXPIRED          uint8 = 13 // Message expired
+	MSG_STATUS_BAD_LOCAL_LEASESET       uint8 = 14 // Local LeaseSet invalid
+	MSG_STATUS_NO_LOCAL_TUNNELS         uint8 = 15 // No local tunnels available
+	MSG_STATUS_UNSUPPORTED_ENCRYPTION   uint8 = 16 // Encryption type unsupported
+	MSG_STATUS_BAD_DESTINATION          uint8 = 17 // Destination invalid
+	MSG_STATUS_BAD_LEASESET             uint8 = 18 // Remote LeaseSet invalid
+	MSG_STATUS_EXPIRED_LEASESET         uint8 = 19 // Remote LeaseSet expired
+	MSG_STATUS_NO_LEASESET              uint8 = 20 // Remote LeaseSet not found
+	MSG_STATUS_SEND_BEST_EFFORT_FAILURE uint8 = 21 // Send best-effort failed (since 0.9.37)
+	MSG_STATUS_META_LEASESET            uint8 = 22 // MetaLeaseSet received (since 0.9.41)
+	MSG_STATUS_LOOPBACK_DENIED          uint8 = 23 // Loopback message denied (since 0.9.62)
 )
+
+// Legacy type alias for backward compatibility
+// DEPRECATED: Use uint8 MSG_STATUS_* constants directly
+type SessionMessageStatus = uint8
 
 // Session Status Constants
 // Moved from: session.go
