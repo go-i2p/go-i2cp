@@ -173,9 +173,11 @@ func (s *Stream) ChLen(len int) {
 }
 
 func (s *Stream) Seek(offset int64, whence int) (int64, error) {
-	// Reset buffer to beginning and advance by offset
+	// Reset read position to beginning without clearing the buffer
 	if whence == 0 && offset == 0 {
-		s.Reset()
+		// Get current data and create new buffer with same data
+		data := s.Bytes()
+		s.Buffer = bytes.NewBuffer(data)
 		return 0, nil
 	}
 	return 0, fmt.Errorf("seek operation not fully implemented")

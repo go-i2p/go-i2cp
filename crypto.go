@@ -113,16 +113,26 @@ func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (
 		Fatal(tAG|FATAL, "Failed to write unsupported signature keypair to stream.")
 		return fmt.Errorf("Failed to write unsupported signature keypair to stream.")
 	}
-	var n int
 	err = stream.WriteUint32(sgk.algorithmType)
-	n, err = stream.Write(sgk.priv.X.Bytes())
-	if n != 20 {
-		Fatal(tAG|FATAL, "Failed to export signature because publickey != 20 bytes")
+	if err != nil {
 		return err
 	}
-	n, err = stream.Write(sgk.pub.Y.Bytes())
-	if n != 128 {
-		Fatal(tAG|FATAL, "Failed to export signature because privatekey != 128 bytes")
+	// Pad private key X to exactly 20 bytes (DSA_SHA1_PRIV_KEY_SIZE)
+	// big.Int.Bytes() returns minimal representation without leading zeros
+	privKeyBytes := sgk.priv.X.Bytes()
+	paddedPrivKey := make([]byte, 20)
+	copy(paddedPrivKey[20-len(privKeyBytes):], privKeyBytes)
+	_, err = stream.Write(paddedPrivKey)
+	if err != nil {
+		return err
+	}
+	// Pad public key Y to exactly 128 bytes (DSA_SHA1_PUB_KEY_SIZE)
+	// big.Int.Bytes() returns minimal representation without leading zeros
+	pubKeyBytes := sgk.pub.Y.Bytes()
+	paddedPubKey := make([]byte, 128)
+	copy(paddedPubKey[128-len(pubKeyBytes):], pubKeyBytes)
+	_, err = stream.Write(paddedPubKey)
+	if err != nil {
 		return err
 	}
 	return
@@ -155,8 +165,8 @@ func (c *Crypto) SignatureKeyPairFromStream(stream *Stream) (sgk SignatureKeyPai
 		sgk.priv.Y = new(big.Int)
 		sgk.pub.Y = new(big.Int)
 		sgk.priv.X.SetBytes(keys[:20])
-		sgk.priv.Y.SetBytes(keys[20:128])
-		sgk.pub.Y.SetBytes(keys[20:128])
+		sgk.priv.Y.SetBytes(keys[20:])
+		sgk.pub.Y.SetBytes(keys[20:])
 	} else {
 		Fatal(tAG|FATAL, "Failed to read unsupported signature keypair from stream.")
 	}

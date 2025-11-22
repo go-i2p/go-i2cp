@@ -147,7 +147,12 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
-	if _, err = stream.Write(dest.signPubKey.Bytes()); err != nil {
+	// Pad signing public key to exactly 128 bytes (DSA_SHA1_PUB_KEY_SIZE)
+	// big.Int.Bytes() returns minimal representation without leading zeros
+	signKeyBytes := dest.signPubKey.Bytes()
+	paddedSignKey := make([]byte, DSA_SHA1_PUB_KEY_SIZE)
+	copy(paddedSignKey[DSA_SHA1_PUB_KEY_SIZE-len(signKeyBytes):], signKeyBytes)
+	if _, err = stream.Write(paddedSignKey); err != nil {
 		return fmt.Errorf("failed to write signing public key: %w", err)
 	}
 	if err = dest.cert.WriteToMessage(stream); err != nil {

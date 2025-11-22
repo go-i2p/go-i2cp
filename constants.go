@@ -111,9 +111,10 @@ const (
 // Destination Size Constants
 // Moved from: destination.go
 const (
-	PUB_KEY_SIZE = 256
-	DIGEST_SIZE  = 40
-	DEST_SIZE    = 4096
+	PUB_KEY_SIZE          = 256
+	DSA_SHA1_PUB_KEY_SIZE = 128
+	DIGEST_SIZE           = 40
+	DEST_SIZE             = 4096
 )
 
 // Hash Algorithm Constants
