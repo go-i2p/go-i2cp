@@ -4,94 +4,152 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"sort"
 )
 
+// Stream provides I2CP-specific message serialization operations.
+// It wraps bytes.Buffer and adds methods for reading/writing I2CP protocol data structures.
+//
+// The Stream type focuses on I2CP protocol serialization including:
+//   - Binary integer encoding (big-endian uint16/32/64)
+//   - Length-prefixed strings
+//   - I2CP property mappings (key=value; format)
+//
+// For general binary operations outside I2CP, use encoding/binary directly.
 type Stream struct {
 	*bytes.Buffer
 }
 
-func NewStream(buf []byte) (s *Stream) {
+// NewStream creates a new Stream from a byte slice.
+// The Stream wraps a bytes.Buffer initialized with the provided data.
+func NewStream(buf []byte) *Stream {
 	return &Stream{bytes.NewBuffer(buf)}
 }
 
-func (s *Stream) ReadUint16() (r uint16, err error) {
+// ReadUint16 reads a big-endian uint16 from the stream.
+// This is commonly used for I2CP session IDs and length prefixes.
+func (s *Stream) ReadUint16() (uint16, error) {
 	bts := make([]byte, 2)
-	_, err = s.Read(bts)
-	r = binary.BigEndian.Uint16(bts)
-	return
+	_, err := s.Read(bts)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint16(bts), nil
 }
 
-func (s *Stream) ReadUint32() (r uint32, err error) {
+// ReadUint32 reads a big-endian uint32 from the stream.
+// This is commonly used for I2CP message IDs, sizes, and tunnel IDs.
+func (s *Stream) ReadUint32() (uint32, error) {
 	bts := make([]byte, 4)
-	_, err = s.Read(bts)
-	r = binary.BigEndian.Uint32(bts)
-	return
+	_, err := s.Read(bts)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint32(bts), nil
 }
 
-func (s *Stream) ReadUint64() (r uint64, err error) {
+// ReadUint64 reads a big-endian uint64 from the stream.
+// This is commonly used for I2CP timestamps.
+func (s *Stream) ReadUint64() (uint64, error) {
 	bts := make([]byte, 8)
-	_, err = s.Read(bts)
-	r = binary.BigEndian.Uint64(bts)
-	return
+	_, err := s.Read(bts)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(bts), nil
 }
 
-func (s *Stream) WriteUint16(i uint16) (err error) {
+// WriteUint16 writes a big-endian uint16 to the stream.
+// This is commonly used for I2CP session IDs and length prefixes.
+func (s *Stream) WriteUint16(i uint16) error {
 	bts := make([]byte, 2)
 	binary.BigEndian.PutUint16(bts, i)
-	_, err = s.Write(bts)
-	return
+	_, err := s.Write(bts)
+	return err
 }
 
-func (s *Stream) WriteUint32(i uint32) (err error) {
+// WriteUint32 writes a big-endian uint32 to the stream.
+// This is commonly used for I2CP message IDs, sizes, and tunnel IDs.
+func (s *Stream) WriteUint32(i uint32) error {
 	bts := make([]byte, 4)
 	binary.BigEndian.PutUint32(bts, i)
-	_, err = s.Write(bts)
-	return
+	_, err := s.Write(bts)
+	return err
 }
 
-func (s *Stream) WriteUint64(i uint64) (err error) {
+// WriteUint64 writes a big-endian uint64 to the stream.
+// This is commonly used for I2CP timestamps.
+func (s *Stream) WriteUint64(i uint64) error {
 	bts := make([]byte, 8)
 	binary.BigEndian.PutUint64(bts, i)
-	_, err = s.Write(bts)
-	return
+	_, err := s.Write(bts)
+	return err
 }
 
-func (stream *Stream) WriteLenPrefixedString(s string) (err error) {
-	err = stream.WriteByte(uint8(len(s)))
+// WriteLenPrefixedString writes a string prefixed by its length as a single byte.
+// Format: [length:1 byte][string data]
+// This limits strings to 255 bytes, which is sufficient for I2CP property keys/values.
+func (stream *Stream) WriteLenPrefixedString(s string) error {
+	if len(s) > 255 {
+		return fmt.Errorf("string too long: %d bytes (max 255)", len(s))
+	}
+	err := stream.WriteByte(uint8(len(s)))
 	if err != nil {
-		return
+		return err
 	}
 	_, err = stream.WriteString(s)
-	return
+	return err
 }
 
-func (stream *Stream) WriteMapping(m map[string]string) (err error) {
+// WriteMapping writes an I2CP property mapping to the stream.
+// Format: [size:uint16][key1_len:1][key1][=][value1_len:1][value1][;]...[keyN_len:1][keyN][=][valueN_len:1][valueN][;]
+//
+// The mapping is a collection of key=value pairs separated by semicolons.
+// Keys are sorted alphabetically for deterministic serialization.
+// Empty keys are skipped to avoid malformed output.
+//
+// This format is used throughout I2CP for session configuration properties.
+func (stream *Stream) WriteMapping(m map[string]string) error {
 	buf := NewStream(make([]byte, 0))
-	keys := make([]string, len(m))
+
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(m))
 	for k := range m {
-		keys = append(keys, k)
+		if k != "" { // Skip empty keys
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
+
+	// Write each key=value; pair
 	for _, key := range keys {
-		if key == "" {
-			continue
+		if err := buf.WriteLenPrefixedString(key); err != nil {
+			return fmt.Errorf("failed to write key %q: %w", key, err)
 		}
-		buf.WriteLenPrefixedString(key)
-		buf.WriteByte(byte('='))
-		buf.WriteLenPrefixedString(m[key])
-		buf.WriteByte(byte(';'))
+		if err := buf.WriteByte(byte('=')); err != nil {
+			return err
+		}
+		if err := buf.WriteLenPrefixedString(m[key]); err != nil {
+			return fmt.Errorf("failed to write value for key %q: %w", key, err)
+		}
+		if err := buf.WriteByte(byte(';')); err != nil {
+			return err
+		}
 	}
-	err = stream.WriteUint16(uint16(buf.Len()))
-	if err != nil {
-		return
+
+	// Write size prefix and mapping data
+	if err := stream.WriteUint16(uint16(buf.Len())); err != nil {
+		return err
 	}
-	_, err = stream.Write(buf.Bytes())
-	return
+	_, err := stream.Write(buf.Bytes())
+	return err
 }
 
-// ReadMapping reads a mapping from the stream in the format written by WriteMapping
+// ReadMapping reads an I2CP property mapping from the stream.
+// Format: [size:uint16][key1_len:1][key1][=][value1_len:1][value1][;]...[keyN_len:1][keyN][=][valueN_len:1][valueN][;]
+//
+// Returns a map of key-value pairs. If the mapping is empty (size=0), returns an empty map.
+// Returns an error if the mapping data is malformed or incomplete.
 func (stream *Stream) ReadMapping() (map[string]string, error) {
 	// Read the length of the mapping data
 	mappingLength, err := stream.ReadUint16()
@@ -162,79 +220,18 @@ func (stream *Stream) ReadMapping() (map[string]string, error) {
 	return result, nil
 }
 
-func (s *Stream) loadFile(f *os.File) (err error) {
-	_, err = f.Read(s.Bytes())
-	return
-}
-
-func (s *Stream) ChLen(len int) {
-	byt := s.Bytes()
-	byt = byt[:len]
-}
-
+// Seek provides limited support for repositioning within the stream.
+// Currently only supports Seek(0, 0) to reset to the beginning.
+// This is used internally for I2CP message processing.
+//
+// For full io.Seeker support, use bytes.Reader instead.
 func (s *Stream) Seek(offset int64, whence int) (int64, error) {
-	// Reset read position to beginning without clearing the buffer
+	// Only support reset to beginning (offset=0, whence=0)
 	if whence == 0 && offset == 0 {
-		// Get current data and create new buffer with same data
+		// Create new buffer with same data to reset read position
 		data := s.Bytes()
 		s.Buffer = bytes.NewBuffer(data)
 		return 0, nil
 	}
-	return 0, fmt.Errorf("seek operation not fully implemented")
+	return 0, fmt.Errorf("seek operation only supports reset to beginning (0, 0)")
 }
-
-/*type Stream struct {
-	data []byte
-	size uint32
-	p uint32
-	end uint32
-}
-
-func (s *Stream) Init(len uint32) {
-	data := make([]byte, len)
-	s.data = data
-	s.size = len
-	s.Reset()
-}
-
-func (s *Stream) Reset() {
-	s.end = s.size - 1
-	s.p = 0
-}
-
-func (s *Stream) Seek(a uint32) {
-	s.p = a
-}
-func (s *Stream) Advance() {
-	s.p += 1
-}
-func (s *Stream) Tell() uint32 { return s.p }
-func (s *Stream) MarkEnd() { s.end = s.p}
-func (s *Stream) Eof() bool { return s.end < s.p}
-func (s *Stream) Debug() {fmt.Printf("STREAM: data %p size %d p %d end %d", s.data, s.size, s.p, s.end)}
-func (s *Stream) Check(len uint32) {
-	if (s.p + len) > s.size {
-		s.Debug()
-		// TODO better error message
-		os.Exit(2)
-	}
-}
-func (s *Stream) Dump(file os.File) {
-	file.Write(s.data)
-	defer file.Close()
-}
-func (s *Stream) Skip(n uint32) {
-	s.Check(n)
-	s.p += n
-}
-func (s *Stream) ReadUint8() uint8 {
-	s.Check(1)
-	defer s.Advance()
-	return s.data[s.p]
-}
-func (s *Stream) ReadUint8p(len uint32) []uint8 {
-	s.Check(len)
-	defer s.Skip(len)
-	return s.data[s.p:len]
-}
-*/

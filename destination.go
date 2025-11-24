@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 
@@ -109,9 +110,15 @@ func NewDestinationFromBase64(base64Str string, crypto *Crypto) (dest *Destinati
 }
 
 func NewDestinationFromFile(file *os.File, crypto *Crypto) (*Destination, error) {
-	var stream Stream
-	stream.loadFile(file)
-	return NewDestinationFromStream(&stream, crypto)
+	// Read all data from file
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read destination file: %w", err)
+	}
+
+	// Create stream from file data
+	stream := NewStream(data)
+	return NewDestinationFromStream(stream, crypto)
 }
 
 func (dest *Destination) Copy() (newDest Destination) {
