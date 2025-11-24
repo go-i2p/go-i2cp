@@ -4,18 +4,15 @@ package go_i2cp
 
 import (
 	"crypto/dsa"
-	"encoding/base32"
-	"encoding/base64"
 	"hash"
 	"io"
 )
 
 // Crypto provides cryptographic operations for I2CP
+// Note: Base32/Base64 encoding migrated to github.com/go-i2p/common
+// SHA256 hashing now uses stdlib crypto/sha256 directly
 type Crypto struct {
-	b64    *base64.Encoding
-	b32    *base32.Encoding
 	rng    io.Reader
 	params dsa.Parameters
-	sh1    hash.Hash
-	sh256  hash.Hash
+	sh1    hash.Hash // SHA1 still used for legacy DSA operations
 }

@@ -4,9 +4,6 @@ import (
 	"crypto/dsa"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/sha256"
-	"encoding/base32"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"math/big"
@@ -15,11 +12,8 @@ import (
 // NewCrypto creates a new Crypto instance
 func NewCrypto() *Crypto {
 	c := &Crypto{
-		b64:   base64.StdEncoding,
-		b32:   base32.StdEncoding.WithPadding(base32.NoPadding),
-		rng:   rand.Reader,
 		sh1:   sha1.New(),
-		sh256: sha256.New(),
+                rng:   rand.Reader,
 	}
 	// Initialize DSA parameters on first use for performance
 	dsa.GenerateParameters(&c.params, c.rng, dsa.L1024N160)
@@ -279,38 +273,4 @@ func (c *Crypto) Random32() uint32 {
 	}
 	// Convert big-endian bytes to uint32
 	return uint32(bytes[0])<<24 | uint32(bytes[1])<<16 | uint32(bytes[2])<<8 | uint32(bytes[3])
-}
-
-func (c *Crypto) HashStream(algorithmTyp uint8, src *Stream) *Stream {
-	if algorithmTyp == HASH_SHA256 {
-		c.sh256.Reset()
-		return NewStream(c.sh256.Sum(src.Bytes()))
-	} else {
-		Fatal(tAG|FATAL, "Request of unsupported hash algorithm.")
-		return nil
-	}
-}
-
-func (c *Crypto) EncodeStream(algorithmTyp uint8, src *Stream) (dst *Stream) {
-	switch algorithmTyp {
-	case CODEC_BASE32:
-		dst = NewStream(make([]byte, c.b32.EncodedLen(src.Len())))
-		c.b32.Encode(dst.Bytes(), src.Bytes())
-	case CODEC_BASE64:
-		dst = NewStream(make([]byte, c.b64.EncodedLen(src.Len())))
-		c.b64.Encode(dst.Bytes(), src.Bytes())
-	}
-	return
-}
-
-func (c *Crypto) DecodeStream(algorithmTyp uint8, src *Stream) (dst *Stream, err error) {
-	switch algorithmTyp {
-	case CODEC_BASE32:
-		dst = NewStream(make([]byte, c.b32.DecodedLen(src.Len())))
-		_, err = c.b32.Decode(dst.Bytes(), src.Bytes())
-	case CODEC_BASE64:
-		dst = NewStream(make([]byte, c.b64.DecodedLen(src.Len())))
-		_, err = c.b64.Decode(dst.Bytes(), src.Bytes())
-	}
-	return
 }

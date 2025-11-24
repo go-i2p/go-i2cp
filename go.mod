@@ -11,6 +11,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/go-i2p/common v0.0.6 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/samber/lo v1.51.0 // indirect
 	github.com/samber/oops v1.19.0 // indirect

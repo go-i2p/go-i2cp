@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-i2p/common/base32"
 )
 
 type ClientProperty int
@@ -428,8 +430,9 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 		}
 		b32 = destination.b32
 	} else {
-		bits := c.crypto.EncodeStream(CODEC_BASE32, stream)
-		b32 = string(bits.Bytes()) + ".b32.i2p"
+		// Use common/base32 for I2P-specific base32 encoding
+		b32Encoded := base32.EncodeToString(stream.Bytes())
+		b32 = b32Encoded + ".b32.i2p"
 		Debug(TAG, "Could not resolve destination")
 	}
 	requestId = c.lookup[b32]
@@ -1347,17 +1350,18 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 		return 0, ErrInvalidDestination
 	}
 
-	in := NewStream(make([]byte, 0, 512))
 	if len(address) == b32Len {
 		Debug(TAG, "Lookup of b32 address detected, decode and use hash for faster lookup.")
 		host := address[:strings.Index(address, ".")]
-		in.Write([]byte(host))
+		// Use common/base32 to decode I2P base32 address
 		var decodeErr error
-		out, decodeErr = c.crypto.DecodeStream(CODEC_BASE32, in)
-		if decodeErr != nil || out.Len() == 0 {
+		var decodedBytes []byte
+		decodedBytes, decodeErr = base32.DecodeString(host)
+		if decodeErr != nil || len(decodedBytes) == 0 {
 			Warning(TAG, "Failed to decode hash of address '%s'", address)
 			return 0, fmt.Errorf("failed to decode b32 address: %w", decodeErr)
 		}
+		out = NewStream(decodedBytes)
 	}
 
 	lup = LookupEntry{address: address, session: session}
