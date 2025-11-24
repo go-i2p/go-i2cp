@@ -1,8 +1,6 @@
 package go_i2cp
 
 import (
-	"fmt"
-
 	"github.com/go-i2p/common/certificate"
 )
 
@@ -26,7 +24,7 @@ func NewCertificate(typ uint8) (cert Certificate) {
 	if err != nil {
 		// For null certificates, this should never error
 		// but we handle it gracefully
-		Error(fmt.Sprintf("%08x", tag), "Failed to create certificate: %v", err)
+		Error("Failed to create certificate: %v", err)
 		return Certificate{}
 	}
 	cert.cert = commonCert
@@ -55,7 +53,7 @@ func NewCertificateFromMessage(stream *Stream) (cert Certificate, err error) {
 
 	// Validation: null certificates must have zero length
 	if (certType != CERTIFICATE_NULL) && (length == 0) {
-		Fatal(fmt.Sprintf("%08x", CERTIFICATE|PROTOCOL), "Non-null certificates must have non-zero length.")
+		Fatal("Non-null certificates must have non-zero length.")
 		return
 	}
 

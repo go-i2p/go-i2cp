@@ -206,7 +206,7 @@ func (dest *Destination) generateB32() {
 	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
 	// If it fails, the b32 address will be incomplete, but this is logged for debugging
 	if err := dest.WriteToMessage(stream); err != nil {
-		Error(fmt.Sprintf("%08x", tag), "Failed to generate b32 address: %v", err)
+		Error("Failed to generate b32 address: %v", err)
 		return
 	}
 	// Use stdlib crypto/sha256 for hashing
@@ -214,7 +214,7 @@ func (dest *Destination) generateB32() {
 	// Use common/base32 for I2P-specific base32 encoding
 	b32Encoded := base32.EncodeToString(hash[:])
 	dest.b32 = b32Encoded + ".b32.i2p"
-	Debug(fmt.Sprintf("%08x", tag), "New destination %s", dest.b32)
+	Debug("New destination %s", dest.b32)
 }
 
 func (dest *Destination) generateB64() {
@@ -222,7 +222,7 @@ func (dest *Destination) generateB64() {
 	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
 	// If it fails, the b64 address will be incomplete, but this is logged for debugging
 	if err := dest.WriteToMessage(stream); err != nil {
-		Error(fmt.Sprintf("%08x", tag), "Failed to generate b64 address: %v", err)
+		Error("Failed to generate b64 address: %v", err)
 		return
 	}
 	if stream.Len() > 0 {

@@ -45,7 +45,7 @@ func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	dest, err := NewDestination(client.crypto)
 	if err != nil {
 		// Log error but continue with nil destination - will be handled later
-		Error(fmt.Sprintf("%08x", SESSION), "Failed to create destination for new session: %v", err)
+		Error("Failed to create destination for new session: %v", err)
 	}
 
 	sess.config = &SessionConfig{destination: dest}
@@ -71,7 +71,7 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 	}
 
 	// Use structured logging with session context
-	Debug(fmt.Sprintf("%08x", SESSION), "Sending message from session %d: protocol=%d, srcPort=%d, destPort=%d, nonce=%d",
+	Debug("Sending message from session %d: protocol=%d, srcPort=%d, destPort=%d, nonce=%d",
 		session.id, protocol, srcPort, destPort, nonce)
 
 	return session.client.msgSendMessage(session, destination, protocol, srcPort, destPort, payload, nonce, true)
@@ -117,11 +117,11 @@ func (session *Session) ReconfigureSession(properties map[string]string) error {
 		return fmt.Errorf("properties cannot be nil or empty")
 	}
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Reconfiguring session %d with %d properties", session.id, len(properties))
+	Debug("Reconfiguring session %d with %d properties", session.id, len(properties))
 
 	// Log each property for debugging
 	for key, value := range properties {
-		Debug(fmt.Sprintf("%08x", SESSION_CONFIG), "Reconfigure property: %s = %s", key, value)
+		Debug("Reconfigure property: %s = %s", key, value)
 	}
 
 	return session.client.msgReconfigureSession(session, properties, true)
@@ -182,7 +182,7 @@ func (session *Session) SetID(id uint16) {
 	defer session.mu.Unlock()
 	session.id = id
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Session ID set to %d", id)
+	Debug("Session ID set to %d", id)
 }
 
 // IsPrimary returns whether this is a primary session or subsession
@@ -200,7 +200,7 @@ func (session *Session) SetPrimary(isPrimary bool) {
 	defer session.mu.Unlock()
 	session.isPrimary = isPrimary
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Session %d primary status set to %t", session.id, isPrimary)
+	Debug("Session %d primary status set to %t", session.id, isPrimary)
 }
 
 // PrimarySession returns the primary session for this subsession
@@ -228,7 +228,7 @@ func (session *Session) SetPrimarySession(primary *Session) error {
 	session.primarySession = primary
 	session.isPrimary = false
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Session %d linked to primary session %d", session.id, primary.id)
+	Debug("Session %d linked to primary session %d", session.id, primary.id)
 	return nil
 }
 
@@ -243,14 +243,14 @@ func (session *Session) Close() error {
 		return fmt.Errorf("session already closed")
 	}
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Closing session %d", session.id)
+	Debug("Closing session %d", session.id)
 
 	// Send DestroySession message to router if client is connected
 	if session.client != nil && session.client.IsConnected() {
 		// Only send DestroySession for sessions that have been created by router
 		if session.id != 0 {
 			session.client.msgDestroySession(session, false)
-			Debug(fmt.Sprintf("%08x", SESSION), "Sent DestroySession message for session %d", session.id)
+			Debug("Sent DestroySession message for session %d", session.id)
 		}
 	}
 
@@ -294,11 +294,11 @@ func (session *Session) ClosedAt() time.Time {
 func (session *Session) handleContextCancellation(ctx context.Context) {
 	<-ctx.Done()
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Context cancelled for session %d: %v", session.id, ctx.Err())
+	Debug("Context cancelled for session %d: %v", session.id, ctx.Err())
 
 	// Close session on context cancellation
 	if err := session.Close(); err != nil {
-		Error(fmt.Sprintf("%08x", SESSION), "Failed to close session %d on context cancellation: %v", session.id, err)
+		Error("Failed to close session %d on context cancellation: %v", session.id, err)
 	}
 }
 
@@ -307,23 +307,23 @@ func (session *Session) handleContextCancellation(ctx context.Context) {
 func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16, payload *Stream) {
 	// Check if session is closed
 	if session.IsClosed() {
-		Warning(fmt.Sprintf("%08x", SESSION), "Ignoring message dispatch to closed session %d", session.id)
+		Warning("Ignoring message dispatch to closed session %d", session.id)
 		return
 	}
 
 	if session.callbacks == nil || session.callbacks.onMessage == nil {
-		Debug(fmt.Sprintf("%08x", SESSION), "No message callback registered for session %d", session.id)
+		Debug("No message callback registered for session %d", session.id)
 		return
 	}
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Dispatching message to session %d: protocol=%d, srcPort=%d, destPort=%d",
+	Debug("Dispatching message to session %d: protocol=%d, srcPort=%d, destPort=%d",
 		session.id, protocol, srcPort, destPort)
 
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				Error(fmt.Sprintf("%08x", SESSION), "Panic in message callback for session %d: %v", session.id, r)
+				Error("Panic in message callback for session %d: %v", session.id, r)
 			}
 		}()
 
@@ -344,23 +344,23 @@ func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16
 func (session *Session) dispatchDestination(requestId uint32, address string, destination *Destination) {
 	// Check if session is closed
 	if session.IsClosed() {
-		Warning(fmt.Sprintf("%08x", SESSION), "Ignoring destination dispatch to closed session %d", session.id)
+		Warning("Ignoring destination dispatch to closed session %d", session.id)
 		return
 	}
 
 	if session.callbacks == nil || session.callbacks.onDestination == nil {
-		Debug(fmt.Sprintf("%08x", SESSION), "No destination callback registered for session %d", session.id)
+		Debug("No destination callback registered for session %d", session.id)
 		return
 	}
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Dispatching destination lookup result to session %d: requestId=%d, address=%s",
+	Debug("Dispatching destination lookup result to session %d: requestId=%d, address=%s",
 		session.id, requestId, address)
 
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				Error(fmt.Sprintf("%08x", SESSION), "Panic in destination callback for session %d: %v", session.id, r)
+				Error("Panic in destination callback for session %d: %v", session.id, r)
 			}
 		}()
 
@@ -389,15 +389,15 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	// Log status change with structured logging
 	switch status {
 	case I2CP_SESSION_STATUS_CREATED:
-		Info(fmt.Sprintf("%08x", SESSION), "Session %d created at %v", session.id, session.created)
+		Info("Session %d created at %v", session.id, session.created)
 	case I2CP_SESSION_STATUS_DESTROYED:
-		Info(fmt.Sprintf("%08x", SESSION), "Session %d destroyed after %v", session.id, time.Since(session.created))
+		Info("Session %d destroyed after %v", session.id, time.Since(session.created))
 	case I2CP_SESSION_STATUS_UPDATED:
-		Info(fmt.Sprintf("%08x", SESSION), "Session %d configuration updated", session.id)
+		Info("Session %d configuration updated", session.id)
 	case I2CP_SESSION_STATUS_INVALID:
-		Error(fmt.Sprintf("%08x", SESSION), "Session %d marked as invalid", session.id)
+		Error("Session %d marked as invalid", session.id)
 	default:
-		Warning(fmt.Sprintf("%08x", SESSION), "Session %d received unknown status %d", session.id, status)
+		Warning("Session %d received unknown status %d", session.id, status)
 	}
 
 	if session.callbacks == nil || session.callbacks.onStatus == nil {
@@ -408,7 +408,7 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	callbackFunc := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				Error(fmt.Sprintf("%08x", SESSION), "Panic in status callback for session %d: %v", session.id, r)
+				Error("Panic in status callback for session %d: %v", session.id, r)
 			}
 		}()
 
@@ -429,25 +429,25 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMessageStatus, size, nonce uint32) {
 	// Check if session is closed
 	if session.IsClosed() {
-		Warning(fmt.Sprintf("%08x", SESSION), "Ignoring message status dispatch to closed session %d", session.id)
+		Warning("Ignoring message status dispatch to closed session %d", session.id)
 		return
 	}
 
 	if session.callbacks == nil || session.callbacks.onMessageStatus == nil {
-		Debug(fmt.Sprintf("%08x", SESSION), "No message status callback registered for session %d", session.id)
+		Debug("No message status callback registered for session %d", session.id)
 		return
 	}
 
 	// Log message status with detailed information
 	statusName := getMessageStatusName(uint8(status))
-	Debug(fmt.Sprintf("%08x", SESSION), "Dispatching message status to session %d: messageId=%d, status=%d (%s), size=%d, nonce=%d",
+	Debug("Dispatching message status to session %d: messageId=%d, status=%d (%s), size=%d, nonce=%d",
 		session.id, messageId, status, statusName, size, nonce)
 
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				Error(fmt.Sprintf("%08x", SESSION), "Panic in message status callback for session %d: %v", session.id, r)
+				Error("Panic in message status callback for session %d: %v", session.id, r)
 			}
 		}()
 
@@ -487,7 +487,7 @@ func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, sr
 	// Generate unique nonce for message tracking
 	nonce := session.client.crypto.Random32()
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Sending expiring message from session %d: protocol=%d, srcPort=%d, destPort=%d, flags=0x%04x, expiration=%ds, nonce=%d",
+	Debug("Sending expiring message from session %d: protocol=%d, srcPort=%d, destPort=%d, flags=0x%04x, expiration=%ds, nonce=%d",
 		session.id, protocol, srcPort, destPort, flags, expirationSeconds, nonce)
 
 	return session.client.msgSendMessageExpires(session, dest, protocol, srcPort, destPort, payload, nonce, flags, expirationSeconds, true)
@@ -539,7 +539,7 @@ func (session *Session) LookupDestination(address string, timeout time.Duration)
 	// Generate unique request ID
 	requestId := session.client.crypto.Random32()
 
-	Debug(fmt.Sprintf("%08x", SESSION), "Looking up destination from session %d: address=%s, requestId=%d, timeout=%v",
+	Debug("Looking up destination from session %d: address=%s, requestId=%d, timeout=%v",
 		session.id, address, requestId, timeout)
 
 	// Determine lookup type based on address format

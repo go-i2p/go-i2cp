@@ -91,7 +91,7 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 	bites := stream.Bytes()
 	rs = r.Bytes()
 	if len(rs) > 21 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "DSA digest r > 21 bytes")
+		Fatal("DSA digest r > 21 bytes")
 	} else if len(rs) > 20 {
 		copy(bites[:20], rs[len(rs)-20:])
 	} else if len(rs) == 20 {
@@ -101,7 +101,7 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 	}
 	ss = s.Bytes()
 	if len(ss) > 21 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "DSA digest r > 21 bytes")
+		Fatal("DSA digest r > 21 bytes")
 	} else if len(ss) > 20 {
 		copy(bites[20:], ss[len(ss)-20:])
 	} else if len(ss) == 20 {
@@ -115,7 +115,7 @@ func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
 // Verify Stream
 func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified bool, err error) {
 	if stream.Len() < 40 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Stream length < 40 bytes (signature length)")
+		Fatal("Stream length < 40 bytes (signature length)")
 		return false, fmt.Errorf("stream too short for signature verification")
 	}
 
@@ -140,12 +140,12 @@ func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified b
 // Write public signature key to stream
 func (c *Crypto) WritePublicSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 	if sgk.algorithmType != DSA_SHA1 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Failed to write unsupported signature keypair to stream.")
+		Fatal("Failed to write unsupported signature keypair to stream.")
 	}
 	var n int
 	n, err = stream.Write(sgk.pub.Y.Bytes())
 	if n != 128 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Failed to export signature because privatekey != 20 bytes")
+		Fatal("Failed to export signature because privatekey != 20 bytes")
 	}
 	return
 }
@@ -153,15 +153,15 @@ func (c *Crypto) WritePublicSignatureToStream(sgk *SignatureKeyPair, stream *Str
 // Write Signature keypair to stream
 func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 	if sgk == nil {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Error signature cannot be nil")
+		Fatal("Error signature cannot be nil")
 		return fmt.Errorf("Error, signature cannot be nil")
 	}
 	if stream == nil {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Error, stream cannot be nil")
+		Fatal("Error, stream cannot be nil")
 		return fmt.Errorf("Error, stream cannot be nil")
 	}
 	if sgk.algorithmType != DSA_SHA1 {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Failed to write unsupported signature keypair to stream.")
+		Fatal("Failed to write unsupported signature keypair to stream.")
 		return fmt.Errorf("Failed to write unsupported signature keypair to stream.")
 	}
 	err = stream.WriteUint32(sgk.algorithmType)
@@ -219,7 +219,7 @@ func (c *Crypto) SignatureKeyPairFromStream(stream *Stream) (sgk SignatureKeyPai
 		sgk.priv.Y.SetBytes(keys[20:])
 		sgk.pub.Y.SetBytes(keys[20:])
 	} else {
-		Fatal(fmt.Sprintf("%08x", tAG|FATAL), "Failed to read unsupported signature keypair from stream.")
+		Fatal("Failed to read unsupported signature keypair from stream.")
 	}
 	return
 }
@@ -232,7 +232,7 @@ func (c *Crypto) PublicKeyFromStream(keyType uint32, stream *Stream) (key *big.I
 		key.SetBytes(keyBytes)
 		return key, err
 	} else {
-		Fatal(fmt.Sprintf("%08x", CRYPTO), "Unknown signature algorithm")
+		Fatal("Unknown signature algorithm")
 		return nil, errors.New("Unknown signature algorithm")
 	}
 }
@@ -305,7 +305,7 @@ func (c *Crypto) Random32() uint32 {
 	if err != nil {
 		// Fallback to a simpler method if crypto/rand fails
 		// This should rarely happen in practice
-		Fatal(fmt.Sprintf("%08x", tAG|ERROR), "Failed to generate random uint32: %v", err)
+		Fatal("Failed to generate random uint32: %v", err)
 		return 0
 	}
 	// Convert big-endian bytes to uint32
