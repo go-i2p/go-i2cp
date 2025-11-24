@@ -28,6 +28,17 @@ func NewCrypto() *Crypto {
 
 // Sign a stream using the specified algorithm
 func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
+	// Use new DSA wrapper if available
+	if sgk.dsaKeyPair != nil {
+		signature, err := sgk.dsaKeyPair.Sign(stream.Bytes())
+		if err != nil {
+			return fmt.Errorf("failed to sign stream with DSA: %w", err)
+		}
+		stream.Write(signature)
+		return nil
+	}
+
+	// Fallback to legacy implementation for backward compatibility
 	var r, s *big.Int
 	out := NewStream(make([]byte, 40))
 	c.sh1.Reset()
@@ -76,12 +87,21 @@ func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified b
 		Fatal(tAG|FATAL, "Stream length < 40 bytes (signature length)")
 		return false, fmt.Errorf("stream too short for signature verification")
 	}
-	var r, s big.Int
+
 	message := stream.Bytes()[:stream.Len()-40]
-	digest := stream.Bytes()[stream.Len()-40:]
+	signature := stream.Bytes()[stream.Len()-40:]
+
+	// Use new DSA wrapper if available
+	if sgk.dsaKeyPair != nil {
+		verified = sgk.dsaKeyPair.Verify(message, signature)
+		return verified, nil
+	}
+
+	// Fallback to legacy implementation for backward compatibility
+	var r, s big.Int
 	// TODO not sure about this part...
-	r.SetBytes(digest[:20])
-	s.SetBytes(digest[20:])
+	r.SetBytes(signature[:20])
+	s.SetBytes(signature[20:])
 	verified = dsa.Verify(&sgk.pub, message, &r, &s)
 	return
 }
@@ -190,24 +210,43 @@ func (c *Crypto) PublicKeyFromStream(keyType uint32, stream *Stream) (key *big.I
 func (c *Crypto) SignatureKeygen(algorithmTyp uint32) (sgk SignatureKeyPair, err error) {
 	switch algorithmTyp {
 	case DSA_SHA1:
-		var pkey dsa.PrivateKey
-		pkey.G = c.params.G
-		pkey.Q = c.params.Q
-		pkey.P = c.params.P
-		err = dsa.GenerateKey(&pkey, c.rng)
-		sgk.priv = pkey
-		sgk.pub.G = pkey.G
-		sgk.pub.P = pkey.P
-		sgk.pub.Q = pkey.Q
-		sgk.pub.Y = pkey.Y
+		// Use new DSA wrapper from crypto package
+		dsaKp, err := c.DSASignatureKeygen()
+		if err != nil {
+			return sgk, fmt.Errorf("failed to generate DSA key pair: %w", err)
+		}
+
+		// Convert new DSAKeyPair to legacy SignatureKeyPair for backward compatibility
+		// This allows existing code to continue working while we migrate to the new types
 		sgk.algorithmType = DSA_SHA1
+		sgk.dsaKeyPair = dsaKp
+
+		// Also populate legacy fields for backward compatibility
+		// Extract raw bytes and reconstruct old big.Int format
+		privKeyBytes := dsaKp.PrivateKey()
+		pubKeyBytes := dsaKp.PublicKey()
+
+		// Initialize DSA parameters from crypto struct
+		sgk.priv.G = c.params.G
+		sgk.priv.Q = c.params.Q
+		sgk.priv.P = c.params.P
+		sgk.pub.G = c.params.G
+		sgk.pub.Q = c.params.Q
+		sgk.pub.P = c.params.P
+
+		// Set private key X from bytes
+		sgk.priv.X = new(big.Int)
+		sgk.priv.X.SetBytes(privKeyBytes)
+
+		// Set public key Y from bytes
+		sgk.pub.Y = new(big.Int)
+		sgk.pub.Y.SetBytes(pubKeyBytes)
+		sgk.priv.Y = sgk.pub.Y // Private key also stores public key Y
 	default:
 		err = fmt.Errorf("unsupported signature algorithm type: %d", algorithmTyp)
 	}
 	return
-}
-
-// Ed25519SignatureKeygen generates a new Ed25519 signature key pair
+} // Ed25519SignatureKeygen generates a new Ed25519 signature key pair
 func (c *Crypto) Ed25519SignatureKeygen() (*Ed25519KeyPair, error) {
 	return NewEd25519KeyPair()
 }
@@ -222,7 +261,12 @@ func (c *Crypto) ChaCha20Poly1305CipherKeygen() (*ChaCha20Poly1305Cipher, error)
 	return NewChaCha20Poly1305Cipher()
 }
 
-// Random32 generates a cryptographically secure random uint32 value
+// DSASignatureKeygen generates a new DSA signature key pair
+func (c *Crypto) DSASignatureKeygen() (*DSAKeyPair, error) {
+	return NewDSAKeyPair()
+}
+
+// Random32 generates a cryptographically secure random uint32.
 // Used for I2CP message nonces and request IDs per protocol specification
 func (c *Crypto) Random32() uint32 {
 	var bytes [4]byte

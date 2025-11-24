@@ -1,26 +1,37 @@
+// Migration Notes (November 24, 2025):
+// Migrated to use github.com/go-i2p/crypto/chacha20poly1305 package which provides
+// standardized ChaCha20-Poly1305 AEAD (Authenticated Encryption with Associated Data).
+//
+// Key Changes:
+// - ChaCha20Poly1305Cipher now wraps crypto/chacha20poly1305.AEAD
+// - NewChaCha20Poly1305Cipher() delegates to chacha20poly1305.GenerateKey() and NewAEAD()
+// - Encrypt/Decrypt maintain [nonce][ciphertext+tag] format for backward compatibility
+// - Crypto package separates tag from ciphertext; wrapper combines them for I2CP compatibility
+//
+// The crypto package uses explicit tag separation (AEAD standard), while I2CP traditionally
+// combines nonce+ciphertext+tag. The wrapper maintains I2CP format compatibility.
+
 package go_i2cp
 
 import (
-	"crypto/cipher"
-	"crypto/rand"
 	"fmt"
 
-	"golang.org/x/crypto/chacha20poly1305"
+	cryptoaead "github.com/go-i2p/crypto/chacha20poly1305"
 )
 
 // ChaCha20Poly1305Cipher provides authenticated encryption using ChaCha20-Poly1305
+// Wraps github.com/go-i2p/crypto/chacha20poly1305.AEAD
 type ChaCha20Poly1305Cipher struct {
 	algorithmType uint32
-	aead          cipher.AEAD
+	aead          *cryptoaead.AEAD
 	key           [32]byte
 }
 
 // NewChaCha20Poly1305Cipher creates a new ChaCha20-Poly1305 cipher with a random key
+// Delegates to github.com/go-i2p/crypto/chacha20poly1305.GenerateKey() and NewAEAD()
 func NewChaCha20Poly1305Cipher() (*ChaCha20Poly1305Cipher, error) {
-	var key [32]byte
-
-	// Generate random 256-bit key
-	_, err := rand.Read(key[:])
+	// Generate random 256-bit key using crypto package
+	key, err := cryptoaead.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ChaCha20-Poly1305 key: %w", err)
 	}
@@ -29,8 +40,9 @@ func NewChaCha20Poly1305Cipher() (*ChaCha20Poly1305Cipher, error) {
 }
 
 // NewChaCha20Poly1305CipherWithKey creates a new ChaCha20-Poly1305 cipher with the provided key
+// Delegates to github.com/go-i2p/crypto/chacha20poly1305.NewAEAD()
 func NewChaCha20Poly1305CipherWithKey(key [32]byte) (*ChaCha20Poly1305Cipher, error) {
-	aead, err := chacha20poly1305.New(key[:])
+	aead, err := cryptoaead.NewAEAD(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ChaCha20-Poly1305 AEAD: %w", err)
 	}
@@ -66,25 +78,31 @@ func ChaCha20Poly1305CipherFromStream(stream *Stream) (*ChaCha20Poly1305Cipher, 
 }
 
 // Encrypt encrypts plaintext with optional associated data using ChaCha20-Poly1305
+// Returns [nonce][ciphertext+tag] format for I2CP compatibility
+// Uses github.com/go-i2p/crypto/chacha20poly1305.AEAD.Encrypt()
 func (c *ChaCha20Poly1305Cipher) Encrypt(plaintext, additionalData []byte) ([]byte, error) {
 	if c.aead == nil {
 		return nil, fmt.Errorf("cipher not initialized")
 	}
 
-	// Generate random nonce
-	nonce := make([]byte, c.aead.NonceSize())
-	_, err := rand.Read(nonce)
+	// Generate random nonce using crypto package
+	nonce, err := cryptoaead.GenerateNonce()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	// Encrypt plaintext
-	ciphertext := c.aead.Seal(nil, nonce, plaintext, additionalData)
+	// Encrypt plaintext - crypto package returns separate ciphertext and tag
+	ciphertext, tag, err := c.aead.Encrypt(plaintext, additionalData, nonce[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt: %w", err)
+	}
 
-	// Prepend nonce to ciphertext for transmission
-	result := make([]byte, len(nonce)+len(ciphertext))
-	copy(result, nonce)
+	// Combine nonce, ciphertext, and tag for I2CP compatibility
+	// Format: [nonce][ciphertext][tag]
+	result := make([]byte, len(nonce)+len(ciphertext)+len(tag))
+	copy(result, nonce[:])
 	copy(result[len(nonce):], ciphertext)
+	copy(result[len(nonce)+len(ciphertext):], tag[:])
 
 	return result, nil
 }
@@ -110,22 +128,32 @@ func (c *ChaCha20Poly1305Cipher) EncryptStream(src, dst *Stream, additionalData 
 }
 
 // Decrypt decrypts ciphertext with optional associated data using ChaCha20-Poly1305
+// Expects [nonce][ciphertext+tag] format for I2CP compatibility
+// Uses github.com/go-i2p/crypto/chacha20poly1305.AEAD.Decrypt()
 func (c *ChaCha20Poly1305Cipher) Decrypt(ciphertext, additionalData []byte) ([]byte, error) {
 	if c.aead == nil {
 		return nil, fmt.Errorf("cipher not initialized")
 	}
 
-	nonceSize := c.aead.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, fmt.Errorf("ciphertext too short: need at least %d bytes for nonce", nonceSize)
+	nonceSize := cryptoaead.NonceSize
+	tagSize := cryptoaead.TagSize
+	minSize := nonceSize + tagSize
+
+	if len(ciphertext) < minSize {
+		return nil, fmt.Errorf("ciphertext too short: need at least %d bytes (nonce + tag)", minSize)
 	}
 
-	// Extract nonce and actual ciphertext
+	// Extract nonce, ciphertext, and tag from combined format
 	nonce := ciphertext[:nonceSize]
-	actualCiphertext := ciphertext[nonceSize:]
+	actualCiphertextWithTag := ciphertext[nonceSize:]
 
-	// Decrypt ciphertext
-	plaintext, err := c.aead.Open(nil, nonce, actualCiphertext, additionalData)
+	// Split ciphertext and tag
+	actualCiphertext := actualCiphertextWithTag[:len(actualCiphertextWithTag)-tagSize]
+	var tag [cryptoaead.TagSize]byte
+	copy(tag[:], actualCiphertextWithTag[len(actualCiphertext):])
+
+	// Decrypt using crypto package - pass tag separately
+	plaintext, err := c.aead.Decrypt(actualCiphertext, tag[:], additionalData, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt: %w", err)
 	}
@@ -186,16 +214,10 @@ func (c *ChaCha20Poly1305Cipher) AlgorithmType() uint32 {
 
 // NonceSize returns the nonce size used by the cipher
 func (c *ChaCha20Poly1305Cipher) NonceSize() int {
-	if c.aead == nil {
-		return chacha20poly1305.NonceSize // Return standard size even if not initialized
-	}
-	return c.aead.NonceSize()
+	return cryptoaead.NonceSize
 }
 
 // Overhead returns the authentication tag overhead
 func (c *ChaCha20Poly1305Cipher) Overhead() int {
-	if c.aead == nil {
-		return chacha20poly1305.Overhead // Return standard overhead even if not initialized
-	}
-	return c.aead.Overhead()
+	return cryptoaead.TagSize
 }
