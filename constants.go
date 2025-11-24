@@ -1,5 +1,16 @@
 package go_i2cp
 
+// I2CP Protocol Constants
+//
+// This file contains constants defined by the I2CP specification for the
+// I2P Control Protocol. I2CP is a lower-level protocol for managing sessions,
+// leases, and message routing between I2P clients and routers.
+//
+// Note: This library focuses solely on I2CP. Higher-level application protocols
+// such as streaming (protocol 6) and datagram (protocol 17/18) are intentionally
+// NOT defined here as they are built on top of I2CP, not part of the I2CP spec.
+// Applications using I2CP can define their own protocol identifiers as needed.
+
 // I2CP Client Constants
 // Moved from: client.go
 const (
@@ -83,14 +94,6 @@ const (
 // Router Capabilities Constants
 // Moved from: client.go
 const ROUTER_CAN_HOST_LOOKUP uint32 = 1
-
-// Protocol Constants
-// Moved from: client.go
-const (
-	PROTOCOL_STREAMING    = 6
-	PROTOCOL_DATAGRAM     = 17
-	PROTOCOL_RAW_DATAGRAM = 18
-)
 
 // Host Lookup Type Constants
 // Moved from: client.go
