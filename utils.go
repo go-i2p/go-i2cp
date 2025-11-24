@@ -40,7 +40,7 @@ func LogInit(level int) {
 }
 
 // Debug logs a debug message with optional arguments
-func Debug(tags string, message string, args ...interface{}) {
+func Debug(tags, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Debug(message)
 		return
@@ -49,7 +49,7 @@ func Debug(tags string, message string, args ...interface{}) {
 }
 
 // Info logs an info message with optional arguments
-func Info(tags string, message string, args ...interface{}) {
+func Info(tags, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -58,7 +58,7 @@ func Info(tags string, message string, args ...interface{}) {
 }
 
 // Warning logs a warning message with optional arguments
-func Warning(tags string, message string, args ...interface{}) {
+func Warning(tags, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -67,7 +67,7 @@ func Warning(tags string, message string, args ...interface{}) {
 }
 
 // Error logs an error message with optional arguments
-func Error(tags string, message string, args ...interface{}) {
+func Error(tags, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Error(message)
 		return
@@ -76,7 +76,7 @@ func Error(tags string, message string, args ...interface{}) {
 }
 
 // Fatal logs a fatal message with optional arguments
-func Fatal(tags string, message string, args ...interface{}) {
+func Fatal(tags, message string, args ...interface{}) {
 	os.Setenv("WARNFAIL_I2P", "true")
 	if len(args) == 0 {
 		logInstance.Error(message)
