@@ -40,7 +40,7 @@ func (tcp *Tcp) Connect() (err error) {
 		}
 		if err = tcp.conn.SetKeepAlive(true); err != nil {
 			// Non-fatal but should log
-			Warning(TCP, "Failed to set TCP keepalive for %s: %v", tcp.address, err)
+			Warning(fmt.Sprintf("%08x", TCP), "Failed to set TCP keepalive for %s: %v", tcp.address, err)
 		}
 	}
 	return nil
@@ -78,7 +78,7 @@ func (tcp *Tcp) CanRead() bool {
 		}
 		tcp.tlsConn.SetReadDeadline(time.Now())
 		if _, err := tcp.tlsConn.Read(one); err == io.EOF {
-			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())
+			Debug(fmt.Sprintf("%08x", TCP), "%s detected closed LAN connection", tcp.address.String())
 			defer tcp.Disconnect()
 			return false
 		} else {
@@ -92,7 +92,7 @@ func (tcp *Tcp) CanRead() bool {
 		}
 		tcp.conn.SetReadDeadline(time.Now())
 		if _, err := tcp.conn.Read(one); err == io.EOF {
-			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())
+			Debug(fmt.Sprintf("%08x", TCP), "%s detected closed LAN connection", tcp.address.String())
 			defer tcp.Disconnect()
 			return false
 		} else {

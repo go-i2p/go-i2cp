@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -15,9 +16,9 @@ var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
 // Logging utility functions
 // Moved from: logger.go
 
-// LogInit initializes the logger with callbacks and level
-// TODO filter
-func LogInit(callbacks *LoggerCallbacks, level int) {
+// LogInit initializes the logger with the specified level
+// Deprecated: Use github.com/go-i2p/logger directly for new code
+func LogInit(level int) {
 	// Initialize go-i2p/logger
 	logger.InitializeGoI2PLogger()
 
@@ -39,7 +40,7 @@ func LogInit(callbacks *LoggerCallbacks, level int) {
 }
 
 // Debug logs a debug message with optional arguments
-func Debug(tags LoggerTags, message string, args ...interface{}) {
+func Debug(tags string, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Debug(message)
 		return
@@ -48,7 +49,7 @@ func Debug(tags LoggerTags, message string, args ...interface{}) {
 }
 
 // Info logs an info message with optional arguments
-func Info(tags LoggerTags, message string, args ...interface{}) {
+func Info(tags string, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -57,7 +58,7 @@ func Info(tags LoggerTags, message string, args ...interface{}) {
 }
 
 // Warning logs a warning message with optional arguments
-func Warning(tags LoggerTags, message string, args ...interface{}) {
+func Warning(tags string, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -66,7 +67,7 @@ func Warning(tags LoggerTags, message string, args ...interface{}) {
 }
 
 // Error logs an error message with optional arguments
-func Error(tags LoggerTags, message string, args ...interface{}) {
+func Error(tags string, message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Error(message)
 		return
@@ -75,7 +76,7 @@ func Error(tags LoggerTags, message string, args ...interface{}) {
 }
 
 // Fatal logs a fatal message with optional arguments
-func Fatal(tags LoggerTags, message string, args ...interface{}) {
+func Fatal(tags string, message string, args ...interface{}) {
 	os.Setenv("WARNFAIL_I2P", "true")
 	if len(args) == 0 {
 		logInstance.Error(message)
@@ -92,11 +93,11 @@ func ParseConfig(s string, cb func(string, string)) {
 	file, err := os.Open(s)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no such file") {
-			Error(SESSION_CONFIG, "%s", err.Error())
+			Error(fmt.Sprintf("%08x", SESSION_CONFIG), "%s", err.Error())
 		}
 		return
 	}
-	Debug(SESSION_CONFIG, "Parsing config file '%s'", s)
+	Debug(fmt.Sprintf("%08x", SESSION_CONFIG), "Parsing config file '%s'", s)
 	scan := bufio.NewScanner(file)
 	for scan.Scan() {
 		line := scan.Text()
@@ -107,7 +108,7 @@ func ParseConfig(s string, cb func(string, string)) {
 		cb(groups[1], groups[2])
 	}
 	if err := scan.Err(); err != nil {
-		Error(SESSION_CONFIG, "reading input from %s config %s", s, err.Error())
+		Error(fmt.Sprintf("%08x", SESSION_CONFIG), "reading input from %s config %s", s, err.Error())
 	}
 }
 

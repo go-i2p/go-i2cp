@@ -48,7 +48,6 @@ var defaultProperties = map[string]string{
 }
 
 type Client struct {
-	logger          *LoggerCallbacks // TODO idk wat this is for
 	callbacks       *ClientCallBacks
 	properties      map[string]string
 	tcp             Tcp
@@ -76,7 +75,7 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c = new(Client)
 	c.callbacks = callbacks
 	c.crypto = NewCrypto()
-	LogInit(nil, ERROR)
+	LogInit(ERROR)
 	c.outputStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
 	c.messageStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
 	c.setDefaultProperties()
@@ -100,7 +99,7 @@ func (c *Client) setDefaultProperties() {
 		conf = defaultConfigFile
 	}
 	config := home + conf
-	Debug(CLIENT, "Loading config file %s", config)
+	Debug(fmt.Sprintf("%08x", CLIENT), "Loading config file %s", config)
 	ParseConfig(config, c.SetProperty)
 }
 
@@ -114,7 +113,7 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 	lenc := send.Len()
 	_ = lenc
 	if queue {
-		Debug(PROTOCOL, "Putting %d bytes message on the output queue.", send.Len())
+		Debug(fmt.Sprintf("%08x", PROTOCOL), "Putting %d bytes message on the output queue.", send.Len())
 		c.lock.Lock()
 		c.outputQueue = append(c.outputQueue, send)
 		c.lock.Unlock()
@@ -135,25 +134,25 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 		return fmt.Errorf("no data received from router")
 	}
 	if err != nil {
-		Error(PROTOCOL, "Failed to receive message header: %s", err.Error())
+		Error(fmt.Sprintf("%08x", PROTOCOL), "Failed to receive message header: %s", err.Error())
 		return err
 	}
 
 	length, err = firstFive.ReadUint32()
 	if err != nil {
-		Error(PROTOCOL, "Failed to read message length: %s", err.Error())
+		Error(fmt.Sprintf("%08x", PROTOCOL), "Failed to read message length: %s", err.Error())
 		return err
 	}
 
 	msgType, err = firstFive.ReadByte()
 	if err != nil {
-		Error(PROTOCOL, "Failed to read message type: %s", err.Error())
+		Error(fmt.Sprintf("%08x", PROTOCOL), "Failed to read message type: %s", err.Error())
 		return err
 	}
 
 	// Enhanced message length validation with type-specific handling
 	if msgType == I2CP_MSG_SET_DATE && length > 0xffff {
-		Fatal(PROTOCOL, "Unexpected response for SetDate message, check that your router SSL settings match the ~/.i2cp.conf configuration")
+		Fatal(fmt.Sprintf("%08x", PROTOCOL), "Unexpected response for SetDate message, check that your router SSL settings match the ~/.i2cp.conf configuration")
 		return fmt.Errorf("invalid SetDate message length: %d", length)
 	}
 
@@ -169,13 +168,13 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	}
 
 	if length > maxAllowedLength {
-		Error(PROTOCOL, "Message length %d exceeds maximum allowed %d for message type %d", length, maxAllowedLength, msgType)
+		Error(fmt.Sprintf("%08x", PROTOCOL), "Message length %d exceeds maximum allowed %d for message type %d", length, maxAllowedLength, msgType)
 		return fmt.Errorf("message too large: %d bytes (max %d for type %d)", length, maxAllowedLength, msgType)
 	}
 
 	// Validate expected message type if specified
 	if (typ != I2CP_MSG_ANY) && (msgType != typ) {
-		Error(PROTOCOL, "Expected message type %d, received %d", typ, msgType)
+		Error(fmt.Sprintf("%08x", PROTOCOL), "Expected message type %d, received %d", typ, msgType)
 		return fmt.Errorf("unexpected message type: expected %d, got %d", typ, msgType)
 	}
 
@@ -191,11 +190,11 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 
 			i, err = c.tcp.Receive(tempBuffer)
 			if err != nil {
-				Error(PROTOCOL, "Failed to receive message body: %s", err.Error())
+				Error(fmt.Sprintf("%08x", PROTOCOL), "Failed to receive message body: %s", err.Error())
 				return err
 			}
 			if i == 0 {
-				Error(PROTOCOL, "Connection closed while reading message body")
+				Error(fmt.Sprintf("%08x", PROTOCOL), "Connection closed while reading message body")
 				return fmt.Errorf("connection closed during message receive")
 			}
 
@@ -206,7 +205,7 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 			messageBody.Write(receivedData)
 			totalReceived += i
 
-			Debug(PROTOCOL, "Received %d/%d bytes of message body", totalReceived, length)
+			Debug(fmt.Sprintf("%08x", PROTOCOL), "Received %d/%d bytes of message body", totalReceived, length)
 		}
 
 		// Reset stream position for message processing
@@ -219,7 +218,7 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 		stream.Reset()
 	}
 
-	Debug(PROTOCOL, "Received message type %d with %d bytes", msgType, length)
+	Debug(fmt.Sprintf("%08x", PROTOCOL), "Received message type %d with %d bytes", msgType, length)
 
 	if dispatch {
 		c.onMessage(msgType, stream)
@@ -262,12 +261,12 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 	case I2CP_MSG_BLINDING_INFO:
 		c.onMsgBlindingInfo(stream)
 	default:
-		Info(TAG, "%s", "recieved unhandled i2cp message.")
+		Info(fmt.Sprintf("%08x", TAG), "%s", "recieved unhandled i2cp message.")
 	}
 }
 
 func (c *Client) onMsgSetDate(stream *Stream) {
-	Debug(TAG|PROTOCOL, "Received SetDate message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received SetDate message.")
 	var err error
 	c.router.date, err = stream.ReadUint64()
 	var verLength uint8
@@ -275,9 +274,9 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 	version := make([]byte, verLength)
 	_, err = stream.Read(version)
 	c.router.version = parseVersion(string(version))
-	Debug(TAG|PROTOCOL, "Router version %s, date %d", string(version), c.router.date)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Router version %s, date %d", string(version), c.router.date)
 	if err != nil {
-		Error(TAG|PROTOCOL, "Could not read SetDate correctly data")
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Could not read SetDate correctly data")
 	}
 	if c.router.version.compare(Version{major: 0, minor: 9, micro: 10, qualifier: 0}) >= 0 {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
@@ -286,16 +285,16 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 
 func (c *Client) onMsgDisconnect(stream *Stream) {
 	var err error
-	Debug(TAG|PROTOCOL, "Received Disconnect message")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received Disconnect message")
 	// size, err = stream.ReadByte()
 	strbuf := make([]byte, stream.Len())
 	lens := stream.Len()
 	_ = lens
 	_, err = stream.Read(strbuf)
 
-	Debug(TAG|PROTOCOL, "Received Disconnect message with reason %s", string(strbuf))
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received Disconnect message with reason %s", string(strbuf))
 	if err != nil {
-		Error(TAG|PROTOCOL, "Could not read msgDisconnect correctly data")
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Could not read msgDisconnect correctly data")
 	}
 	if c.callbacks != nil && c.callbacks.onDisconnect != nil {
 		c.callbacks.onDisconnect(c, string(strbuf), nil)
@@ -309,13 +308,13 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	var sessionId, srcPort, destPort uint16
 	var messageId, payloadSize uint32
 	var err error
-	Debug(TAG|PROTOCOL, "Received PayloadMessage message")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received PayloadMessage message")
 	sessionId, err = stream.ReadUint16()
 	messageId, err = stream.ReadUint32()
 	_ = messageId // currently unused
 	session, ok := c.sessions[sessionId]
 	if !ok {
-		Fatal(TAG|FATAL, "Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
+		Fatal(fmt.Sprintf("%08x", TAG|FATAL), "Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
 	}
 	payloadSize, err = stream.ReadUint32()
 	_ = payloadSize // currently unused
@@ -323,53 +322,53 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	msgStream := bytes.NewBuffer(stream.Bytes())
 	_, err = stream.Read(testHeader[:])
 	if testHeader != gzipHeader {
-		Warning(TAG, "Payload validation failed, skipping payload")
+		Warning(fmt.Sprintf("%08x", TAG), "Payload validation failed, skipping payload")
 		return
 	}
 	payload := bytes.NewBuffer(make([]byte, 0xffff))
 	var decompress io.ReadCloser
 	decompress, err = zlib.NewReader(msgStream)
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to create zlib reader for message payload: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to create zlib reader for message payload: %v", err)
 		return
 	}
 	_, err = io.Copy(payload, decompress)
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to decompress message payload: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to decompress message payload: %v", err)
 		decompress.Close()
 		return
 	}
 	if err = decompress.Close(); err != nil {
-		Error(TAG|PROTOCOL, "Failed to close decompressor: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to close decompressor: %v", err)
 		return
 	}
 	if payload.Len() > 0 {
 		// finish reading header
 		// skip gzip flags
 		if _, err = stream.ReadByte(); err != nil {
-			Error(TAG|PROTOCOL, "Failed to read gzip flags from payload header: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read gzip flags from payload header: %v", err)
 			return
 		}
 		if srcPort, err = stream.ReadUint16(); err != nil {
-			Error(TAG|PROTOCOL, "Failed to read source port from payload header: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read source port from payload header: %v", err)
 			return
 		}
 		if destPort, err = stream.ReadUint16(); err != nil {
-			Error(TAG|PROTOCOL, "Failed to read dest port from payload header: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read dest port from payload header: %v", err)
 			return
 		}
 		if _, err = stream.ReadByte(); err != nil {
-			Error(TAG|PROTOCOL, "Failed to read protocol byte from payload header: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read protocol byte from payload header: %v", err)
 			return
 		}
 		if protocol, err = stream.ReadByte(); err != nil {
-			Error(TAG|PROTOCOL, "Failed to read protocol from payload header: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read protocol from payload header: %v", err)
 			return
 		}
-		Debug(TAG|PROTOCOL, "Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
 		session.dispatchMessage(protocol, srcPort, destPort, &Stream{payload})
 	} else {
-		Debug(TAG|PROTOCOL, "Empty payload received for session %d", sessionId)
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Empty payload received for session %d", sessionId)
 	}
 }
 
@@ -378,41 +377,41 @@ func (c *Client) onMsgStatus(stream *Stream) {
 	var sessionId uint16
 	var messageId, size, nonce uint32
 	var err error
-	Debug(TAG|PROTOCOL, "Received MessageStatus message")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received MessageStatus message")
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session ID from MessageStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session ID from MessageStatus: %v", err)
 		return
 	}
 	messageId, err = stream.ReadUint32()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read message ID from MessageStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read message ID from MessageStatus: %v", err)
 		return
 	}
 	status, err = stream.ReadByte()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read status from MessageStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read status from MessageStatus: %v", err)
 		return
 	}
 	size, err = stream.ReadUint32()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read size from MessageStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read size from MessageStatus: %v", err)
 		return
 	}
 	nonce, err = stream.ReadUint32()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read nonce from MessageStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read nonce from MessageStatus: %v", err)
 		return
 	}
-	Debug(TAG|PROTOCOL, "Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
 
 	// Find session and dispatch status if available
 	sess := c.sessions[sessionId]
 	if sess != nil {
 		// TODO: Add dispatchMessageStatus callback to Session when message tracking is implemented
-		Debug(TAG|PROTOCOL, "MessageStatus for session %d: message %d status %d", sessionId, messageId, status)
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "MessageStatus for session %d: message %d status %d", sessionId, messageId, status)
 	} else {
-		Warning(TAG|PROTOCOL, "MessageStatus received for unknown session %d", sessionId)
+		Warning(fmt.Sprintf("%08x", TAG|PROTOCOL), "MessageStatus received for unknown session %d", sessionId)
 	}
 }
 
@@ -422,25 +421,25 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 	var lup LookupEntry
 	var err error
 	var requestId uint32
-	Debug(TAG|PROTOCOL, "Received DestReply message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received DestReply message.")
 	if stream.Len() != 32 {
 		destination, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
-			Fatal(TAG|FATAL, "Failed to construct destination from stream")
+			Fatal(fmt.Sprintf("%08x", TAG|FATAL), "Failed to construct destination from stream")
 		}
 		b32 = destination.b32
 	} else {
 		// Use common/base32 for I2P-specific base32 encoding
 		b32Encoded := base32.EncodeToString(stream.Bytes())
 		b32 = b32Encoded + ".b32.i2p"
-		Debug(TAG, "Could not resolve destination")
+		Debug(fmt.Sprintf("%08x", TAG), "Could not resolve destination")
 	}
 	requestId = c.lookup[b32]
 	delete(c.lookup, b32)
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
 	if lup == (LookupEntry{}) {
-		Warning(TAG, "No sesssion for destination lookup of address '%s'", b32)
+		Warning(fmt.Sprintf("%08x", TAG), "No sesssion for destination lookup of address '%s'", b32)
 	} else {
 		lup.session.dispatchDestination(requestId, b32, destination)
 	}
@@ -450,23 +449,23 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 // DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
 // per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
 func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
-	Warning(TAG, "Received deprecated ReceiveMessageBeginMessage - fastReceive mode should be used")
+	Warning(fmt.Sprintf("%08x", TAG), "Received deprecated ReceiveMessageBeginMessage - fastReceive mode should be used")
 
 	// Read session ID
 	sessionID, err := stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read session ID from ReceiveMessageBegin: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read session ID from ReceiveMessageBegin: %v", err)
 		return
 	}
 
 	// Read message ID
 	messageID, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read message ID from ReceiveMessageBegin: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read message ID from ReceiveMessageBegin: %v", err)
 		return
 	}
 
-	Debug(TAG|PROTOCOL, "ReceiveMessageBegin for session %d, message %d (legacy mode)",
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "ReceiveMessageBegin for session %d, message %d (legacy mode)",
 		sessionID, messageID)
 
 	// In legacy slow-receive mode, the client would need to send an acknowledgment
@@ -478,23 +477,23 @@ func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
 // DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
 // per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
 func (c *Client) onMsgReceiveMessageEnd(stream *Stream) {
-	Warning(TAG, "Received deprecated ReceiveMessageEndMessage - fastReceive mode should be used")
+	Warning(fmt.Sprintf("%08x", TAG), "Received deprecated ReceiveMessageEndMessage - fastReceive mode should be used")
 
 	// Read session ID
 	sessionID, err := stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read session ID from ReceiveMessageEnd: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read session ID from ReceiveMessageEnd: %v", err)
 		return
 	}
 
 	// Read message ID
 	messageID, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read message ID from ReceiveMessageEnd: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read message ID from ReceiveMessageEnd: %v", err)
 		return
 	}
 
-	Debug(TAG|PROTOCOL, "ReceiveMessageEnd for session %d, message %d (legacy mode)",
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "ReceiveMessageEnd for session %d, message %d (legacy mode)",
 		sessionID, messageID)
 
 	// In legacy mode, this signals the end of a message transfer
@@ -505,12 +504,12 @@ func (c *Client) onMsgReceiveMessageEnd(stream *Stream) {
 // DEPRECATED: Use RequestVariableLeaseSetMessage (type 37) for clients 0.9.7+
 // per I2CP specification 0.6.x - 0.9.6 - fixed-expiration lease sets
 func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
-	Warning(TAG, "Received deprecated RequestLeaseSetMessage - converting to variable lease set format")
+	Warning(fmt.Sprintf("%08x", TAG), "Received deprecated RequestLeaseSetMessage - converting to variable lease set format")
 
 	// Read session ID
 	sessionID, err := stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read session ID from RequestLeaseSet: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read session ID from RequestLeaseSet: %v", err)
 		return
 	}
 
@@ -518,11 +517,11 @@ func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
 	// Read lease count
 	leaseCount, err := stream.ReadByte()
 	if err != nil {
-		Error(TAG, "Failed to read lease count from RequestLeaseSet: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read lease count from RequestLeaseSet: %v", err)
 		return
 	}
 
-	Debug(TAG|PROTOCOL, "RequestLeaseSet for session %d with %d leases (converting to variable format)",
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "RequestLeaseSet for session %d with %d leases (converting to variable format)",
 		sessionID, leaseCount)
 
 	// Convert to variable lease set format by calling the modern handler
@@ -535,62 +534,62 @@ func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
 // DEPRECATED: Never fully implemented in I2P, unsupported
 // per I2CP specification - reserved for abuse reporting (unused)
 func (c *Client) onMsgReportAbuse(stream *Stream) {
-	Warning(TAG, "Received deprecated ReportAbuseMessage - ignoring (never implemented)")
+	Warning(fmt.Sprintf("%08x", TAG), "Received deprecated ReportAbuseMessage - ignoring (never implemented)")
 
 	// This message type was reserved but never fully implemented in I2P
 	// Routers do not send this message, and clients should not expect it
 	// We simply log and ignore it for protocol completeness
-	Debug(TAG|PROTOCOL, "ReportAbuse message ignored - unsupported legacy feature")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "ReportAbuse message ignored - unsupported legacy feature")
 }
 
 // onMsgBandwithLimit handles BandwidthLimitsMessage (type 23) from router
 // per I2CP specification - reports bandwidth limits and burst parameters
 // Note: 9 fields are undefined in the spec and reserved for future use
 func (c *Client) onMsgBandwithLimit(stream *Stream) {
-	Debug(TAG|PROTOCOL, "Received BandwidthLimits message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received BandwidthLimits message.")
 	var err error
 
 	// Read client bandwidth limits (bytes/second)
 	clientInbound, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read client inbound limit: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read client inbound limit: %v", err)
 		return
 	}
 
 	clientOutbound, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read client outbound limit: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read client outbound limit: %v", err)
 		return
 	}
 
 	// Read router bandwidth limits (bytes/second)
 	routerInbound, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read router inbound limit: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read router inbound limit: %v", err)
 		return
 	}
 
 	routerInboundBurst, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read router inbound burst: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read router inbound burst: %v", err)
 		return
 	}
 
 	routerOutbound, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read router outbound limit: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read router outbound limit: %v", err)
 		return
 	}
 
 	routerOutboundBurst, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read router outbound burst: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read router outbound burst: %v", err)
 		return
 	}
 
 	burstTime, err := stream.ReadUint32()
 	if err != nil {
-		Error(TAG, "Failed to read burst time: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read burst time: %v", err)
 		return
 	}
 
@@ -600,12 +599,12 @@ func (c *Client) onMsgBandwithLimit(stream *Stream) {
 	for i := 0; i < 9; i++ {
 		undefined[i], err = stream.ReadUint32()
 		if err != nil {
-			Error(TAG, "Failed to read undefined field %d: %v", i, err)
+			Error(fmt.Sprintf("%08x", TAG), "Failed to read undefined field %d: %v", i, err)
 			return
 		}
 	}
 
-	Debug(TAG|PROTOCOL, "BandwidthLimits - Client: in=%d out=%d, Router: in=%d(%d) out=%d(%d) burst=%d",
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "BandwidthLimits - Client: in=%d out=%d, Router: in=%d(%d) out=%d(%d) burst=%d",
 		clientInbound, clientOutbound,
 		routerInbound, routerInboundBurst,
 		routerOutbound, routerOutboundBurst,
@@ -622,21 +621,21 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var sessionID uint16
 	var sessionStatus uint8
 	var err error
-	Debug(TAG|PROTOCOL, "Received SessionStatus message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received SessionStatus message.")
 	sessionID, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session ID from SessionStatus: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session ID from SessionStatus: %v", err)
 		return
 	}
 	sessionStatus, err = stream.ReadByte()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session status from SessionStatus for session %d: %v", sessionID, err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session status from SessionStatus for session %d: %v", sessionID, err)
 		return
 	}
-	Debug(TAG|PROTOCOL, "SessionStatus for session %d: status %d", sessionID, sessionStatus)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "SessionStatus for session %d: status %d", sessionID, sessionStatus)
 	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_CREATED {
 		if c.currentSession == nil {
-			Error(TAG, "Received session status created without waiting for it %p", c)
+			Error(fmt.Sprintf("%08x", TAG), "Received session status created without waiting for it %p", c)
 			return
 		}
 		c.currentSession.id = sessionID
@@ -645,7 +644,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	}
 	sess = c.sessions[sessionID]
 	if sess == nil {
-		Fatal(TAG|FATAL, "Session with id %d doesn't exists in client instance %p.", sessionID, c)
+		Fatal(fmt.Sprintf("%08x", TAG|FATAL), "Session with id %d doesn't exists in client instance %p.", sessionID, c)
 	} else {
 		sess.dispatchStatus(SessionStatus(sessionStatus))
 	}
@@ -657,31 +656,31 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	var sess *Session
 	var leases []*Lease
 	var err error
-	Debug(TAG|PROTOCOL, "Received RequestVariableLeaseSet message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received RequestVariableLeaseSet message.")
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session ID from RequestVariableLeaseSet: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session ID from RequestVariableLeaseSet: %v", err)
 		return
 	}
 	tunnels, err = stream.ReadByte()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
 		return
 	}
 	sess = c.sessions[sessionId]
 	if sess == nil {
-		Error(TAG|PROTOCOL, "Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
 		return
 	}
 	leases = make([]*Lease, tunnels)
 	for i := uint8(0); i < tunnels; i++ {
 		leases[i], err = NewLeaseFromStream(stream)
 		if err != nil {
-			Error(TAG|PROTOCOL, "Failed to parse lease %d/%d for session %d: %v", i+1, tunnels, sessionId, err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to parse lease %d/%d for session %d: %v", i+1, tunnels, sessionId, err)
 			return
 		}
 	}
-	Debug(TAG|PROTOCOL, "Parsed %d leases for session %d", tunnels, sessionId)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Parsed %d leases for session %d", tunnels, sessionId)
 	c.msgCreateLeaseSet(sess, tunnels, leases, true)
 }
 
@@ -693,22 +692,22 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	var dest *Destination
 	var lup LookupEntry
 	var err error
-	Debug(TAG|PROTOCOL, "Received HostReply message.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received HostReply message.")
 
 	// Parse message fields
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session ID from HostReply: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session ID from HostReply: %v", err)
 		return
 	}
 	requestId, err = stream.ReadUint32()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read request ID from HostReply: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read request ID from HostReply: %v", err)
 		return
 	}
 	result, err = stream.ReadByte()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read result code from HostReply: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read result code from HostReply: %v", err)
 		return
 	}
 
@@ -716,19 +715,19 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	if result == 0 {
 		dest, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
-			Error(TAG|PROTOCOL, "Failed to parse destination from HostReply: %v", err)
+			Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to parse destination from HostReply: %v", err)
 			return
 		}
-		Debug(TAG|PROTOCOL, "HostReply lookup succeeded for request %d", requestId)
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "HostReply lookup succeeded for request %d", requestId)
 	} else {
 		// Lookup failed - log the error code
-		Debug(TAG|PROTOCOL, "HostReply lookup failed for request %d with result code %d", requestId, result)
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "HostReply lookup failed for request %d with result code %d", requestId, result)
 	}
 
 	// Find session
 	sess = c.sessions[sessionId]
 	if sess == nil {
-		Error(TAG|PROTOCOL, "Session with id %d doesn't exist for HostReply", sessionId)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Session with id %d doesn't exist for HostReply", sessionId)
 		return
 	}
 
@@ -737,7 +736,7 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	delete(c.lookupReq, requestId)
 
 	if lup.address == "" {
-		Warning(TAG|PROTOCOL, "No lookup entry found for request ID %d", requestId)
+		Warning(fmt.Sprintf("%08x", TAG|PROTOCOL), "No lookup entry found for request ID %d", requestId)
 		return
 	}
 
@@ -752,30 +751,30 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 	var sess *Session
 	var err error
 
-	Debug(TAG|PROTOCOL, "Received ReconfigureSessionMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received ReconfigureSessionMessage")
 
 	// Read session ID
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read session ID from ReconfigureSessionMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read session ID from ReconfigureSessionMessage: %v", err)
 		return
 	}
 
 	// Find session
 	sess = c.sessions[sessionId]
 	if sess == nil {
-		Error(TAG|PROTOCOL, "ReconfigureSessionMessage received for unknown session ID %d", sessionId)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "ReconfigureSessionMessage received for unknown session ID %d", sessionId)
 		return
 	}
 
 	// Read properties mapping
 	properties, err := stream.ReadMapping()
 	if err != nil {
-		Error(TAG|PROTOCOL, "Failed to read properties mapping from ReconfigureSessionMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to read properties mapping from ReconfigureSessionMessage: %v", err)
 		return
 	}
 
-	Debug(TAG|PROTOCOL, "Reconfiguring session %d with %d properties", sessionId, len(properties))
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Reconfiguring session %d with %d properties", sessionId, len(properties))
 
 	// Apply properties to session configuration
 	if sess.config != nil {
@@ -784,9 +783,9 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 			prop := sess.config.propFromString(key)
 			if prop >= 0 && prop < NR_OF_SESSION_CONFIG_PROPERTIES {
 				sess.config.SetProperty(prop, value)
-				Debug(SESSION_CONFIG, "Updated session %d property %s = %s", sessionId, key, value)
+				Debug(fmt.Sprintf("%08x", SESSION_CONFIG), "Updated session %d property %s = %s", sessionId, key, value)
 			} else {
-				Warning(SESSION_CONFIG, "Unknown session property in reconfigure: %s", key)
+				Warning(fmt.Sprintf("%08x", SESSION_CONFIG), "Unknown session property in reconfigure: %s", key)
 			}
 		}
 
@@ -798,11 +797,11 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 // onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router (unusual - typically client sends)
 // per I2CP specification 0.9.39+ - modern LeaseSet creation with encryption support
 func (c *Client) onMsgCreateLeaseSet2(stream *Stream) {
-	Debug(TAG|PROTOCOL, "Received CreateLeaseSet2Message (unusual - typically client sends)")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received CreateLeaseSet2Message (unusual - typically client sends)")
 
 	// This message is typically sent by client to router, not vice versa
 	// Log and ignore
-	Warning(TAG, "Received CreateLeaseSet2Message from router - ignoring")
+	Warning(fmt.Sprintf("%08x", TAG), "Received CreateLeaseSet2Message from router - ignoring")
 }
 
 // onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
@@ -813,60 +812,60 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 	var authScheme uint8
 	var flags uint16
 
-	Debug(TAG|PROTOCOL, "Received BlindingInfoMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Received BlindingInfoMessage")
 
 	// Read session ID
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read session ID from BlindingInfoMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read session ID from BlindingInfoMessage: %v", err)
 		return
 	}
 
 	// Read authentication scheme
 	authScheme, err = stream.ReadByte()
 	if err != nil {
-		Error(TAG, "Failed to read auth scheme from BlindingInfoMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read auth scheme from BlindingInfoMessage: %v", err)
 		return
 	}
 
 	// Read flags
 	flags, err = stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read flags from BlindingInfoMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read flags from BlindingInfoMessage: %v", err)
 		return
 	}
 
 	// Read blinding parameter length
 	paramLen, err := stream.ReadUint16()
 	if err != nil {
-		Error(TAG, "Failed to read param length from BlindingInfoMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read param length from BlindingInfoMessage: %v", err)
 		return
 	}
 
 	// Read blinding parameters
 	blindingParams := make([]byte, paramLen)
 	if _, err = stream.Read(blindingParams); err != nil {
-		Error(TAG, "Failed to read blinding params from BlindingInfoMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to read blinding params from BlindingInfoMessage: %v", err)
 		return
 	}
 
-	Debug(TAG|PROTOCOL, "BlindingInfo for session %d: scheme %d, flags 0x%04x, params %d bytes",
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "BlindingInfo for session %d: scheme %d, flags 0x%04x, params %d bytes",
 		sessionId, authScheme, flags, paramLen)
 
 	// Find session
 	_, ok := c.sessions[sessionId]
 	if !ok {
-		Error(TAG, "Session with id %d doesn't exist for BlindingInfoMessage", sessionId)
+		Error(fmt.Sprintf("%08x", TAG), "Session with id %d doesn't exist for BlindingInfoMessage", sessionId)
 		return
 	}
 
 	// Store blinding info for encrypted LeaseSet creation
 	// TODO: Add blinding info fields to Session struct
-	Debug(TAG, "Blinding info received for encrypted LeaseSet - implementation pending")
+	Debug(fmt.Sprintf("%08x", TAG), "Blinding info received for encrypted LeaseSet - implementation pending")
 
 	// Notify session callback if available
 	// Note: This would require extending SessionCallbacks to include onBlindingInfo
-	Debug(TAG, "BlindingInfo callback not yet implemented")
+	Debug(fmt.Sprintf("%08x", TAG), "BlindingInfo callback not yet implemented")
 }
 
 func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Lease, queue bool) {
@@ -876,7 +875,7 @@ func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Le
 	var config *SessionConfig
 	var dest *Destination
 	var sgk *SignatureKeyPair
-	Debug(TAG|PROTOCOL, "Sending CreateLeaseSetMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending CreateLeaseSetMessage")
 	leaseSet = NewStream(make([]byte, 4096))
 	config = session.config
 	dest = config.destination
@@ -900,7 +899,7 @@ func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Le
 	c.crypto.SignStream(sgk, leaseSet)
 	c.messageStream.Write(leaseSet.Bytes())
 	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending CreateLeaseSet")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending CreateLeaseSet")
 	}
 }
 
@@ -913,7 +912,7 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	var dest *Destination
 	var sgk *SignatureKeyPair
 
-	Debug(TAG|PROTOCOL, "Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
 
 	leaseSet = NewStream(make([]byte, 4096))
 	config = session.config
@@ -943,7 +942,7 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	// Properties (mapping) - empty for basic implementation
 	emptyProps := make(map[string]string)
 	if err = leaseSet.WriteMapping(emptyProps); err != nil {
-		Error(TAG, "Failed to write properties to LeaseSet2: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Failed to write properties to LeaseSet2: %v", err)
 		return fmt.Errorf("failed to write properties: %w", err)
 	}
 
@@ -973,17 +972,17 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 
 	// Send message
 	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending CreateLeaseSet2Message: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending CreateLeaseSet2Message: %v", err)
 		return fmt.Errorf("failed to send CreateLeaseSet2Message: %w", err)
 	}
 
-	Debug(TAG|PROTOCOL, "Successfully sent CreateLeaseSet2Message for session %d", session.id)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Successfully sent CreateLeaseSet2Message for session %d", session.id)
 	return nil
 }
 
 func (c *Client) msgGetDate(queue bool) {
 	var err error
-	Debug(TAG|PROTOCOL, "Sending GetDateMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending GetDateMessage")
 	c.messageStream.Reset()
 	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
 	if len(c.properties["i2cp.username"]) > 0 {
@@ -994,34 +993,34 @@ func (c *Client) msgGetDate(queue bool) {
 		c.messageStream.WriteMapping(authInfo)
 	}
 	if err = c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending GetDateMessage")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending GetDateMessage")
 	}
 }
 
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
-	Debug(TAG|PROTOCOL, "Sending CreateSessionMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending CreateSessionMessage")
 	c.messageStream.Reset()
 	config.writeToMessage(c.messageStream, c.crypto)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending CreateSessionMessage.")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending CreateSessionMessage.")
 		return err
 	}
 	return err
 }
 
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
-	Debug(TAG|PROTOCOL, "Sending DestLookupMessage.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending DestLookupMessage.")
 	c.messageStream.Reset()
 	c.messageStream.Write(hash)
 	if err := c.sendMessage(I2CP_MSG_DEST_LOOKUP, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending DestLookupMessage.")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending DestLookupMessage.")
 	}
 }
 
 func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uint8, data []byte, queue bool) error {
 	var sessionId uint16
-	Debug(TAG|PROTOCOL, "Sending HostLookupMessage.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending HostLookupMessage.")
 	c.messageStream.Reset()
 	sessionId = sess.id
 	c.messageStream.WriteUint16(sessionId)
@@ -1032,7 +1031,7 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 		c.messageStream.Write(data)
 	}
 	if err := c.sendMessage(I2CP_MSG_HOST_LOOKUP, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending HostLookupMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending HostLookupMessage: %v", err)
 		return fmt.Errorf("failed to send HostLookupMessage: %w", err)
 	}
 	return nil
@@ -1041,45 +1040,45 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 // msgReconfigureSession sends ReconfigureSessionMessage (type 2) for dynamic session updates
 // per I2CP specification section 7.1 - implements runtime tunnel and crypto parameter changes
 func (c *Client) msgReconfigureSession(session *Session, properties map[string]string, queue bool) error {
-	Debug(TAG|PROTOCOL, "Sending ReconfigureSessionMessage for session %d with %d properties", session.id, len(properties))
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending ReconfigureSessionMessage for session %d with %d properties", session.id, len(properties))
 
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(session.id)
 
 	// Write properties mapping to message
 	if err := c.messageStream.WriteMapping(properties); err != nil {
-		Error(TAG|PROTOCOL, "Failed to write properties mapping to ReconfigureSessionMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG|PROTOCOL), "Failed to write properties mapping to ReconfigureSessionMessage: %v", err)
 		return fmt.Errorf("failed to write properties mapping: %w", err)
 	}
 
 	if err := c.sendMessage(I2CP_MSG_RECONFIGURE_SESSION, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending ReconfigureSessionMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending ReconfigureSessionMessage: %v", err)
 		return fmt.Errorf("failed to send ReconfigureSessionMessage: %w", err)
 	}
 
-	Debug(TAG|PROTOCOL, "Successfully sent ReconfigureSessionMessage for session %d", session.id)
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Successfully sent ReconfigureSessionMessage for session %d", session.id)
 	return nil
 }
 
 func (c *Client) msgGetBandwidthLimits(queue bool) {
-	Debug(TAG|PROTOCOL, "Sending GetBandwidthLimitsMessage.")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending GetBandwidthLimitsMessage.")
 	c.messageStream.Reset()
 	if err := c.sendMessage(I2CP_MSG_GET_BANDWIDTH_LIMITS, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending GetBandwidthLimitsMessage")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending GetBandwidthLimitsMessage")
 	}
 }
 
 func (c *Client) msgDestroySession(sess *Session, queue bool) {
-	Debug(TAG|PROTOCOL, "Sending DestroySessionMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending DestroySessionMessage")
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
 	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending DestroySessionMessage")
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending DestroySessionMessage")
 	}
 }
 
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
-	Debug(TAG|PROTOCOL, "Sending SendMessageMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending SendMessageMessage")
 	out := bytes.NewBuffer(make([]byte, 0xffff))
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
@@ -1095,7 +1094,7 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 	c.messageStream.Write(out.Bytes())
 	c.messageStream.WriteUint32(nonce)
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending SendMessageMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending SendMessageMessage: %v", err)
 		return fmt.Errorf("failed to send SendMessageMessage: %w", err)
 	}
 	return nil
@@ -1104,7 +1103,7 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 // msgSendMessageExpires sends SendMessageExpiresMessage (type 36) for enhanced delivery control
 // per I2CP specification 0.7.1+ - implements expiring message delivery with flags and timeout
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
-	Debug(TAG|PROTOCOL, "Sending SendMessageExpiresMessage")
+	Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending SendMessageExpiresMessage")
 	out := bytes.NewBuffer(make([]byte, 0xffff))
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
@@ -1122,7 +1121,7 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	c.messageStream.WriteUint16(flags)
 	c.messageStream.WriteUint64(expirationSeconds)
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
-		Error(TAG, "Error while sending SendMessageExpiresMessage: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error while sending SendMessageExpiresMessage: %v", err)
 		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
 	}
 	return nil
@@ -1143,7 +1142,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("context cancelled before connect: %w", err)
 	}
 
-	Info(0, "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
+	Info(fmt.Sprintf("%08x", 0), "Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
 
 	// Establish TCP connection
 	err := c.tcp.Connect()
@@ -1156,7 +1155,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	success := false
 	defer func() {
 		if !success {
-			Debug(PROTOCOL, "Connect failed - cleaning up TCP connection")
+			Debug(fmt.Sprintf("%08x", PROTOCOL), "Connect failed - cleaning up TCP connection")
 			c.tcp.Disconnect()
 			c.connected = false
 		}
@@ -1175,7 +1174,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to send protocol init: %w", err)
 	}
 
-	Debug(PROTOCOL, "Sending protocol byte message")
+	Debug(fmt.Sprintf("%08x", PROTOCOL), "Sending protocol byte message")
 
 	// Send GetDate message
 	c.msgGetDate(false)
@@ -1220,7 +1219,7 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 	}
 
 	if c.n_sessions == I2CP_MAX_SESSIONS_PER_CLIENT {
-		Warning(TAG, "Maximum number of session per client connection reached.")
+		Warning(fmt.Sprintf("%08x", TAG), "Maximum number of session per client connection reached.")
 		return ErrMaxSessionsReached
 	}
 
@@ -1288,7 +1287,7 @@ func (c *Client) ProcessIO(ctx context.Context) error {
 			return fmt.Errorf("context cancelled during output queue processing: %w", err)
 		}
 
-		Debug(TAG|PROTOCOL, "Sending %d bytes message", stream.Len())
+		Debug(fmt.Sprintf("%08x", TAG|PROTOCOL), "Sending %d bytes message", stream.Len())
 		ret, err := c.tcp.Send(stream)
 		if ret < 0 {
 			c.lock.Unlock()
@@ -1346,19 +1345,19 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
 
 	if !routerCanHostLookup && len(address) != b32Len {
-		Warning(TAG, "Address '%s' is not a b32 address %d.", address, len(address))
+		Warning(fmt.Sprintf("%08x", TAG), "Address '%s' is not a b32 address %d.", address, len(address))
 		return 0, ErrInvalidDestination
 	}
 
 	if len(address) == b32Len {
-		Debug(TAG, "Lookup of b32 address detected, decode and use hash for faster lookup.")
+		Debug(fmt.Sprintf("%08x", TAG), "Lookup of b32 address detected, decode and use hash for faster lookup.")
 		host := address[:strings.Index(address, ".")]
 		// Use common/base32 to decode I2P base32 address
 		var decodeErr error
 		var decodedBytes []byte
 		decodedBytes, decodeErr = base32.DecodeString(host)
 		if decodeErr != nil || len(decodedBytes) == 0 {
-			Warning(TAG, "Failed to decode hash of address '%s'", address)
+			Warning(fmt.Sprintf("%08x", TAG), "Failed to decode hash of address '%s'", address)
 			return 0, fmt.Errorf("failed to decode b32 address: %w", decodeErr)
 		}
 		out = NewStream(decodedBytes)
@@ -1402,7 +1401,7 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 //
 //	defer client.Close()
 func (c *Client) Close() error {
-	Info(TAG, "Closing client %p", c)
+	Info(fmt.Sprintf("%08x", TAG), "Closing client %p", c)
 
 	// Signal shutdown to all operations
 	select {
@@ -1417,7 +1416,7 @@ func (c *Client) Close() error {
 	if c.tcp.IsConnected() {
 		c.lock.Lock()
 		for sessionId, sess := range c.sessions {
-			Debug(TAG, "Destroying session %d during shutdown", sessionId)
+			Debug(fmt.Sprintf("%08x", TAG), "Destroying session %d during shutdown", sessionId)
 			c.msgDestroySession(sess, false)
 		}
 		c.lock.Unlock()
@@ -1432,25 +1431,25 @@ func (c *Client) Close() error {
 
 	select {
 	case <-done:
-		Debug(TAG, "All pending operations completed")
+		Debug(fmt.Sprintf("%08x", TAG), "All pending operations completed")
 	case <-time.After(5 * time.Second):
-		Warning(TAG, "Shutdown timeout - forcing close")
+		Warning(fmt.Sprintf("%08x", TAG), "Shutdown timeout - forcing close")
 	}
 
 	// Close TCP connection
 	c.tcp.Disconnect()
 	c.connected = false
 
-	Info(TAG, "Client %p closed successfully", c)
+	Info(fmt.Sprintf("%08x", TAG), "Client %p closed successfully", c)
 	return nil
 }
 
 // Disconnect is deprecated. Use Close() instead.
 // Kept for backward compatibility.
 func (c *Client) Disconnect() {
-	Info(TAG, "Disconnection client %p (deprecated - use Close instead)", c)
+	Info(fmt.Sprintf("%08x", TAG), "Disconnection client %p (deprecated - use Close instead)", c)
 	if err := c.Close(); err != nil && err != ErrClientClosed {
-		Error(TAG, "Error during disconnect: %v", err)
+		Error(fmt.Sprintf("%08x", TAG), "Error during disconnect: %v", err)
 	}
 }
 
