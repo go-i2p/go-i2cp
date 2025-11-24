@@ -1,5 +1,35 @@
 // Crypto struct definition
-// Moved from: crypto.go
+//
+// This file defines the Crypto type which serves as an I2CP protocol adapter
+// for coordinating cryptographic operations in I2CP message handling.
+//
+// IMPORTANT: This is NOT a cryptographic implementation. It is protocol glue code.
+//
+// Purpose:
+// The Crypto type coordinates various cryptographic operations required by the
+// I2CP protocol, including:
+//   - Random number generation for protocol operations
+//   - DSA parameters for legacy signature operations
+//   - SHA-1 hashing for legacy DSA compatibility
+//   - Stream-based message signing/verification
+//
+// Design Philosophy:
+// This struct exists to maintain state needed for I2CP protocol operations,
+// NOT to implement cryptography. All actual cryptographic work is delegated to:
+//   - Standard library (crypto/dsa, crypto/rand, crypto/sha1)
+//   - github.com/go-i2p/crypto for modern operations (Ed25519, X25519, ChaCha20-Poly1305)
+//
+// Migration Status:
+//  Base32/Base64 methods removed (migrated to github.com/go-i2p/common)
+//  SHA256 operations migrated to direct stdlib usage (crypto/sha256)
+//
+// Related Files:
+//   - crypto.go: I2CP-specific signing/verification functions
+//   - dsa.go: DSA wrapper delegating to github.com/go-i2p/crypto/dsa
+//   - ed25519.go: Ed25519 wrapper delegating to github.com/go-i2p/crypto/ed25519
+//   - x25519.go: X25519 wrapper delegating to github.com/go-i2p/crypto/curve25519
+//   - chacha20poly1305.go: AEAD wrapper delegating to github.com/go-i2p/crypto/chacha20poly1305
+
 package go_i2cp
 
 import (
@@ -8,11 +38,32 @@ import (
 	"io"
 )
 
-// Crypto provides cryptographic operations for I2CP
-// Note: Base32/Base64 encoding migrated to github.com/go-i2p/common
-// SHA256 hashing now uses stdlib crypto/sha256 directly
+// Crypto provides cryptographic operations for I2CP protocol message handling.
+//
+// This type is an I2CP protocol adapter that coordinates cryptographic operations
+// for I2CP messages. It maintains state required for protocol operations but
+// delegates all actual cryptographic work to specialized packages.
+//
+// Fields:
+//   - rng: Random number generator (crypto/rand.Reader) for protocol operations
+//   - params: DSA parameters for legacy DSA signature operations
+//   - sh1: SHA-1 hash for legacy DSA operations (required by DSA specification)
+//
+// Note: SHA-1 is only used for DSA signatures as required by the DSA algorithm
+// specification, not for general-purpose hashing. Modern operations use SHA-256
+// or more secure algorithms.
+//
+// Usage Example:
+//
+//	crypto := NewCrypto()
+//	signature, err := crypto.SignStream(keyPair, messageStream)
+//
+// See Also:
+//   - NewCrypto(): Constructor function in crypto.go
+//   - SignStream(): Stream-based signing in crypto.go
+//   - VerifyStream(): Stream-based verification in crypto.go
 type Crypto struct {
-	rng    io.Reader
-	params dsa.Parameters
-	sh1    hash.Hash // SHA1 still used for legacy DSA operations
+	rng    io.Reader      // Random number generator (crypto/rand.Reader)
+	params dsa.Parameters // DSA parameters for legacy signature operations
+	sh1    hash.Hash      // SHA1 for legacy DSA operations (required by DSA spec)
 }

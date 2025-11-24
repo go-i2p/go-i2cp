@@ -1,3 +1,45 @@
+// DSA (Digital Signature Algorithm) Implementation for I2CP
+//
+// Migration Notes (November 24, 2025):
+// Migrated to use github.com/go-i2p/crypto/dsa package which provides standardized
+// DSA signature operations following I2P cryptographic specifications.
+//
+// IMPORTANT: This file provides an I2CP protocol adapter wrapping the crypto package.
+// All cryptographic operations delegate to github.com/go-i2p/crypto/dsa.
+//
+// Key Changes:
+//   - DSAKeyPair wraps cryptodsa.DSAPrivateKey and cryptodsa.DSAPublicKey
+//   - NewDSAKeyPair() delegates to crypto package's Generate() method
+//   - Sign() delegates to crypto.Signer interface (NewSigner().Sign())
+//   - Verify() delegates to crypto.Verifier interface (NewVerifier().Verify())
+//   - Maintains backward compatible API - all existing tests pass
+//
+// Architecture:
+// The DSAKeyPair type serves as an I2CP-specific wrapper that:
+//   1. Provides familiar API for I2CP protocol operations
+//   2. Delegates all cryptographic work to github.com/go-i2p/crypto/dsa
+//   3. Maintains compatibility with existing I2CP message handlers
+//   4. Supports Stream-based serialization for I2CP protocol
+//
+// Migration Status (Phase 2.1 - Complete):
+//   All DSA operations migrated to github.com/go-i2p/crypto/dsa
+//   Wrapper pattern maintains backward compatibility
+//   Tests pass without modification
+//
+// Design Rationale:
+// DSA is a legacy algorithm maintained for compatibility with older I2P nodes.
+// New implementations should prefer Ed25519 for better security and performance.
+// This wrapper exists to:
+//   - Isolate I2CP protocol code from cryptographic implementation details
+//   - Enable future crypto package updates without I2CP code changes
+//   - Maintain consistent error handling across the I2CP protocol
+//
+// See Also:
+//   - github.com/go-i2p/crypto/dsa - DSA cryptographic implementation
+//   - ed25519.go - Recommended modern signature algorithm
+//   - crypto.go - I2CP protocol adapter for signing/verification
+//   - signature_key_pair.go - Legacy wrapper (deprecated)
+
 package go_i2cp
 
 import (
