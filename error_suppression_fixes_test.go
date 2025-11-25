@@ -240,7 +240,7 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 		},
 		{
 			name:            "valid b32 address format",
-			address:         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.b32.i2p", // 52 valid base32 chars + .b32.i2p
+			address:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.b32.i2p", // 52 valid base32 chars + .b32.i2p
 			mockDecodeError: false,
 			wantRequestId:   1, // Should return valid request ID
 			description:     "Should handle valid b32 address",

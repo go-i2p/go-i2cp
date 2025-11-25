@@ -84,7 +84,8 @@ func TestSessionSendMessage(t *testing.T) {
 	payload := NewStream([]byte("test message"))
 
 	// Test message sending (should not panic)
-	session.SendMessage(testDest, PROTOCOL_STREAMING, 1234, 5678, payload, 123456)
+	// Using protocol=6 as test value (not I2CP-defined, represents application-level protocol)
+	session.SendMessage(testDest, 6, 1234, 5678, payload, 123456)
 
 	// Verify no immediate errors (actual sending requires router connection)
 }
@@ -112,16 +113,18 @@ func TestSessionDispatchMessage(t *testing.T) {
 	session := NewSession(client, callbacks)
 
 	// Test message dispatch
+	// Using protocol=17 as test value (not I2CP-defined, represents application-level protocol)
+	const testProtocol uint8 = 17
 	testPayload := NewStream([]byte("test payload"))
-	session.dispatchMessage(PROTOCOL_DATAGRAM, 1111, 2222, testPayload)
+	session.dispatchMessage(testProtocol, 1111, 2222, testPayload)
 
 	// Verify callback was invoked with correct parameters
 	if !callbackInvoked {
 		t.Error("Message callback was not invoked")
 	}
 
-	if receivedProtocol != PROTOCOL_DATAGRAM {
-		t.Errorf("Expected protocol %d, got %d", PROTOCOL_DATAGRAM, receivedProtocol)
+	if receivedProtocol != testProtocol {
+		t.Errorf("Expected protocol %d, got %d", testProtocol, receivedProtocol)
 	}
 
 	if receivedSrcPort != 1111 {
@@ -233,7 +236,8 @@ func TestSessionWithNilCallbacks(t *testing.T) {
 	testPayload := NewStream([]byte("test"))
 
 	// These should not panic even with nil callbacks
-	session.dispatchMessage(PROTOCOL_STREAMING, 1, 2, testPayload)
+	// Using protocol=6 as test value (not I2CP-defined, represents application-level protocol)
+	session.dispatchMessage(6, 1, 2, testPayload)
 	session.dispatchDestination(1, "test", nil)
 	session.dispatchStatus(I2CP_SESSION_STATUS_CREATED)
 }

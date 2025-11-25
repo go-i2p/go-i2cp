@@ -1,11 +1,15 @@
 package go_i2cp
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
-	"strings"
+
+	"github.com/go-i2p/common/base32"
+	"github.com/go-i2p/common/base64"
 )
 
 type Destination struct {
@@ -84,29 +88,37 @@ func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination
 	return
 }
 
-func NewDestinationFromBase64(base64 string, crypto *Crypto) (dest *Destination, err error) {
+func NewDestinationFromBase64(base64Str string, crypto *Crypto) (dest *Destination, err error) {
 	/* Same as decode, except from a filesystem / URL friendly set of characters,
 	*  replacing / with ~, and + with -
 	 */
 	// see https://javadoc.freenetproject.org/freenet/support/Base64.html
-	if len(base64) == 0 {
+	if len(base64Str) == 0 {
 		err = errors.New("empty string")
 		return
 	}
-	var replaced string
-	// Convert from freenet to standard
-	replaced = strings.Replace(base64, "~", "/", -1)
-	replaced = strings.Replace(replaced, "-", "+", -1)
-	stream := NewStream([]byte(replaced))
-	var decoded *Stream
-	decoded, err = crypto.DecodeStream(CODEC_BASE64, stream)
-	return NewDestinationFromMessage(decoded, crypto)
+	// The base64 string uses freenet format (~ for /, - for +)
+	// common/base64 already uses I2P format which is the same as freenet
+	// So we can decode directly without replacement
+	var decoded []byte
+	decoded, err = base64.DecodeString(base64Str)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64 destination: %w", err)
+	}
+	stream := NewStream(decoded)
+	return NewDestinationFromMessage(stream, crypto)
 }
 
 func NewDestinationFromFile(file *os.File, crypto *Crypto) (*Destination, error) {
-	var stream Stream
-	stream.loadFile(file)
-	return NewDestinationFromStream(&stream, crypto)
+	// Read all data from file
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read destination file: %w", err)
+	}
+
+	// Create stream from file data
+	stream := NewStream(data)
+	return NewDestinationFromStream(stream, crypto)
 }
 
 func (dest *Destination) Copy() (newDest Destination) {
@@ -194,14 +206,15 @@ func (dest *Destination) generateB32() {
 	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
 	// If it fails, the b32 address will be incomplete, but this is logged for debugging
 	if err := dest.WriteToMessage(stream); err != nil {
-		Error(tag, "Failed to generate b32 address: %v", err)
+		Error("Failed to generate b32 address: %v", err)
 		return
 	}
-	hash := dest.crypto.HashStream(HASH_SHA256, stream)
-	b32 := dest.crypto.EncodeStream(CODEC_BASE32, hash)
-	dest.b32 = b32.String()
-	dest.b32 += ".b32.i2p"
-	Debug(tag, "New destination %s", dest.b32)
+	// Use stdlib crypto/sha256 for hashing
+	hash := sha256.Sum256(stream.Bytes())
+	// Use common/base32 for I2P-specific base32 encoding
+	b32Encoded := base32.EncodeToString(hash[:])
+	dest.b32 = b32Encoded + ".b32.i2p"
+	Debug("New destination %s", dest.b32)
 }
 
 func (dest *Destination) generateB64() {
@@ -209,14 +222,12 @@ func (dest *Destination) generateB64() {
 	// WriteToMessage errors are not expected in normal operation since we're writing to a memory buffer
 	// If it fails, the b64 address will be incomplete, but this is logged for debugging
 	if err := dest.WriteToMessage(stream); err != nil {
-		Error(tag, "Failed to generate b64 address: %v", err)
+		Error("Failed to generate b64 address: %v", err)
 		return
 	}
 	if stream.Len() > 0 {
 		fmt.Printf("Stream len %d \n", stream.Len())
 	}
-	b64B := dest.crypto.EncodeStream(CODEC_BASE64, stream)
-	replaced := strings.Replace(b64B.String(), "/", "~", -1)
-	replaced = strings.Replace(replaced, "/", "~", -1)
-	dest.b64 = replaced
+	// Use common/base64 for I2P-specific base64 encoding (already uses - and ~ chars)
+	dest.b64 = base64.EncodeToString(stream.Bytes())
 }

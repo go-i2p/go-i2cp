@@ -77,7 +77,7 @@ func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (confi
 	if file, err := os.Open(filename); err == nil {
 		config.destination, err = NewDestinationFromFile(file, crypto)
 		if err != nil {
-			Warning(SESSION_CONFIG, "Failed to load destination from file '%s', a new destination will be generated.", filename)
+			Warning("Failed to load destination from file '%s', a new destination will be generated.", filename)
 		}
 	}
 	if config.destination == nil {
@@ -118,7 +118,7 @@ func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
 		}
 		m[option] = config.properties[i]
 	}
-	Debug(SESSION_CONFIG, "Writing %d options to mapping table", len(m))
+	Debug("Writing %d options to mapping table", len(m))
 	return stream.WriteMapping(m)
 }
 
