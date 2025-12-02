@@ -1342,7 +1342,7 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 
 	var out *Stream
 	var lup LookupEntry
-	b32Len := 52 + 8
+	b32Len := 56 + 8 // base32-encoded 32-byte hash (56 chars with padding) + ".b32.i2p" (8 chars)
 	defaultTimeout := uint32(30000)
 	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
 
