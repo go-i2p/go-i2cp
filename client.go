@@ -736,6 +736,15 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	} else {
 		// Lookup failed - log the error code
 		Debug("HostReply lookup failed for request %d with result code %d", requestId, result)
+
+		// Check if blinding info is required for encrypted LeaseSet (I2CP 0.9.43+)
+		// Result codes 2, 3, 4 indicate the destination requires blinding parameters
+		if result == HOST_REPLY_PASSWORD_REQUIRED ||
+			result == HOST_REPLY_PRIVATE_KEY_REQUIRED ||
+			result == HOST_REPLY_PASSWORD_AND_KEY_REQUIRED {
+			Warning("Lookup failed: encrypted LeaseSet requires blinding info (result code %d) - %v",
+				result, ErrBlindingRequired)
+		}
 	}
 
 	// Find session
@@ -987,8 +996,16 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	c.messageStream.WriteUint16(session.id)
 
 	// Build LeaseSet2 stream with modern format
-	// LeaseSet2 Type (1 byte) - Standard LeaseSet2
-	leaseSet.WriteByte(LEASESET_TYPE_STANDARD)
+	// Determine LeaseSet2 type based on blinding configuration (I2CP 0.9.43+)
+	var leaseSetType uint8
+	if session.IsBlindingEnabled() {
+		leaseSetType = LEASESET_TYPE_ENCRYPTED // Encrypted LeaseSet2 with blinding
+		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
+	} else {
+		leaseSetType = LEASESET_TYPE_STANDARD // Standard LeaseSet2
+		Debug("Creating standard LeaseSet2 for session %d", session.id)
+	}
+	leaseSet.WriteByte(leaseSetType)
 
 	// Destination
 	dest.WriteToMessage(leaseSet)
@@ -1000,12 +1017,22 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	expires := uint64(c.router.date) + 600000 // 10 minutes in milliseconds
 	leaseSet.WriteUint64(expires)
 
-	// Flags (2 bytes) - no special flags for basic LeaseSet2
-	leaseSet.WriteUint16(0)
+	// Flags (2 bytes) - set offline signature flag if needed
+	var flags uint16 = 0
+	// Add blinding flags if blinding is enabled
+	if session.IsBlindingEnabled() {
+		flags |= session.BlindingFlags()
+	}
+	leaseSet.WriteUint16(flags)
 
-	// Properties (mapping) - empty for basic implementation
-	emptyProps := make(map[string]string)
-	if err = leaseSet.WriteMapping(emptyProps); err != nil {
+	// Properties (mapping) - include blinding info if enabled
+	properties := make(map[string]string)
+	if session.IsBlindingEnabled() {
+		// Include blinding parameters in properties per I2CP 0.9.43+ spec
+		properties["blinding.scheme"] = fmt.Sprintf("%d", session.BlindingScheme())
+		Debug("Added blinding scheme %d to LeaseSet2 properties", session.BlindingScheme())
+	}
+	if err = leaseSet.WriteMapping(properties); err != nil {
 		Error("Failed to write properties to LeaseSet2: %v", err)
 		return fmt.Errorf("failed to write properties: %w", err)
 	}
@@ -1026,6 +1053,22 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 		// End date (8 bytes) - 5 minutes from now
 		leaseEndDate := uint64(c.router.date) + 300000 // 5 minutes
 		leaseSet.WriteUint64(leaseEndDate)
+	}
+
+	// For encrypted LeaseSet2 with blinding, write blinding parameters after leases
+	// per I2CP 0.9.43+ specification
+	if session.IsBlindingEnabled() {
+		blindingParams := session.BlindingParams()
+		if len(blindingParams) > 0 {
+			// Write length-prefixed blinding parameters
+			leaseSet.WriteUint16(uint16(len(blindingParams)))
+			leaseSet.Write(blindingParams)
+			Debug("Added %d bytes of blinding parameters to LeaseSet2", len(blindingParams))
+		} else {
+			// No blinding parameters - write zero length
+			leaseSet.WriteUint16(0)
+			Debug("Blinding enabled but no parameters present, wrote zero-length")
+		}
 	}
 
 	// Signature - sign the entire LeaseSet2 with destination's signing key
