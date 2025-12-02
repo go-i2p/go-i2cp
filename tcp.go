@@ -25,6 +25,17 @@ var (
 )
 
 func ResolveAddr(address string) (net.Addr, error) {
+	// check if the address contains a scheme to extract.
+	// If it does not, determine if it is an IP:Port or a unix socket path.
+	if scheme, err := url.Parse(address); err != nil || scheme.Scheme == "" {
+		if _, _, err := net.SplitHostPort(address); err != nil {
+			// treat as unix socket path
+			address = "unix://" + address
+		} else {
+			// treat as tcp address
+			address = "tcp://" + address
+		}
+	}
 	// extract the scheme, host, and port
 	scheme, err := url.Parse(address)
 	if err != nil {
