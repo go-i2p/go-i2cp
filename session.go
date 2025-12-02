@@ -74,6 +74,9 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 	Debug("Sending message from session %d: protocol=%d, srcPort=%d, destPort=%d, nonce=%d",
 		session.id, protocol, srcPort, destPort, nonce)
 
+	// Track message for delivery status (ignore errors if already tracked)
+	_ = session.TrackMessage(nonce, destination, protocol, srcPort, destPort, uint32(payload.Len()), 0, 0)
+
 	return session.client.msgSendMessage(session, destination, protocol, srcPort, destPort, payload, nonce, true)
 }
 
@@ -259,6 +262,12 @@ func (session *Session) Close() error {
 		session.cancel()
 	}
 
+	// Clear pending messages
+	pendingCount := session.ClearPendingMessages()
+	if pendingCount > 0 {
+		Debug("Cleared %d pending messages for session %d", pendingCount, session.id)
+	}
+
 	// Mark as closed
 	session.closed = true
 	session.closedAt = time.Now()
@@ -433,6 +442,14 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 		return
 	}
 
+	// Complete tracked message if present
+	pending, wasTracked := session.CompleteMessage(nonce, status)
+	if wasTracked && pending != nil {
+		deliveryTime := pending.CompletedAt.Sub(pending.SentAt)
+		Debug("Message delivery completed for session %d: nonce=%d, delivery_time=%v",
+			session.id, nonce, deliveryTime)
+	}
+
 	if session.callbacks == nil || session.callbacks.OnMessageStatus == nil {
 		Debug("No message status callback registered for session %d", session.id)
 		return
@@ -566,6 +583,9 @@ func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, sr
 
 	Debug("Sending expiring message from session %d: protocol=%d, srcPort=%d, destPort=%d, flags=0x%04x, expiration=%ds, nonce=%d",
 		session.id, protocol, srcPort, destPort, flags, expirationSeconds, nonce)
+
+	// Track message for delivery status (ignore errors if already tracked)
+	_ = session.TrackMessage(nonce, dest, protocol, srcPort, destPort, uint32(payload.Len()), flags, expirationSeconds)
 
 	return session.client.msgSendMessageExpires(session, dest, protocol, srcPort, destPort, payload, nonce, flags, expirationSeconds, true)
 }
@@ -825,4 +845,124 @@ func (session *Session) IsBlindingEnabled() bool {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 	return session.blindingScheme != 0
+}
+
+// TrackMessage registers a message for delivery tracking
+// per I2CP specification - tracks messages from send to status callback (type 22)
+// Returns error if nonce is already being tracked
+func (session *Session) TrackMessage(nonce uint32, dest *Destination, protocol uint8, srcPort, destPort uint16, payloadSize uint32, flags uint16, expiration uint64) error {
+	session.messageMu.Lock()
+	defer session.messageMu.Unlock()
+
+	// Initialize map if needed
+	if session.pendingMessages == nil {
+		session.pendingMessages = make(map[uint32]*PendingMessage)
+	}
+
+	// Check for duplicate nonce
+	if _, exists := session.pendingMessages[nonce]; exists {
+		return fmt.Errorf("message with nonce %d is already being tracked", nonce)
+	}
+
+	// Create pending message
+	pending := &PendingMessage{
+		Nonce:       nonce,
+		Destination: dest,
+		Protocol:    protocol,
+		SrcPort:     srcPort,
+		DestPort:    destPort,
+		PayloadSize: payloadSize,
+		SentAt:      time.Now(),
+		Status:      0, // 0 indicates pending
+		Flags:       flags,
+		Expiration:  expiration,
+	}
+
+	session.pendingMessages[nonce] = pending
+	Debug("Tracking message for session %d: nonce=%d, protocol=%d, srcPort=%d, destPort=%d, size=%d",
+		session.id, nonce, protocol, srcPort, destPort, payloadSize)
+
+	return nil
+}
+
+// CompleteMessage marks a message as completed with the given status
+// per I2CP specification - called when MessageStatusMessage (type 22) is received
+// Returns the pending message and true if found, nil and false otherwise
+func (session *Session) CompleteMessage(nonce uint32, status SessionMessageStatus) (*PendingMessage, bool) {
+	session.messageMu.Lock()
+	defer session.messageMu.Unlock()
+
+	pending, exists := session.pendingMessages[nonce]
+	if !exists {
+		Debug("No pending message found for nonce %d in session %d", nonce, session.id)
+		return nil, false
+	}
+
+	// Update status and completion time
+	pending.Status = status
+	pending.CompletedAt = time.Now()
+
+	// Calculate delivery time
+	deliveryTime := pending.CompletedAt.Sub(pending.SentAt)
+	statusName := getMessageStatusName(status)
+	Debug("Completed message for session %d: nonce=%d, status=%d (%s), delivery_time=%v",
+		session.id, nonce, status, statusName, deliveryTime)
+
+	// Remove from pending map (message is no longer pending)
+	delete(session.pendingMessages, nonce)
+
+	return pending, true
+}
+
+// GetPendingMessage returns a pending message by nonce without completing it
+// per I2CP specification - used for status queries and debugging
+// Returns the pending message and true if found, nil and false otherwise
+func (session *Session) GetPendingMessage(nonce uint32) (*PendingMessage, bool) {
+	session.messageMu.RLock()
+	defer session.messageMu.RUnlock()
+
+	pending, exists := session.pendingMessages[nonce]
+	return pending, exists
+}
+
+// GetPendingMessages returns a snapshot of all pending messages
+// per I2CP specification - used for monitoring and cleanup
+// Returns a copy of the pending messages map to prevent external modification
+func (session *Session) GetPendingMessages() map[uint32]*PendingMessage {
+	session.messageMu.RLock()
+	defer session.messageMu.RUnlock()
+
+	// Return copy to prevent external modification
+	snapshot := make(map[uint32]*PendingMessage, len(session.pendingMessages))
+	for nonce, pending := range session.pendingMessages {
+		snapshot[nonce] = pending
+	}
+
+	return snapshot
+}
+
+// PendingMessageCount returns the number of messages awaiting status
+// per I2CP specification - used for monitoring queue depth
+func (session *Session) PendingMessageCount() int {
+	session.messageMu.RLock()
+	defer session.messageMu.RUnlock()
+
+	return len(session.pendingMessages)
+}
+
+// ClearPendingMessages removes all pending messages
+// per I2CP specification - called on session close or reset
+// Returns the number of messages that were pending
+func (session *Session) ClearPendingMessages() int {
+	session.messageMu.Lock()
+	defer session.messageMu.Unlock()
+
+	count := len(session.pendingMessages)
+	session.pendingMessages = make(map[uint32]*PendingMessage)
+
+	if count > 0 {
+		Debug("Cleared %d pending messages for session %d", count, session.id)
+	}
+
+	return count
 }
