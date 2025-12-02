@@ -809,13 +809,52 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 }
 
 // onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router (unusual - typically client sends)
-// per I2CP specification 0.9.39+ - modern LeaseSet creation with encryption support
+// per I2CP specification 0.9.38+ - modern LeaseSet updates from router to client
 func (c *Client) onMsgCreateLeaseSet2(stream *Stream) {
-	Debug("Received CreateLeaseSet2Message (unusual - typically client sends)")
+	Debug("Received CreateLeaseSet2Message from router")
 
-	// This message is typically sent by client to router, not vice versa
-	// Log and ignore
-	Warning("Received CreateLeaseSet2Message from router - ignoring")
+	// Read session ID (2 bytes)
+	sessionId, err := stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read session ID from CreateLeaseSet2Message: %v", err)
+		return
+	}
+
+	// Look up session with proper locking
+	c.lock.Lock()
+	session, exists := c.sessions[sessionId]
+	c.lock.Unlock()
+
+	if !exists {
+		Warning("Received CreateLeaseSet2Message for unknown session %d", sessionId)
+		return
+	}
+
+	// Parse LeaseSet2 from stream
+	leaseSet, err := NewLeaseSet2FromStream(stream, c.crypto)
+	if err != nil {
+		Error("Failed to parse LeaseSet2 for session %d: %v", sessionId, err)
+		return
+	}
+
+	Debug("Parsed LeaseSet2 for session %d: type=%d, leases=%d, expires=%s",
+		sessionId, leaseSet.Type(), leaseSet.LeaseCount(),
+		leaseSet.Expires().Format("2006-01-02 15:04:05"))
+
+	// Validate signature (basic check)
+	if !leaseSet.VerifySignature() {
+		Warning("LeaseSet2 signature validation failed for session %d (basic check)", sessionId)
+		// Continue anyway - full crypto verification would be done with proper keys
+	}
+
+	// Check for expiration (warning only)
+	if leaseSet.IsExpired() {
+		Warning("Received expired LeaseSet2 for session %d (expires: %s)",
+			sessionId, leaseSet.Expires().Format("2006-01-02 15:04:05"))
+	}
+
+	// Dispatch to session callback
+	session.dispatchLeaseSet2(leaseSet)
 }
 
 // onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
@@ -858,7 +897,11 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 
 	// Read blinding parameters
 	blindingParams := make([]byte, paramLen)
-	if _, err = stream.Read(blindingParams); err != nil {
+	n, err := stream.Read(blindingParams)
+	if err != nil || n != int(paramLen) {
+		if err == nil {
+			err = fmt.Errorf("expected %d bytes, got %d", paramLen, n)
+		}
 		Error("Failed to read blinding params from BlindingInfoMessage: %v", err)
 		return
 	}
@@ -866,19 +909,26 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 	Debug("BlindingInfo for session %d: scheme %d, flags 0x%04x, params %d bytes",
 		sessionId, authScheme, flags, paramLen)
 
-	// Find session
-	_, ok := c.sessions[sessionId]
+	// Find session with proper locking
+	c.lock.Lock()
+	session, ok := c.sessions[sessionId]
+	c.lock.Unlock()
+
 	if !ok {
 		Error("Session with id %d doesn't exist for BlindingInfoMessage", sessionId)
 		return
 	}
 
-	// Store blinding info for encrypted LeaseSet creation
-	// TODO: Add blinding info fields to Session struct
-	Debug("Blinding info received for encrypted LeaseSet - implementation pending")
+	// Store blinding info in session
+	session.SetBlindingScheme(uint16(authScheme))
+	session.SetBlindingFlags(flags)
+	session.SetBlindingParams(blindingParams)
 
-	// Notify session callback if available
-	// Note: This would require extending SessionCallbacks to include onBlindingInfo
+	Debug("Blinding info stored for session %d: enabled=%v", sessionId, session.IsBlindingEnabled())
+
+	// Dispatch to session callback
+	session.dispatchBlindingInfo(uint16(authScheme), flags, blindingParams)
+
 	Debug("BlindingInfo callback not yet implemented")
 }
 

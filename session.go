@@ -463,6 +463,83 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 	}
 }
 
+// dispatchLeaseSet2 dispatches LeaseSet2 updates to registered callbacks
+// per I2CP specification 0.9.38+ - handles CreateLeaseSet2Message (type 41) from router
+func (session *Session) dispatchLeaseSet2(leaseSet *LeaseSet2) {
+	// Check if session is closed
+	if session.IsClosed() {
+		Warning("Ignoring LeaseSet2 dispatch to closed session %d", session.id)
+		return
+	}
+
+	if session.callbacks == nil || session.callbacks.OnLeaseSet2 == nil {
+		Debug("No LeaseSet2 callback registered for session %d", session.id)
+		return
+	}
+
+	// Log LeaseSet2 details
+	Debug("Dispatching LeaseSet2 to session %d: type=%d, leases=%d, expires=%s, expired=%v",
+		session.id, leaseSet.Type(), leaseSet.LeaseCount(),
+		leaseSet.Expires().Format("2006-01-02 15:04:05"), leaseSet.IsExpired())
+
+	// Choose between sync and async callback execution
+	callbackFunc := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				Error("Panic in LeaseSet2 callback for session %d: %v", session.id, r)
+			}
+		}()
+
+		session.callbacks.OnLeaseSet2(session, leaseSet)
+	}
+
+	if session.syncCallbacks {
+		// Synchronous execution for testing
+		callbackFunc()
+	} else {
+		// Asynchronous execution for production to prevent blocking
+		go callbackFunc()
+	}
+}
+
+// dispatchBlindingInfo dispatches blinding information to the session callback
+// per I2CP specification 0.9.43+ - called when router provides blinding parameters
+func (session *Session) dispatchBlindingInfo(blindingScheme, blindingFlags uint16, blindingParams []byte) {
+	// Check if session is closed
+	if session.IsClosed() {
+		Warning("Ignoring BlindingInfo dispatch to closed session %d", session.id)
+		return
+	}
+
+	if session.callbacks == nil || session.callbacks.OnBlindingInfo == nil {
+		Debug("No BlindingInfo callback registered for session %d", session.id)
+		return
+	}
+
+	// Log blinding info details
+	Debug("Dispatching BlindingInfo to session %d: scheme=%d, flags=%d, params_len=%d",
+		session.id, blindingScheme, blindingFlags, len(blindingParams))
+
+	// Choose between sync and async callback execution
+	callbackFunc := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				Error("Panic in BlindingInfo callback for session %d: %v", session.id, r)
+			}
+		}()
+
+		session.callbacks.OnBlindingInfo(session, blindingScheme, blindingFlags, blindingParams)
+	}
+
+	if session.syncCallbacks {
+		// Synchronous execution for testing
+		callbackFunc()
+	} else {
+		// Asynchronous execution for production to prevent blocking
+		go callbackFunc()
+	}
+}
+
 // SendMessageExpires sends a message with expiration time and flags for delivery options
 // per I2CP specification 0.7.1+ - implements SendMessageExpiresMessage (type 36) for enhanced delivery control
 // Supports per-message reliability override and tag management
@@ -666,4 +743,86 @@ func getMessageStatusName(status uint8) string {
 	default:
 		return fmt.Sprintf("Unknown(%d)", status)
 	}
+}
+
+// BlindingScheme returns the current blinding cryptographic scheme
+// per I2CP specification 0.9.43+ - returns 0 if blinding is disabled
+func (session *Session) BlindingScheme() uint16 {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.blindingScheme
+}
+
+// SetBlindingScheme sets the blinding cryptographic scheme
+// per I2CP specification 0.9.43+ - use 0 to disable blinding
+func (session *Session) SetBlindingScheme(scheme uint16) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	session.blindingScheme = scheme
+}
+
+// BlindingFlags returns the current blinding flags
+// per I2CP specification 0.9.43+
+func (session *Session) BlindingFlags() uint16 {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.blindingFlags
+}
+
+// SetBlindingFlags sets the blinding flags
+// per I2CP specification 0.9.43+
+func (session *Session) SetBlindingFlags(flags uint16) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	session.blindingFlags = flags
+}
+
+// BlindingParams returns a copy of the current blinding parameters
+// per I2CP specification 0.9.43+ - returns nil if no parameters set
+func (session *Session) BlindingParams() []byte {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.blindingParams == nil {
+		return nil
+	}
+
+	// Return copy to prevent external modification
+	params := make([]byte, len(session.blindingParams))
+	copy(params, session.blindingParams)
+	return params
+}
+
+// SetBlindingParams sets the blinding parameters
+// per I2CP specification 0.9.43+ - stores a copy of the provided data
+func (session *Session) SetBlindingParams(params []byte) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if params == nil {
+		session.blindingParams = nil
+		return
+	}
+
+	// Store copy to prevent external modification
+	session.blindingParams = make([]byte, len(params))
+	copy(session.blindingParams, params)
+}
+
+// ClearBlinding clears all blinding parameters
+// per I2CP specification 0.9.43+ - resets to non-blinded state
+func (session *Session) ClearBlinding() {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	session.blindingScheme = 0
+	session.blindingFlags = 0
+	session.blindingParams = nil
+}
+
+// IsBlindingEnabled returns true if blinding is currently enabled
+// per I2CP specification 0.9.43+ - checks if scheme is non-zero
+func (session *Session) IsBlindingEnabled() bool {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.blindingScheme != 0
 }

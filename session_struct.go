@@ -30,6 +30,12 @@ type Session struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// Blinding support (I2CP 0.9.43+)
+	// Enables encrypted LeaseSet access with blinding parameters
+	blindingScheme uint16 // Blinding cryptographic scheme (0 = disabled)
+	blindingFlags  uint16 // Blinding flags per I2CP spec
+	blindingParams []byte // Scheme-specific blinding parameters
+
 	// Thread safety
 	mu sync.RWMutex
 
