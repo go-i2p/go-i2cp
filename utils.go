@@ -147,6 +147,11 @@ func parseIntWithDefault(s string, defaultValue int) int {
 		start = 1
 	}
 
+	// If string is just a minus sign, return default
+	if start >= len(s) {
+		return defaultValue
+	}
+
 	for i := start; i < len(s); i++ {
 		if s[i] < '0' || s[i] > '9' {
 			return defaultValue // Invalid character, return default
