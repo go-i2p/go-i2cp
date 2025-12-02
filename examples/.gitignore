@@ -1,6 +1,8 @@
 # Ignore compiled binaries in subdirectories
 context-usage/context-usage
 modern-crypto/modern-crypto
-
+encrypted-leaseset/encrypted-leaseset
+external-callbacks/external-callbacks
+tls-connection/tls-connection
 # Ignore test binaries
 *.test
