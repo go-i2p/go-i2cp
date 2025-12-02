@@ -24,6 +24,10 @@ const (
 	CLIENT_PROP_ROUTER_USE_TLS
 	CLIENT_PROP_USERNAME
 	CLIENT_PROP_PASSWORD
+	CLIENT_PROP_TLS_CERT_FILE
+	CLIENT_PROP_TLS_KEY_FILE
+	CLIENT_PROP_TLS_CA_FILE
+	CLIENT_PROP_TLS_INSECURE
 	NR_OF_I2CP_CLIENT_PROPERTIES
 )
 
@@ -42,7 +46,11 @@ var defaultProperties = map[string]string{
 	"i2cp.reduceIdleTime":            "",
 	"i2cp.reduceOnIdle":              "",
 	"i2cp.reduceQuantity":            "",
-	"i2cp.SSL":                       "",
+	"i2cp.SSL":                       "false",
+	"i2cp.SSL.certFile":              "",
+	"i2cp.SSL.keyFile":               "",
+	"i2cp.SSL.caFile":                "",
+	"i2cp.SSL.insecure":              "false",
 	"i2cp.tcp.host":                  "127.0.0.1",
 	"i2cp.tcp.port":                  "7654",
 }
@@ -89,7 +97,11 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 }
 
 func (c *Client) setDefaultProperties() {
-	c.properties = defaultProperties
+	// Create a copy of defaultProperties to avoid shared map reference
+	c.properties = make(map[string]string, len(defaultProperties))
+	for k, v := range defaultProperties {
+		c.properties[k] = v
+	}
 	home := os.Getenv("I2CP_HOME")
 	if len(home) == 0 {
 		home = ""
@@ -982,18 +994,72 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	return nil
 }
 
+// getAuthenticationMethod determines which authentication method is being used
+// based on the client's configuration properties.
+// Returns one of: AUTH_METHOD_NONE, AUTH_METHOD_USERNAME_PWD, or AUTH_METHOD_SSL_TLS
+func (c *Client) getAuthenticationMethod() uint8 {
+	// Check TLS authentication first (method 2)
+	if c.properties["i2cp.SSL"] == "true" {
+		return AUTH_METHOD_SSL_TLS
+	}
+
+	// Check username/password authentication (method 1)
+	if len(c.properties["i2cp.username"]) > 0 {
+		return AUTH_METHOD_USERNAME_PWD
+	}
+
+	// No authentication (method 0)
+	return AUTH_METHOD_NONE
+}
+
+// msgGetDate sends GetDateMessage (type 32) to initialize the I2CP protocol connection.
+// This message includes the client version and authentication information.
+// Per I2CP specification, authentication method is communicated via the properties mapping.
+//
+// Supported authentication methods:
+//   - Method 0 (none): No authentication
+//   - Method 1 (username/password): I2CP 0.9.11+ username/password auth
+//   - Method 2 (TLS): I2CP 0.8.3+ TLS certificate auth
 func (c *Client) msgGetDate(queue bool) {
 	var err error
 	Debug("Sending GetDateMessage")
 	c.messageStream.Reset()
 	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
-	if len(c.properties["i2cp.username"]) > 0 {
+
+	// Determine authentication method
+	authMethod := c.getAuthenticationMethod()
+
+	// Build authentication info mapping based on method
+	switch authMethod {
+	case AUTH_METHOD_USERNAME_PWD:
+		// Method 1: Username/password authentication (I2CP 0.9.11+)
 		authInfo := map[string]string{
 			"i2cp.username": c.properties["i2cp.username"],
 			"i2cp.password": c.properties["i2cp.password"],
 		}
 		c.messageStream.WriteMapping(authInfo)
+		Debug("Using username/password authentication (method 1)")
+
+	case AUTH_METHOD_SSL_TLS:
+		// Method 2: TLS certificate authentication (I2CP 0.8.3+)
+		// The TLS handshake has already occurred in Connect()
+		// Just indicate the authentication method to the router
+		authInfo := map[string]string{
+			"i2cp.auth.method": "2", // TLS certificate authentication
+		}
+		c.messageStream.WriteMapping(authInfo)
+		Debug("Using TLS certificate authentication (method 2)")
+
+	case AUTH_METHOD_NONE:
+		// Method 0: No authentication required
+		// Send empty mapping (no authentication info)
+		Debug("Using no authentication (method 0)")
+
+	default:
+		// Should never happen, but handle gracefully
+		Warning("Unknown authentication method %d, using no authentication", authMethod)
 	}
+
 	if err = c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
 		Error("Error while sending GetDateMessage")
 	}
@@ -1132,6 +1198,7 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 // Connect establishes a connection to the I2P router with context support.
 // The context can be used to cancel the connection attempt or set a timeout.
 // Implements proper error path cleanup with defer pattern per PLAN.md section 1.3.
+// Supports TLS connections per I2CP 0.8.3+ specification (authentication method 2).
 //
 // Example:
 //
@@ -1146,7 +1213,25 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	Info("Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
 
-	// Establish TCP connection
+	// Setup TLS if enabled (I2CP 0.8.3+ authentication method 2)
+	if c.properties["i2cp.SSL"] == "true" {
+		certFile := c.properties["i2cp.SSL.certFile"]
+		keyFile := c.properties["i2cp.SSL.keyFile"]
+		caFile := c.properties["i2cp.SSL.caFile"]
+		insecure := c.properties["i2cp.SSL.insecure"] == "true"
+
+		Debug("Configuring TLS: certFile=%s, keyFile=%s, caFile=%s, insecure=%v",
+			certFile, keyFile, caFile, insecure)
+
+		err := c.tcp.SetupTLS(certFile, keyFile, caFile, insecure)
+		if err != nil {
+			return fmt.Errorf("failed to setup TLS: %w", err)
+		}
+
+		Info("TLS configured successfully")
+	}
+
+	// Establish TCP/TLS connection
 	err := c.tcp.Connect()
 	if err != nil {
 		return fmt.Errorf("failed to connect TCP: %w", err)
@@ -1465,6 +1550,10 @@ func (c *Client) SetProperty(name, value string) {
 			c.tcp.SetProperty(TCP_PROP_PORT, c.properties[name])
 		case "i2cp.SSL":
 			c.tcp.SetProperty(TCP_PROP_USE_TLS, c.properties[name])
+		case "i2cp.SSL.certFile":
+			c.tcp.SetProperty(TCP_PROP_TLS_CLIENT_CERTIFICATE, c.properties[name])
+			// Note: keyFile, caFile, and insecure will be handled by tcp.SetupTLS()
+			// These properties are read directly from client.properties during Connect()
 		}
 	}
 }

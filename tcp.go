@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"time"
 )
 
@@ -69,6 +70,68 @@ func (tcp *Tcp) Init(routerAddress ...string) (err error) {
 	return
 }
 
+// SetupTLS configures TLS for the TCP connection per I2CP 0.8.3+ specification.
+// It loads client certificates, CA certificates, and configures TLS settings.
+// The insecure parameter allows skipping certificate verification (development only).
+//
+// Parameters:
+//   - certFile: Path to client certificate file (PEM format)
+//   - keyFile: Path to client private key file (PEM format)
+//   - caFile: Path to CA certificate file (PEM format, optional)
+//   - insecure: If true, skip certificate verification (NOT for production)
+//
+// Returns error if certificate loading fails or TLS configuration is invalid.
+func (tcp *Tcp) SetupTLS(certFile, keyFile, caFile string, insecure bool) error {
+	tcp.tlsConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12, // I2CP requires TLS 1.2+ for security
+	}
+
+	// Load client certificate if provided (for mutual TLS authentication)
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		tcp.tlsConfig.Certificates = []tls.Certificate{cert}
+		Debug("Loaded client certificate from %s", certFile)
+	}
+
+	// Load CA certificate if provided (for server certificate validation)
+	if caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to parse CA certificate from %s", caFile)
+		}
+		tcp.tlsConfig.RootCAs = caPool
+		Debug("Loaded CA certificate from %s", caFile)
+	} else {
+		// Use system CA pool if no custom CA provided
+		if roots, err := x509.SystemCertPool(); err == nil {
+			tcp.tlsConfig.RootCAs = roots
+			Debug("Using system CA certificate pool")
+		} else {
+			Warning("Failed to load system CA pool: %v", err)
+			// Create empty pool as fallback
+			tcp.tlsConfig.RootCAs = x509.NewCertPool()
+		}
+	}
+
+	// Configure insecure mode (development/testing only)
+	if insecure {
+		Warning("TLS certificate verification DISABLED - insecure mode active")
+		tcp.tlsConfig.InsecureSkipVerify = true
+	} else {
+		tcp.tlsConfig.InsecureSkipVerify = false
+	}
+
+	return nil
+}
+
 func (tcp *Tcp) Connect() (err error) {
 	if tcp.address == nil {
 		err := tcp.Init()
@@ -76,16 +139,47 @@ func (tcp *Tcp) Connect() (err error) {
 			return err
 		}
 	}
-	if USE_TLS {
-		roots, _ := x509.SystemCertPool()
-		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), &tls.Config{RootCAs: roots})
+
+	// Use TLS if configured via SetupTLS or USE_TLS flag
+	if tcp.tlsConfig != nil || USE_TLS {
+		// Use configured TLS settings if available
+		if tcp.tlsConfig == nil {
+			// Fallback to basic TLS config for backward compatibility
+			roots, _ := x509.SystemCertPool()
+			tcp.tlsConfig = &tls.Config{
+				RootCAs:    roots,
+				MinVersion: tls.VersionTLS12,
+			}
+			Debug("Using default TLS configuration (no SetupTLS called)")
+		}
+
+		Debug("Establishing TLS connection to %s", tcp.address.String())
+		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), tcp.tlsConfig)
+		if err != nil {
+			return fmt.Errorf("i2cp: failed to dial TLS connection to %s: %w", tcp.address, err)
+		}
+
+		// Verify TLS handshake completed successfully
+		if tlsConn, ok := tcp.conn.(*tls.Conn); ok {
+			if err := tlsConn.Handshake(); err != nil {
+				tcp.conn.Close()
+				tcp.conn = nil
+				return fmt.Errorf("i2cp: TLS handshake failed: %w", err)
+			}
+			state := tlsConn.ConnectionState()
+			Debug("TLS connection established: version=%s cipher=%s",
+				tls.VersionName(state.Version), tls.CipherSuiteName(state.CipherSuite))
+		}
 	} else {
+		// Plain TCP connection
+		Debug("Establishing TCP connection to %s", tcp.address.String())
 		tcp.conn, err = net.Dial("tcp", tcp.address.String())
 		if err != nil {
 			return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
 		}
 	}
-	return err
+
+	return nil
 }
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
@@ -141,5 +235,6 @@ func (tcp *Tcp) GetProperty(property TcpProperty) string {
 type Tcp struct {
 	address    net.Addr
 	conn       net.Conn
+	tlsConfig  *tls.Config
 	properties [NR_OF_TCP_PROPERTIES]string
 }
