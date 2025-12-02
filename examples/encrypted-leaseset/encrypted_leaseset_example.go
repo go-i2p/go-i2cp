@@ -68,7 +68,7 @@ func monitorLeaseSet2() error {
 			fmt.Printf("  - Expires: %s\n", leaseSet.Expires())
 			fmt.Printf("  - Published: %s\n", leaseSet.Published())
 			fmt.Printf("  - Lease count: %d\n", leaseSet.LeaseCount())
-			
+
 			if leaseSet.IsExpired() {
 				fmt.Println("  ⚠ WARNING: LeaseSet is expired!")
 			} else {
@@ -128,18 +128,18 @@ func handleBlindingInfo() error {
 			}
 			fmt.Printf("  - Blinding flags: 0x%04x\n", blindingFlags)
 			fmt.Printf("  - Blinding params: %d bytes\n", len(blindingParams))
-			
+
 			// CRITICAL: Store blinding parameters securely!
 			// These are required to:
 			// - Decrypt the encrypted LeaseSet
 			// - Allow clients to connect to this destination
 			// - Cannot be recovered if lost!
-			
+
 			storedScheme = blindingScheme
 			storedFlags = blindingFlags
 			storedBlindingParams = make([]byte, len(blindingParams))
 			copy(storedBlindingParams, blindingParams)
-			
+
 			// Encrypt blinding params with password (for secure storage)
 			password := "your-strong-password-here"
 			encrypted, err := encryptBlindingParams(blindingParams, password)
@@ -147,7 +147,7 @@ func handleBlindingInfo() error {
 				log.Printf("ERROR: Failed to encrypt blinding params: %v", err)
 				return
 			}
-			
+
 			fmt.Printf("  ✓ Encrypted blinding params: %d bytes\n", len(encrypted))
 			fmt.Println()
 			fmt.Println("  IMPORTANT: Save this encrypted data to secure storage!")
@@ -220,7 +220,7 @@ func encryptBlindingParams(params []byte, password string) ([]byte, error) {
 
 	// Encrypt: ciphertext = salt || nonce || encrypted_data || auth_tag
 	ciphertext := gcm.Seal(nil, nonce, params, nil)
-	
+
 	// Return: salt || nonce || ciphertext
 	result := make([]byte, 0, len(salt)+len(nonce)+len(ciphertext))
 	result = append(result, salt...)
