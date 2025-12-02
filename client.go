@@ -74,6 +74,13 @@ type Client struct {
 	crypto          *Crypto
 	shutdown        chan struct{}  // Channel to signal shutdown
 	wg              sync.WaitGroup // WaitGroup for goroutine tracking
+
+	// Reconnection support (I2CP enhancement for production reliability)
+	reconnectEnabled    bool          // Whether auto-reconnect is enabled
+	reconnectAttempts   int           // Current number of reconnection attempts
+	reconnectMaxRetries int           // Maximum number of reconnection attempts (0 = infinite)
+	reconnectBackoff    time.Duration // Initial backoff duration between reconnect attempts
+	reconnectMu         sync.Mutex    // Protects reconnection state
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -310,8 +317,30 @@ func (c *Client) onMsgDisconnect(stream *Stream) {
 	if err != nil {
 		Error("Could not read msgDisconnect correctly data")
 	}
+
+	// Invoke disconnect callback if registered
 	if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
 		c.callbacks.OnDisconnect(c, string(strbuf), nil)
+	}
+
+	// Mark as disconnected
+	c.connected = false
+
+	// Attempt auto-reconnect if enabled (don't block the message handler)
+	c.reconnectMu.Lock()
+	shouldReconnect := c.reconnectEnabled
+	c.reconnectMu.Unlock()
+
+	if shouldReconnect {
+		go func() {
+			Info("Connection lost, attempting auto-reconnect...")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			if err := c.autoReconnect(ctx); err != nil {
+				Error("Auto-reconnect failed: %v", err)
+			}
+		}()
 	}
 }
 
@@ -1645,6 +1674,108 @@ func (c *Client) Disconnect() {
 	if err := c.Close(); err != nil && err != ErrClientClosed {
 		Error("Error during disconnect: %v", err)
 	}
+}
+
+// EnableAutoReconnect enables automatic reconnection with exponential backoff.
+// When enabled, the client will automatically attempt to reconnect if the connection
+// is lost unexpectedly (not via explicit Close()).
+//
+// Parameters:
+//   - maxRetries: Maximum reconnection attempts (0 = infinite retries)
+//   - initialBackoff: Starting delay between reconnect attempts (doubles each time)
+//
+// The backoff strategy uses exponential backoff capped at 5 minutes.
+// Set maxRetries to 0 for infinite retry attempts.
+//
+// Example:
+//
+//	// Retry indefinitely with 1 second initial backoff
+//	client.EnableAutoReconnect(0, time.Second)
+//
+//	// Retry up to 5 times with 2 second initial backoff
+//	client.EnableAutoReconnect(5, 2*time.Second)
+func (c *Client) EnableAutoReconnect(maxRetries int, initialBackoff time.Duration) {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
+	c.reconnectEnabled = true
+	c.reconnectMaxRetries = maxRetries
+	c.reconnectBackoff = initialBackoff
+	c.reconnectAttempts = 0
+
+	Debug("Auto-reconnect enabled: maxRetries=%d, initialBackoff=%v", maxRetries, initialBackoff)
+}
+
+// DisableAutoReconnect disables automatic reconnection.
+func (c *Client) DisableAutoReconnect() {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
+	c.reconnectEnabled = false
+	Debug("Auto-reconnect disabled")
+}
+
+// IsAutoReconnectEnabled returns whether auto-reconnect is currently enabled.
+func (c *Client) IsAutoReconnectEnabled() bool {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+	return c.reconnectEnabled
+}
+
+// ReconnectAttempts returns the current number of reconnection attempts.
+func (c *Client) ReconnectAttempts() int {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+	return c.reconnectAttempts
+}
+
+// autoReconnect attempts to reconnect to the I2P router with exponential backoff.
+// This is called internally when a disconnect is detected and auto-reconnect is enabled.
+// It returns nil if reconnection succeeds, or an error if all retries are exhausted.
+func (c *Client) autoReconnect(ctx context.Context) error {
+	c.reconnectMu.Lock()
+	if !c.reconnectEnabled {
+		c.reconnectMu.Unlock()
+		return fmt.Errorf("auto-reconnect is not enabled")
+	}
+	maxRetries := c.reconnectMaxRetries
+	initialBackoff := c.reconnectBackoff
+	c.reconnectMu.Unlock()
+
+	Info("Starting auto-reconnect (maxRetries=%d, initialBackoff=%v)", maxRetries, initialBackoff)
+
+	// Use RetryWithBackoff for the reconnection logic
+	err := RetryWithBackoff(ctx, maxRetries, initialBackoff, func() error {
+		c.reconnectMu.Lock()
+		c.reconnectAttempts++
+		attempt := c.reconnectAttempts
+		c.reconnectMu.Unlock()
+
+		Info("Reconnection attempt %d", attempt)
+
+		// Attempt to connect
+		connectErr := c.Connect(ctx)
+		if connectErr != nil {
+			Warning("Reconnection attempt %d failed: %v", attempt, connectErr)
+			return connectErr
+		}
+
+		Info("Reconnection attempt %d succeeded!", attempt)
+
+		// Reset attempt counter on success
+		c.reconnectMu.Lock()
+		c.reconnectAttempts = 0
+		c.reconnectMu.Unlock()
+
+		return nil
+	})
+
+	if err != nil {
+		Error("Auto-reconnect failed after all retries: %v", err)
+		return fmt.Errorf("auto-reconnect failed: %w", err)
+	}
+
+	return nil
 }
 
 func (c *Client) SetProperty(name, value string) {
