@@ -311,7 +311,7 @@ func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16
 		return
 	}
 
-	if session.callbacks == nil || session.callbacks.onMessage == nil {
+	if session.callbacks == nil || session.callbacks.OnMessage == nil {
 		Debug("No message callback registered for session %d", session.id)
 		return
 	}
@@ -327,7 +327,7 @@ func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16
 			}
 		}()
 
-		session.callbacks.onMessage(session, protocol, srcPort, destPort, payload)
+		session.callbacks.OnMessage(session, protocol, srcPort, destPort, payload)
 	}
 
 	if session.syncCallbacks {
@@ -348,7 +348,7 @@ func (session *Session) dispatchDestination(requestId uint32, address string, de
 		return
 	}
 
-	if session.callbacks == nil || session.callbacks.onDestination == nil {
+	if session.callbacks == nil || session.callbacks.OnDestination == nil {
 		Debug("No destination callback registered for session %d", session.id)
 		return
 	}
@@ -364,7 +364,7 @@ func (session *Session) dispatchDestination(requestId uint32, address string, de
 			}
 		}()
 
-		session.callbacks.onDestination(session, requestId, address, destination)
+		session.callbacks.OnDestination(session, requestId, address, destination)
 	}
 
 	if session.syncCallbacks {
@@ -400,7 +400,7 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 		Warning("Session %d received unknown status %d", session.id, status)
 	}
 
-	if session.callbacks == nil || session.callbacks.onStatus == nil {
+	if session.callbacks == nil || session.callbacks.OnStatus == nil {
 		return
 	}
 
@@ -412,7 +412,7 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 			}
 		}()
 
-		session.callbacks.onStatus(session, status)
+		session.callbacks.OnStatus(session, status)
 	}
 
 	if session.syncCallbacks {
@@ -433,7 +433,7 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 		return
 	}
 
-	if session.callbacks == nil || session.callbacks.onMessageStatus == nil {
+	if session.callbacks == nil || session.callbacks.OnMessageStatus == nil {
 		Debug("No message status callback registered for session %d", session.id)
 		return
 	}
@@ -451,7 +451,7 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 			}
 		}()
 
-		session.callbacks.onMessageStatus(session, messageId, status, size, nonce)
+		session.callbacks.OnMessageStatus(session, messageId, status, size, nonce)
 	}
 
 	if session.syncCallbacks {

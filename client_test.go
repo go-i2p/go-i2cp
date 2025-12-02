@@ -20,11 +20,11 @@ func TestClient_CreateSession(t *testing.T) {
 	}
 
 	session := NewSession(client, SessionCallbacks{
-		onDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
+		OnDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
 		},
-		onStatus: func(session *Session, status SessionStatus) {
+		OnStatus: func(session *Session, status SessionStatus) {
 		},
-		onMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 		},
 	})
 	session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")

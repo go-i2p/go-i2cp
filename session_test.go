@@ -11,13 +11,13 @@ func TestNewSession(t *testing.T) {
 
 	// Define test callbacks
 	callbacks := SessionCallbacks{
-		onDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
+		OnDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
 			// Mock callback for testing
 		},
-		onStatus: func(session *Session, status SessionStatus) {
+		OnStatus: func(session *Session, status SessionStatus) {
 			// Mock callback for testing
 		},
-		onMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			// Mock callback for testing
 		},
 	}
@@ -101,7 +101,7 @@ func TestSessionDispatchMessage(t *testing.T) {
 	var receivedPayload *Stream
 
 	callbacks := SessionCallbacks{
-		onMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			callbackInvoked = true
 			receivedProtocol = protocol
 			receivedSrcPort = srcPort
@@ -151,7 +151,7 @@ func TestSessionDispatchDestination(t *testing.T) {
 	var receivedDest *Destination
 
 	callbacks := SessionCallbacks{
-		onDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
+		OnDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
 			callbackInvoked = true
 			receivedRequestId = requestId
 			receivedAddress = address
@@ -197,7 +197,7 @@ func TestSessionDispatchStatus(t *testing.T) {
 	var receivedStatus SessionStatus
 
 	callbacks := SessionCallbacks{
-		onStatus: func(session *Session, status SessionStatus) {
+		OnStatus: func(session *Session, status SessionStatus) {
 			callbackInvoked = true
 			receivedStatus = status
 		},
