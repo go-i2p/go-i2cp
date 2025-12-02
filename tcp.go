@@ -20,9 +20,7 @@ const (
 	NR_OF_TCP_PROPERTIES
 )
 
-var (
-	defaultRouterAddress = "127.0.0.1:7654"
-)
+var defaultRouterAddress = "127.0.0.1:7654"
 
 func ResolveAddr(address string) (net.Addr, error) {
 	// check if the address contains a scheme to extract.
