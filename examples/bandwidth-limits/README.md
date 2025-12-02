@@ -182,7 +182,7 @@ Waiting for bandwidth limits message from router...
 - [I2CP Specification](https://geti2p.net/spec/i2cp)
 - [Token Bucket Algorithm](https://en.wikipedia.org/wiki/Token_bucket)
 - [COMPLIANCE.md](../../COMPLIANCE.md) - Protocol compliance details
-- [PLAN.md](../../PLAN.md) - Implementation roadmap
+- [ROADMAP.md](../../ROADMAP.md) - Future enhancements roadmap
 
 ## License
 

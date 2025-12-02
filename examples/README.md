@@ -184,7 +184,7 @@ export GO_I2CP_CONF=/custom/config.conf
 
 - [I2CP Specification](https://geti2p.net/spec/i2cp)
 - [go-i2cp Documentation](../README.md)
-- [Implementation Plan](../PLAN.md)
+- [Development Roadmap](../ROADMAP.md)
 
 ## Contributing
 
