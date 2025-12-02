@@ -49,7 +49,7 @@ func ResolveAddr(address string) (net.Addr, error) {
 	case "tcp":
 		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
 	case "tls":
-		USE_TLS = true
+		// TLS scheme detected - caller should call SetupTLS before Connect
 		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
 	case "unix":
 		return net.ResolveUnixAddr("unix", scheme.Path)
@@ -140,18 +140,9 @@ func (tcp *Tcp) Connect() (err error) {
 		}
 	}
 
-	// Use TLS if configured via SetupTLS or USE_TLS flag
-	if tcp.tlsConfig != nil || USE_TLS {
-		// Use configured TLS settings if available
-		if tcp.tlsConfig == nil {
-			// Fallback to basic TLS config for backward compatibility
-			roots, _ := x509.SystemCertPool()
-			tcp.tlsConfig = &tls.Config{
-				RootCAs:    roots,
-				MinVersion: tls.VersionTLS12,
-			}
-			Debug("Using default TLS configuration (no SetupTLS called)")
-		}
+	// Use TLS if configured via SetupTLS
+	if tcp.tlsConfig != nil {
+		// TLS configuration has been set up via SetupTLS
 
 		Debug("Establishing TLS connection to %s", tcp.address.String())
 		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), tcp.tlsConfig)

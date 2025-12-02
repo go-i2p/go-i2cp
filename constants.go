@@ -54,12 +54,19 @@ const (
 
 // Authentication Method Constants
 // per I2CP specification for protocol initialization and authentication
+//
+// Support Status in go-i2cp:
+//   - AUTH_METHOD_NONE (0):           ✅ Fully supported
+//   - AUTH_METHOD_USERNAME_PWD (1):   ✅ Fully supported (via i2cp.username, i2cp.password)
+//   - AUTH_METHOD_SSL_TLS (2):        ✅ Fully supported (via i2cp.SSL configuration)
+//   - AUTH_METHOD_PER_CLIENT_DH (3):  ❌ Not yet implemented (planned for Phase 4)
+//   - AUTH_METHOD_PER_CLIENT_PSK (4): ❌ Not yet implemented (planned for Phase 4)
 const (
 	AUTH_METHOD_NONE           uint8 = 0 // No authentication required
 	AUTH_METHOD_USERNAME_PWD   uint8 = 1 // Username/password authentication (0.9.11+)
 	AUTH_METHOD_SSL_TLS        uint8 = 2 // SSL/TLS certificate authentication (0.8.3+)
-	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH authentication (0.9.41+)
-	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+)
+	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH authentication (0.9.41+) - NOT IMPLEMENTED
+	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+) - NOT IMPLEMENTED
 )
 
 // HostReply Error Codes (I2CP Proposal 167)
@@ -86,6 +93,20 @@ const (
 
 // Blinding Authentication Scheme Constants
 // per I2CP specification for BlindingInfoMessage authentication
+//
+// Blinding is used for encrypted LeaseSet access (I2CP 0.9.43+).
+// When a router sends BlindingInfo to a client, it indicates the authentication
+// scheme and parameters required to access an encrypted LeaseSet.
+//
+// Support Status in go-i2cp:
+//   - BLINDING_AUTH_SCHEME_DH (0):  ⚠️  Partial (storage only, crypto pending Phase 4)
+//   - BLINDING_AUTH_SCHEME_PSK (1): ⚠️  Partial (storage only, crypto pending Phase 4)
+//
+// Blinding workflow:
+//  1. Router sends BlindingInfoMessage with scheme, flags, and parameters
+//  2. Client stores blinding info in session (via SetBlindingInfo)
+//  3. Client uses blinding parameters when creating encrypted LeaseSet2
+//  4. Encrypted LeaseSet2 requires password or key for access
 const (
 	BLINDING_AUTH_SCHEME_DH  uint8 = 0 // Diffie-Hellman authentication
 	BLINDING_AUTH_SCHEME_PSK uint8 = 1 // Pre-Shared Key authentication
@@ -152,9 +173,19 @@ const (
 	CHACHA20_POLY1305 uint32 = 4
 )
 
-// TLS Constants
-// Moved from: tcp.go
-var USE_TLS = false
+// TLS Configuration
+//
+// TLS support is controlled via client properties, not a global constant.
+// The legacy USE_TLS constant has been removed in favor of per-client configuration.
+//
+// To enable TLS, set these client properties:
+//   - i2cp.SSL="true"                  // Enable TLS connection to router
+//   - i2cp.SSL.certFile="path/to/cert" // Client certificate (optional)
+//   - i2cp.SSL.keyFile="path/to/key"   // Client private key (optional)
+//   - i2cp.SSL.caFile="path/to/ca"     // CA certificate (optional, system pool used as fallback)
+//   - i2cp.SSL.insecure="false"        // Skip certificate verification (DEV ONLY, default: false)
+//
+// For details, see client.go SetProperty() and tcp.go SetupTLS().
 
 // Logger Level Constants
 // Moved from: logger.go
