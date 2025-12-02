@@ -15,9 +15,9 @@ var configRegex = regexp.MustCompile("\\s*([\\w.]+)=\\s*(.+)\\s*;\\s*")
 // Logging utility functions
 // Moved from: logger.go
 
-// LogInit initializes the logger with callbacks and level
-// TODO filter
-func LogInit(callbacks *LoggerCallbacks, level int) {
+// LogInit initializes the logger with the specified level
+// Deprecated: Use github.com/go-i2p/logger directly for new code
+func LogInit(level int) {
 	// Initialize go-i2p/logger
 	logger.InitializeGoI2PLogger()
 
@@ -38,8 +38,10 @@ func LogInit(callbacks *LoggerCallbacks, level int) {
 	}
 }
 
-// Debug logs a debug message with optional arguments
-func Debug(tags LoggerTags, message string, args ...interface{}) {
+// Debug logs a debug message with optional arguments.
+// Deprecated: Use github.com/go-i2p/logger directly for new code.
+// The tags parameter has been removed; use logger.Debug() or logger.Debugf() instead.
+func Debug(message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Debug(message)
 		return
@@ -47,8 +49,11 @@ func Debug(tags LoggerTags, message string, args ...interface{}) {
 	logInstance.Debugf(message, args...)
 }
 
-// Info logs an info message with optional arguments
-func Info(tags LoggerTags, message string, args ...interface{}) {
+// Info logs an info message with optional arguments.
+// Deprecated: Use github.com/go-i2p/logger directly for new code.
+// The tags parameter has been removed; use logger.Warn() or logger.Warnf() instead.
+// Note: Info maps to Warn level in the logger.
+func Info(message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -56,8 +61,10 @@ func Info(tags LoggerTags, message string, args ...interface{}) {
 	logInstance.Warnf(message, args...)
 }
 
-// Warning logs a warning message with optional arguments
-func Warning(tags LoggerTags, message string, args ...interface{}) {
+// Warning logs a warning message with optional arguments.
+// Deprecated: Use github.com/go-i2p/logger directly for new code.
+// The tags parameter has been removed; use logger.Warn() or logger.Warnf() instead.
+func Warning(message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Warn(message)
 		return
@@ -65,8 +72,10 @@ func Warning(tags LoggerTags, message string, args ...interface{}) {
 	logInstance.Warnf(message, args...)
 }
 
-// Error logs an error message with optional arguments
-func Error(tags LoggerTags, message string, args ...interface{}) {
+// Error logs an error message with optional arguments.
+// Deprecated: Use github.com/go-i2p/logger directly for new code.
+// The tags parameter has been removed; use logger.Error() or logger.Errorf() instead.
+func Error(message string, args ...interface{}) {
 	if len(args) == 0 {
 		logInstance.Error(message)
 		return
@@ -74,8 +83,11 @@ func Error(tags LoggerTags, message string, args ...interface{}) {
 	logInstance.Errorf(message, args...)
 }
 
-// Fatal logs a fatal message with optional arguments
-func Fatal(tags LoggerTags, message string, args ...interface{}) {
+// Fatal logs a fatal message with optional arguments.
+// Deprecated: Use github.com/go-i2p/logger directly for new code.
+// The tags parameter has been removed; use logger.Error() or logger.Errorf() instead.
+// Note: Fatal maps to Error level in the logger and sets WARNFAIL_I2P.
+func Fatal(message string, args ...interface{}) {
 	os.Setenv("WARNFAIL_I2P", "true")
 	if len(args) == 0 {
 		logInstance.Error(message)
@@ -92,11 +104,11 @@ func ParseConfig(s string, cb func(string, string)) {
 	file, err := os.Open(s)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no such file") {
-			Error(SESSION_CONFIG, "%s", err.Error())
+			Error("%s", err.Error())
 		}
 		return
 	}
-	Debug(SESSION_CONFIG, "Parsing config file '%s'", s)
+	Debug("Parsing config file '%s'", s)
 	scan := bufio.NewScanner(file)
 	for scan.Scan() {
 		line := scan.Text()
@@ -107,7 +119,7 @@ func ParseConfig(s string, cb func(string, string)) {
 		cb(groups[1], groups[2])
 	}
 	if err := scan.Err(); err != nil {
-		Error(SESSION_CONFIG, "reading input from %s config %s", s, err.Error())
+		Error("reading input from %s config %s", s, err.Error())
 	}
 }
 

@@ -311,7 +311,7 @@ func TestSessionCloseDispatchesDestroyedStatus(t *testing.T) {
 
 	statusReceived := make(chan SessionStatus, 1)
 	callbacks := SessionCallbacks{
-		onStatus: func(s *Session, status SessionStatus) {
+		OnStatus: func(s *Session, status SessionStatus) {
 			statusReceived <- status
 		},
 	}

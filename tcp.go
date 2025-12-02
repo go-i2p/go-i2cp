@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"time"
 )
 
@@ -20,98 +21,99 @@ const (
 )
 
 var (
-	CAFile               = "/etc/ssl/certs/ca-certificates.crt"
 	defaultRouterAddress = "127.0.0.1:7654"
 )
 
-func (tcp *Tcp) Init() (err error) {
-	tcp.address, err = net.ResolveTCPAddr("tcp", defaultRouterAddress)
+func ResolveAddr(address string) (net.Addr, error) {
+	// extract the scheme, host, and port
+	scheme, err := url.Parse(address)
+	if err != nil {
+		return nil, err
+	}
+	host := scheme.Hostname()
+	port := scheme.Port()
+	if port == "" {
+		port = "7654" // default I2CP port
+	}
+	switch scheme.Scheme {
+	case "tcp":
+		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
+	case "tls":
+		USE_TLS = true
+		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
+	case "unix":
+		return net.ResolveUnixAddr("unix", scheme.Path)
+	default:
+		return nil, fmt.Errorf("unsupported scheme: %s", scheme.Scheme)
+	}
+}
+
+func (tcp *Tcp) Init(routerAddress ...string) (err error) {
+	addrString := defaultRouterAddress
+	if len(routerAddress) > 0 {
+		addrString = routerAddress[0]
+	}
+	addr, err := ResolveAddr(addrString)
+	if err == nil {
+		tcp.address = addr
+	}
 	return
 }
 
 func (tcp *Tcp) Connect() (err error) {
+	if tcp.address == nil {
+		err := tcp.Init()
+		if err != nil {
+			return err
+		}
+	}
 	if USE_TLS {
 		roots, _ := x509.SystemCertPool()
-		tcp.tlsConn, err = tls.Dial("tcp", tcp.address.String(), &tls.Config{RootCAs: roots})
+		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), &tls.Config{RootCAs: roots})
 	} else {
-		tcp.conn, err = net.DialTCP("tcp", nil, tcp.address)
+		tcp.conn, err = net.Dial("tcp", tcp.address.String())
 		if err != nil {
 			return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
 		}
-		if err = tcp.conn.SetKeepAlive(true); err != nil {
-			// Non-fatal but should log
-			Warning(TCP, "Failed to set TCP keepalive for %s: %v", tcp.address, err)
-		}
 	}
-	return nil
+	return err
 }
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
-	if USE_TLS {
-		if tcp.tlsConn == nil {
-			return 0, fmt.Errorf("TLS connection not established")
-		}
-		i, err = tcp.tlsConn.Write(buf.Bytes())
-	} else {
-		if tcp.conn == nil {
-			return 0, fmt.Errorf("TCP connection not established")
-		}
-		i, err = tcp.conn.Write(buf.Bytes())
+	if tcp.conn == nil {
+		return 0, fmt.Errorf("connection not established")
 	}
+	i, err = tcp.conn.Write(buf.Bytes())
 	return
 }
 
 func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
-	if USE_TLS {
-		i, err = tcp.tlsConn.Read(buf.Bytes())
-	} else {
-		i, err = tcp.conn.Read(buf.Bytes())
-	}
+	i, err = tcp.conn.Read(buf.Bytes())
 	return
 }
 
 func (tcp *Tcp) CanRead() bool {
 	var one []byte
-	if USE_TLS {
-		if tcp.tlsConn == nil {
-			return false
+	if tcp.conn == nil {
+		return false
+	}
+	tcp.conn.SetReadDeadline(time.Now())
+	if _, err := tcp.conn.Read(one); err == io.EOF {
+		if tcp.address != nil {
+			Debug("%s detected closed LAN connection", tcp.address.String())
 		}
-		tcp.tlsConn.SetReadDeadline(time.Now())
-		if _, err := tcp.tlsConn.Read(one); err == io.EOF {
-			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())
-			defer tcp.Disconnect()
-			return false
-		} else {
-			var zero time.Time
-			tcp.tlsConn.SetReadDeadline(zero)
-			return tcp.tlsConn.ConnectionState().HandshakeComplete
-		}
+		defer tcp.Disconnect()
+		return false
 	} else {
-		if tcp.conn == nil {
-			return false
-		}
-		tcp.conn.SetReadDeadline(time.Now())
-		if _, err := tcp.conn.Read(one); err == io.EOF {
-			Debug(TCP, "%s detected closed LAN connection", tcp.address.String())
-			defer tcp.Disconnect()
-			return false
-		} else {
-			var zero time.Time
-			tcp.conn.SetReadDeadline(zero)
-			return true
-		}
+		var zero time.Time
+		tcp.conn.SetReadDeadline(zero)
+		return true
 	}
 }
 
 func (tcp *Tcp) Disconnect() {
-	if USE_TLS {
-		if tcp.tlsConn != nil {
-			tcp.tlsConn.Close()
-		}
-	} else {
-		if tcp.conn != nil {
-			tcp.conn.Close()
-		}
+	if tcp.conn != nil {
+		tcp.conn.Close()
 	}
 }
 
@@ -128,8 +130,7 @@ func (tcp *Tcp) GetProperty(property TcpProperty) string {
 }
 
 type Tcp struct {
-	address    *net.TCPAddr
-	conn       *net.TCPConn
-	tlsConn    *tls.Conn
+	address    net.Addr
+	conn       net.Conn
 	properties [NR_OF_TCP_PROPERTIES]string
 }
