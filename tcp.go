@@ -61,6 +61,12 @@ func (tcp *Tcp) Init(routerAddress ...string) (err error) {
 }
 
 func (tcp *Tcp) Connect() (err error) {
+	if tcp.address == nil {
+		err := tcp.Init()
+		if err != nil {
+			return err
+		}
+	}
 	if USE_TLS {
 		roots, _ := x509.SystemCertPool()
 		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), &tls.Config{RootCAs: roots})
@@ -93,7 +99,9 @@ func (tcp *Tcp) CanRead() bool {
 	}
 	tcp.conn.SetReadDeadline(time.Now())
 	if _, err := tcp.conn.Read(one); err == io.EOF {
-		Debug("%s detected closed LAN connection", tcp.address.String())
+		if tcp.address != nil {
+			Debug("%s detected closed LAN connection", tcp.address.String())
+		}
 		defer tcp.Disconnect()
 		return false
 	} else {
