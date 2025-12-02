@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"time"
 )
 
@@ -20,12 +21,42 @@ const (
 )
 
 var (
-	CAFile               = "/etc/ssl/certs/ca-certificates.crt"
 	defaultRouterAddress = "127.0.0.1:7654"
 )
 
-func (tcp *Tcp) Init() (err error) {
-	tcp.address, err = net.ResolveTCPAddr("tcp", defaultRouterAddress)
+func ResolveAddr(address string) (net.Addr, error) {
+	// extract the scheme, host, and port
+	scheme, err := url.Parse(address)
+	if err != nil {
+		return nil, err
+	}
+	host := scheme.Hostname()
+	port := scheme.Port()
+	if port == "" {
+		port = "7654" // default I2CP port
+	}
+	switch scheme.Scheme {
+	case "tcp":
+		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
+	case "tls":
+		USE_TLS = true
+		return net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
+	case "unix":
+		return net.ResolveUnixAddr("unix", scheme.Path)
+	default:
+		return nil, fmt.Errorf("unsupported scheme: %s", scheme.Scheme)
+	}
+}
+
+func (tcp *Tcp) Init(routerAddress ...string) (err error) {
+	addrString := defaultRouterAddress
+	if len(routerAddress) > 0 {
+		addrString = routerAddress[0]
+	}
+	addr, err := ResolveAddr(addrString)
+	if err == nil {
+		tcp.address = addr
+	}
 	return
 }
 
@@ -38,15 +69,8 @@ func (tcp *Tcp) Connect() (err error) {
 		if err != nil {
 			return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
 		}
-		// Set keepalive if this is a TCP connection
-		if tcpConn, ok := tcp.conn.(*net.TCPConn); ok {
-			if err = tcpConn.SetKeepAlive(true); err != nil {
-				// Non-fatal but should log
-				Warning("Failed to set TCP keepalive for %s: %v", tcp.address, err)
-			}
-		}
 	}
-	return nil
+	return err
 }
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
@@ -75,10 +99,6 @@ func (tcp *Tcp) CanRead() bool {
 	} else {
 		var zero time.Time
 		tcp.conn.SetReadDeadline(zero)
-		// Check if this is a TLS connection and verify handshake
-		if tlsConn, ok := tcp.conn.(*tls.Conn); ok {
-			return tlsConn.ConnectionState().HandshakeComplete
-		}
 		return true
 	}
 }
@@ -102,7 +122,7 @@ func (tcp *Tcp) GetProperty(property TcpProperty) string {
 }
 
 type Tcp struct {
-	address    *net.TCPAddr
+	address    net.Addr
 	conn       net.Conn
 	properties [NR_OF_TCP_PROPERTIES]string
 }

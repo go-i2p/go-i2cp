@@ -154,7 +154,7 @@ const (
 
 // TLS Constants
 // Moved from: tcp.go
-const USE_TLS = false
+var USE_TLS = false
 
 // Logger Level Constants
 // Moved from: logger.go
