@@ -110,10 +110,10 @@ func TestSetupTLS_WithCertificates(t *testing.T) {
 	certFile := filepath.Join(tmpDir, "cert.pem")
 	keyFile := filepath.Join(tmpDir, "key.pem")
 
-	if err := os.WriteFile(certFile, certPEM, 0600); err != nil {
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
 		t.Fatalf("Failed to write cert file: %v", err)
 	}
-	if err := os.WriteFile(keyFile, keyPEM, 0600); err != nil {
+	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
 		t.Fatalf("Failed to write key file: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestSetupTLS_WithCAFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	caFile := filepath.Join(tmpDir, "ca.pem")
 
-	if err := os.WriteFile(caFile, certPEM, 0600); err != nil {
+	if err := os.WriteFile(caFile, certPEM, 0o600); err != nil {
 		t.Fatalf("Failed to write CA file: %v", err)
 	}
 
@@ -196,10 +196,10 @@ func TestSetupTLS_MismatchedCertAndKey(t *testing.T) {
 	certFile := filepath.Join(tmpDir, "cert.pem")
 	keyFile := filepath.Join(tmpDir, "key.pem")
 
-	if err := os.WriteFile(certFile, certPEM1, 0600); err != nil {
+	if err := os.WriteFile(certFile, certPEM1, 0o600); err != nil {
 		t.Fatalf("Failed to write cert file: %v", err)
 	}
-	if err := os.WriteFile(keyFile, keyPEM2, 0600); err != nil {
+	if err := os.WriteFile(keyFile, keyPEM2, 0o600); err != nil {
 		t.Fatalf("Failed to write key file: %v", err)
 	}
 
@@ -221,7 +221,7 @@ func TestSetupTLS_OnlyCertProvided(t *testing.T) {
 	tmpDir := t.TempDir()
 	certFile := filepath.Join(tmpDir, "cert.pem")
 
-	if err := os.WriteFile(certFile, certPEM, 0600); err != nil {
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
 		t.Fatalf("Failed to write cert file: %v", err)
 	}
 

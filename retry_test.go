@@ -15,7 +15,6 @@ func TestRetryWithBackoffSuccess(t *testing.T) {
 		callCount++
 		return nil
 	})
-
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -37,7 +36,6 @@ func TestRetryWithBackoffEventualSuccess(t *testing.T) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		t.Errorf("Expected success after retries, got %v", err)
 	}
@@ -150,7 +148,6 @@ func TestRetryWithBackoffInfiniteRetries(t *testing.T) {
 		}
 		return errors.New("test error")
 	})
-
 	if err != nil {
 		t.Errorf("Expected success with infinite retries, got %v", err)
 	}

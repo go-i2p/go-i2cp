@@ -1769,7 +1769,6 @@ func (c *Client) autoReconnect(ctx context.Context) error {
 
 		return nil
 	})
-
 	if err != nil {
 		Error("Auto-reconnect failed after all retries: %v", err)
 		return fmt.Errorf("auto-reconnect failed: %w", err)

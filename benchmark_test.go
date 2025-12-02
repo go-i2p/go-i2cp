@@ -26,7 +26,7 @@ func BenchmarkStream_ReadUint16(b *testing.B) {
 		_ = stream.WriteUint16(uint16(i))
 	}
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _ = stream.ReadUint16()
 	}
@@ -47,7 +47,7 @@ func BenchmarkStream_ReadUint32(b *testing.B) {
 		_ = stream.WriteUint32(uint32(i))
 	}
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _ = stream.ReadUint32()
 	}
@@ -68,7 +68,7 @@ func BenchmarkStream_ReadUint64(b *testing.B) {
 		_ = stream.WriteUint64(uint64(i))
 	}
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _ = stream.ReadUint64()
 	}
@@ -78,7 +78,7 @@ func BenchmarkStream_WriteLenPrefixedString(b *testing.B) {
 	stream := NewStream(make([]byte, 0, 1024))
 	testString := "test.i2p.example.destination.b32"
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = stream.WriteLenPrefixedString(testString)
 	}
@@ -87,14 +87,14 @@ func BenchmarkStream_WriteLenPrefixedString(b *testing.B) {
 func BenchmarkStream_WriteMapping(b *testing.B) {
 	stream := NewStream(make([]byte, 0, 1024))
 	mapping := map[string]string{
-		"inbound.length":   "3",
-		"outbound.length":  "3",
-		"inbound.quantity": "2",
+		"inbound.length":    "3",
+		"outbound.length":   "3",
+		"inbound.quantity":  "2",
 		"outbound.quantity": "2",
-		"i2cp.fastReceive": "true",
+		"i2cp.fastReceive":  "true",
 	}
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = stream.WriteMapping(mapping)
 	}
@@ -103,13 +103,13 @@ func BenchmarkStream_WriteMapping(b *testing.B) {
 func BenchmarkStream_ReadMapping(b *testing.B) {
 	// Pre-populate stream with mappings
 	mapping := map[string]string{
-		"inbound.length":   "3",
-		"outbound.length":  "3",
-		"inbound.quantity": "2",
+		"inbound.length":    "3",
+		"outbound.length":   "3",
+		"inbound.quantity":  "2",
 		"outbound.quantity": "2",
-		"i2cp.fastReceive": "true",
+		"i2cp.fastReceive":  "true",
 	}
-	
+
 	streams := make([]*Stream, b.N)
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 256))
@@ -117,7 +117,7 @@ func BenchmarkStream_ReadMapping(b *testing.B) {
 		streams[i] = stream
 	}
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _ = streams[i].ReadMapping()
 	}
@@ -143,12 +143,12 @@ func BenchmarkEd25519_Sign(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	message := make([]byte, 1024)
 	if _, err := rand.Read(message); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := kp.Sign(message)
@@ -163,22 +163,22 @@ func BenchmarkEd25519_Verify(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	message := make([]byte, 1024)
 	if _, err := rand.Read(message); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	signature, err := kp.Sign(message)
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := kp.Verify(message, signature)
-		if err != nil {
-			b.Fatal(err)
+		verified := kp.Verify(message, signature)
+		if !verified {
+			b.Fatal("verification failed")
 		}
 	}
 }
@@ -200,12 +200,12 @@ func BenchmarkX25519_SharedSecret(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	kp2, err := NewX25519KeyPair()
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	peerPubKey := kp2.PublicKey()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -221,12 +221,12 @@ func BenchmarkChaCha20Poly1305_Encrypt(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	plaintext := make([]byte, 1024)
 	if _, err := rand.Read(plaintext); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := cipher.Encrypt(plaintext, nil)
@@ -241,17 +241,17 @@ func BenchmarkChaCha20Poly1305_Decrypt(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	plaintext := make([]byte, 1024)
 	if _, err := rand.Read(plaintext); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	ciphertext, err := cipher.Encrypt(plaintext, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := cipher.Decrypt(ciphertext, nil)
@@ -264,7 +264,7 @@ func BenchmarkChaCha20Poly1305_Decrypt(b *testing.B) {
 func BenchmarkDSA_KeyGeneration(b *testing.B) {
 	crypto := NewCrypto()
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := crypto.SignatureKeygen(DSA_SHA1)
 		if err != nil {
@@ -279,12 +279,12 @@ func BenchmarkDSA_Sign(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	message := make([]byte, 1024)
 	if _, err := rand.Read(message); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(message)
@@ -301,12 +301,12 @@ func BenchmarkDSA_Verify(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	message := make([]byte, 1024)
 	if _, err := rand.Read(message); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	// Sign the message
 	stream := NewStream(message)
 	err = crypto.SignStream(&kp, stream)
@@ -314,7 +314,7 @@ func BenchmarkDSA_Verify(b *testing.B) {
 		b.Fatal(err)
 	}
 	signedStream := stream.Bytes()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		verifyStream := NewStream(signedStream)
@@ -334,7 +334,7 @@ func BenchmarkDestination_Serialization(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 512))
@@ -351,7 +351,7 @@ func BenchmarkDestination_Deserialization(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	// Pre-serialize destination
 	stream := NewStream(make([]byte, 0, 512))
 	err = dest.WriteToStream(stream)
@@ -359,7 +359,7 @@ func BenchmarkDestination_Deserialization(b *testing.B) {
 		b.Fatal(err)
 	}
 	serialized := stream.Bytes()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(serialized)
@@ -372,7 +372,7 @@ func BenchmarkDestination_Deserialization(b *testing.B) {
 
 func BenchmarkCertificate_Serialization(b *testing.B) {
 	cert := NewCertificate(CERTIFICATE_NULL)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 128))
@@ -385,7 +385,7 @@ func BenchmarkCertificate_Serialization(b *testing.B) {
 
 func BenchmarkCertificate_Deserialization(b *testing.B) {
 	cert := NewCertificate(CERTIFICATE_NULL)
-	
+
 	// Pre-serialize certificate
 	stream := NewStream(make([]byte, 0, 128))
 	err := cert.WriteToStream(stream)
@@ -393,7 +393,7 @@ func BenchmarkCertificate_Deserialization(b *testing.B) {
 		b.Fatal(err)
 	}
 	serialized := stream.Bytes()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(serialized)
@@ -413,7 +413,7 @@ func BenchmarkSession_Creation(b *testing.B) {
 		sessions: make(map[uint16]*Session),
 		crypto:   crypto,
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sess := NewSession(client, SessionCallbacks{})
@@ -427,9 +427,9 @@ func BenchmarkSession_CreationWithContext(b *testing.B) {
 		sessions: make(map[uint16]*Session),
 		crypto:   crypto,
 	}
-	
+
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sess, err := NewSessionWithContext(ctx, client, SessionCallbacks{})
@@ -446,7 +446,7 @@ func BenchmarkSession_ConcurrentCreation(b *testing.B) {
 		sessions: make(map[uint16]*Session),
 		crypto:   crypto,
 	}
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -462,14 +462,14 @@ func BenchmarkClient_SessionLookup(b *testing.B) {
 		sessions: make(map[uint16]*Session),
 		crypto:   crypto,
 	}
-	
+
 	// Pre-populate sessions
 	for i := uint16(0); i < 100; i++ {
 		sess := NewSession(client, SessionCallbacks{})
 		sess.id = i
 		client.sessions[i] = sess
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sessionId := uint16(i % 100)
@@ -482,7 +482,7 @@ func BenchmarkClient_SessionLookup(b *testing.B) {
 
 func BenchmarkCircuitBreaker_Operation(b *testing.B) {
 	cb := NewCircuitBreaker(5, 10*time.Second)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = cb.Execute(func() error {
@@ -506,25 +506,25 @@ func BenchmarkMessage_CreateSession(b *testing.B) {
 		b.Fatal(err)
 	}
 	sess.config.destination = dest
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 1024))
-		
+
 		// Build CreateSessionMessage structure
 		_ = stream.WriteByte(I2CP_MSG_CREATE_SESSION)
 		_ = sess.config.destination.WriteToStream(stream)
-		
+
 		options := map[string]string{
 			"inbound.length":   "3",
 			"outbound.length":  "3",
 			"i2cp.fastReceive": "true",
 		}
 		_ = stream.WriteMapping(options)
-		
+
 		sessionDate := uint64(time.Now().Unix())
 		_ = stream.WriteUint64(sessionDate)
-		
+
 		_ = stream.Bytes()
 	}
 }
@@ -535,29 +535,29 @@ func BenchmarkMessage_SendMessage(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	payload := make([]byte, 512)
 	if _, err := rand.Read(payload); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 1024))
-		
+
 		// Build SendMessageMessage structure
 		sessionId := uint16(1)
 		_ = stream.WriteUint16(sessionId)
 		_ = dest.WriteToStream(stream)
-		
+
 		// Write payload with size prefix
 		_ = stream.WriteUint32(uint32(len(payload)))
 		_, _ = stream.Write(payload)
-		
+
 		// Write nonce
 		nonce := uint32(i)
 		_ = stream.WriteUint32(nonce)
-		
+
 		_ = stream.Bytes()
 	}
 }
@@ -570,7 +570,7 @@ func BenchmarkBuffer_Write1KB(b *testing.B) {
 	if _, err := rand.Read(data); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf := bytes.NewBuffer(make([]byte, 0, 1024))
@@ -583,7 +583,7 @@ func BenchmarkBuffer_Write10KB(b *testing.B) {
 	if _, err := rand.Read(data); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf := bytes.NewBuffer(make([]byte, 0, 10*1024))
@@ -596,7 +596,7 @@ func BenchmarkBuffer_Read1KB(b *testing.B) {
 	if _, err := rand.Read(data); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf := bytes.NewBuffer(data)
@@ -610,7 +610,7 @@ func BenchmarkBuffer_Read10KB(b *testing.B) {
 	if _, err := rand.Read(data); err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf := bytes.NewBuffer(data)
