@@ -142,8 +142,8 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	firstFive := NewStream(make([]byte, 5))
 	i, err = c.tcp.Receive(firstFive)
 	if i == 0 {
-		if c.callbacks != nil && c.callbacks.onDisconnect != nil {
-			c.callbacks.onDisconnect(c, "Didn't receive anything", nil)
+		if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
+			c.callbacks.OnDisconnect(c, "Didn't receive anything", nil)
 		}
 		return fmt.Errorf("no data received from router")
 	}
@@ -310,8 +310,8 @@ func (c *Client) onMsgDisconnect(stream *Stream) {
 	if err != nil {
 		Error("Could not read msgDisconnect correctly data")
 	}
-	if c.callbacks != nil && c.callbacks.onDisconnect != nil {
-		c.callbacks.onDisconnect(c, string(strbuf), nil)
+	if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
+		c.callbacks.OnDisconnect(c, string(strbuf), nil)
 	}
 }
 
@@ -624,10 +624,24 @@ func (c *Client) onMsgBandwithLimit(stream *Stream) {
 		routerOutbound, routerOutboundBurst,
 		burstTime)
 
-	// TODO: Add bandwidth limits callback to ClientCallBacks
-	// if c.callbacks.onBandwidthLimits != nil {
-	//     c.callbacks.onBandwidthLimits(c, clientInbound, clientOutbound, ...)
-	// }
+	// Create BandwidthLimits structure with parsed values
+	limits := &BandwidthLimits{
+		ClientInbound:       clientInbound,
+		ClientOutbound:      clientOutbound,
+		RouterInbound:       routerInbound,
+		RouterInboundBurst:  routerInboundBurst,
+		RouterOutbound:      routerOutbound,
+		RouterOutboundBurst: routerOutboundBurst,
+		BurstTime:           burstTime,
+	}
+	copy(limits.Undefined[:], undefined)
+
+	Debug("Parsed bandwidth limits: %s", limits.String())
+
+	// Dispatch callback if configured
+	if c.callbacks != nil && c.callbacks.OnBandwidthLimits != nil {
+		c.callbacks.OnBandwidthLimits(c, limits)
+	}
 }
 
 func (c *Client) onMsgSessionStatus(stream *Stream) {

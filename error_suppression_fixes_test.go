@@ -116,7 +116,7 @@ func TestOnMsgDisconnectErrorHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &Client{
 				callbacks: &ClientCallBacks{
-					onDisconnect: func(c *Client, reason string, data *interface{}) {
+					OnDisconnect: func(c *Client, reason string, data *interface{}) {
 						t.Logf("Disconnect callback called with reason: %s", reason)
 					},
 				},
