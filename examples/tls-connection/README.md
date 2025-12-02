@@ -9,7 +9,7 @@ TLS authentication provides stronger security than username/password authenticat
 ## Features Demonstrated
 
 - **TLS with Client Certificates** (recommended) - Mutual TLS authentication
-- **TLS Insecure Mode** (development only) - Skip certificate verification for testing
+- **TLS Insecure Mode** (localhost development only) - Skip certificate verification for localhost (127.0.0.1, ::1)
 - **Dual Authentication** - TLS with username/password fallback
 
 ## Prerequisites
@@ -171,14 +171,27 @@ TLS connection example completed successfully!
 
 ### Development: Using Insecure Mode
 
-For development/testing only, you can skip certificate verification:
+For development/testing with **localhost only**, you can skip certificate verification:
 
 ```go
 client.SetProperty("i2cp.SSL", "true")
 client.SetProperty("i2cp.SSL.insecure", "true")
 ```
 
-**⚠️ WARNING:** This disables all certificate validation. **Never use in production!**
+**⚠️ CRITICAL SECURITY RESTRICTIONS:**
+
+✅ **ALLOWED:**
+- Localhost addresses: `127.0.0.1:7654`, `[::1]:7654`
+- Local development/testing only
+- Never in production environments
+
+❌ **NEVER ALLOWED:**
+- Remote host connections (any non-localhost address)
+- Production deployments
+- Public-facing services
+- Any network-accessible endpoint
+
+This disables all certificate validation for **localhost connections only**. Using insecure mode for remote hosts creates severe security vulnerabilities including man-in-the-middle attacks.
 
 ## TLS Version and Cipher Suites
 

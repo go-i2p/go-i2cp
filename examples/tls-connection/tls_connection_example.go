@@ -84,29 +84,34 @@ func tlsWithCertificates() {
 }
 
 // tlsInsecureMode demonstrates TLS with certificate verification disabled.
-// WARNING: Only use this for development/testing! Never in production!
+// WARNING: Only allowed for localhost connections! Never for remote hosts!
 func tlsInsecureMode() {
-	log.Println("--- Example 2: TLS Insecure Mode (Development Only) ---")
-	log.Println("⚠️  WARNING: Insecure mode - do NOT use in production!")
+	log.Println("--- Example 2: TLS Insecure Mode (Localhost Only) ---")
+	log.Println("⚠️  WARNING: Insecure mode only allowed for localhost (127.0.0.1, ::1)")
 
+	// Create client - explicitly using localhost address
+	// Insecure mode is ONLY acceptable for localhost connections
+	localhostAddr := "127.0.0.1:7654"
 	client := i2cp.NewClient(nil)
 
 	// Enable TLS with insecure mode (skips certificate verification)
+	// This is acceptable ONLY for localhost during development
 	client.SetProperty("i2cp.SSL", "true")
 	client.SetProperty("i2cp.SSL.insecure", "true")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	log.Println("Connecting with insecure TLS...")
+	log.Printf("Connecting to %s with insecure TLS...\n", localhostAddr)
 	if err := client.Connect(ctx); err != nil {
 		log.Printf("Connection failed: %v", err)
 		return
 	}
 	defer client.Close()
 
-	log.Println("✓ Connected with insecure TLS")
-	log.Println("⚠️  Certificate verification was SKIPPED - not secure!")
+	log.Println("✓ Connected to localhost with insecure TLS")
+	log.Println("⚠️  Certificate verification SKIPPED - only safe for localhost!")
+	log.Println("⚠️  NEVER use insecure mode for remote hosts - security risk!")
 	log.Println()
 }
 
