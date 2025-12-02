@@ -130,7 +130,9 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	firstFive := NewStream(make([]byte, 5))
 	i, err = c.tcp.Receive(firstFive)
 	if i == 0 {
-		c.callbacks.onDisconnect(c, "Didn't receive anything", nil)
+		if c.callbacks != nil && c.callbacks.onDisconnect != nil {
+			c.callbacks.onDisconnect(c, "Didn't receive anything", nil)
+		}
 		return fmt.Errorf("no data received from router")
 	}
 	if err != nil {
