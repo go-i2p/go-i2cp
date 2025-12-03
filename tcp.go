@@ -204,8 +204,18 @@ func (tcp *Tcp) CanRead() bool {
 	// Use buffered reader's Peek() for non-destructive data availability check
 	// This fixes the critical bug where CanRead() consumed bytes from the stream
 	if tcp.reader != nil {
+		// Set a short read deadline to prevent blocking indefinitely
+		// This prevents CanRead() from hanging on closed or unresponsive connections
+		deadline := time.Now().Add(1 * time.Millisecond)
+		tcp.conn.SetReadDeadline(deadline)
+
 		// Peek at 1 byte without consuming it from the buffer
 		_, err := tcp.reader.Peek(1)
+
+		// Reset deadline to zero (blocking mode) for actual message reads
+		var zero time.Time
+		tcp.conn.SetReadDeadline(zero)
+
 		if err == nil {
 			// Data is available and buffered
 			return true
@@ -218,7 +228,11 @@ func (tcp *Tcp) CanRead() bool {
 			defer tcp.Disconnect()
 			return false
 		}
-		// No data available or other error
+		// Check for timeout (expected when no data available)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return false
+		}
+		// Other errors also indicate connection issues
 		return false
 	}
 
@@ -261,7 +275,10 @@ func (tcp *Tcp) CanRead() bool {
 func (tcp *Tcp) Disconnect() {
 	if tcp.conn != nil {
 		tcp.conn.Close()
+		tcp.conn = nil
 	}
+	// Reset buffered reader to prevent blocking on closed connections
+	tcp.reader = nil
 }
 
 func (tcp *Tcp) IsConnected() bool {
