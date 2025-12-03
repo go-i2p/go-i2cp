@@ -161,3 +161,7 @@ func (config *SessionConfig) propFromString(name string) SessionConfigProperty {
 func (config *SessionConfig) SetProperty(prop SessionConfigProperty, value string) {
 	config.properties[prop] = value
 }
+
+func (config *SessionConfig) GetProperty(prop SessionConfigProperty) string {
+	return config.properties[prop]
+}

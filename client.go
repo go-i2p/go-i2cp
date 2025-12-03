@@ -1649,6 +1649,42 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		return ErrMaxSessionsReached
 	}
 
+	// Multi-session support (I2CP 0.9.21+)
+	// If this is a subsession, validate router support and inherit primary configuration
+	if !sess.IsPrimary() {
+		primary := sess.PrimarySession()
+		if primary == nil {
+			return fmt.Errorf("subsession requires a primary session reference")
+		}
+
+		// Check router version supports multi-session
+		if c.router.version.compare(Version{major: 0, minor: 9, micro: 21, qualifier: 0}) < 0 {
+			return fmt.Errorf("router version %v does not support multi-session (requires >= 0.9.21)", c.router.version)
+		}
+
+		// Inherit all configuration from primary session
+		// Per Java I2P reference: ClientMessageEventListener.java:280-388
+		// "all the primary options, then the overrides from the alias"
+		if primary.config != nil {
+			// Copy all properties from primary to subsession
+			for i := SessionConfigProperty(0); i < NR_OF_SESSION_CONFIG_PROPERTIES; i++ {
+				value := primary.config.GetProperty(i)
+				if value != "" {
+					sess.config.SetProperty(i, value)
+				}
+			}
+			Debug("Subsession inherited configuration from primary session %d", primary.ID())
+		}
+
+		// Override tunnel settings for subsessions - they share primary's tunnels
+		// Per I2CP 0.9.21+ spec: subsessions do NOT create their own tunnels
+		sess.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_LENGTH, "0")
+		sess.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "0")
+		sess.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "0")
+		sess.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "0")
+		Debug("Subsession tunnel creation disabled (sharing primary's tunnels)")
+	}
+
 	// Set fastReceive mode only if router supports it (I2CP 0.9.4+)
 	// Modern routers send PayloadMessage (type 31) instead of deprecated
 	// ReceiveMessageBegin/End (types 6/7) messages
