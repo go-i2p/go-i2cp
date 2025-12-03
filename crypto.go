@@ -81,34 +81,33 @@ func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 }
 
 // Writes a 40-byte signature digest to the stream
+// I2CP DSA signature format: [r:20][s:20] in big-endian byte order
 func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
-	var rs, ss []byte
-	var digest [81]byte
-	for i := 0; i < 81; i++ {
-		digest[i] = 0
-	}
-	// TODO rewrite using big.Int.Bytes()
-	bites := stream.Bytes()
-	rs = r.Bytes()
-	if len(rs) > 21 {
-		Fatal("DSA digest r > 21 bytes")
-	} else if len(rs) > 20 {
-		copy(bites[:20], rs[len(rs)-20:])
-	} else if len(rs) == 20 {
-		copy(bites[:20], rs)
+	// Create 40-byte buffer for DSA signature (20 bytes r + 20 bytes s)
+	var signature [40]byte
+
+	// Convert r to bytes and pad/truncate to exactly 20 bytes
+	rs := r.Bytes()
+	if len(rs) > 20 {
+		// Truncate to rightmost 20 bytes if too long
+		copy(signature[:20], rs[len(rs)-20:])
 	} else {
-		copy(bites[20-len(rs):20], rs)
+		// Pad with leading zeros if too short (big-endian)
+		copy(signature[20-len(rs):20], rs)
 	}
-	ss = s.Bytes()
-	if len(ss) > 21 {
-		Fatal("DSA digest r > 21 bytes")
-	} else if len(ss) > 20 {
-		copy(bites[20:], ss[len(ss)-20:])
-	} else if len(ss) == 20 {
-		copy(bites[20:], ss)
+
+	// Convert s to bytes and pad/truncate to exactly 20 bytes
+	ss := s.Bytes()
+	if len(ss) > 20 {
+		// Truncate to rightmost 20 bytes if too long
+		copy(signature[20:40], ss[len(ss)-20:])
 	} else {
-		copy(bites[40-len(ss):], ss)
+		// Pad with leading zeros if too short (big-endian)
+		copy(signature[40-len(ss):40], ss)
 	}
+
+	// Write the complete 40-byte signature to the stream
+	_, err = stream.Write(signature[:])
 	return
 }
 
@@ -130,7 +129,8 @@ func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified b
 
 	// Fallback to legacy implementation for backward compatibility
 	var r, s big.Int
-	// TODO not sure about this part...
+	// I2CP DSA signature format: [r:20][s:20] in big-endian byte order
+	// SetBytes interprets byte slice as big-endian unsigned integer (correct for I2CP spec)
 	r.SetBytes(signature[:20])
 	s.SetBytes(signature[20:])
 	verified = dsa.Verify(&sgk.pub, message, &r, &s)

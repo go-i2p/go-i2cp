@@ -499,8 +499,9 @@ func (c *Client) onMsgStatus(stream *Stream) {
 	// Find session and dispatch status if available
 	sess := c.sessions[sessionId]
 	if sess != nil {
-		// TODO: Add dispatchMessageStatus callback to Session when message tracking is implemented
-		Debug("MessageStatus for session %d: message %d status %d", sessionId, messageId, status)
+		// Dispatch message status to session callbacks
+		// I2CP 0.9.4+ MessageStatusMessage (type 22) - supports status codes 0-23
+		sess.dispatchMessageStatus(messageId, SessionMessageStatus(status), size, nonce)
 	} else {
 		Warning("MessageStatus received for unknown session %d", sessionId)
 	}

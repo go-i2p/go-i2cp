@@ -309,7 +309,7 @@ func TestLeaseSet2_IsExpired(t *testing.T) {
 	}
 }
 
-// TestLeaseSet2_VerifySignature tests signature verification
+// TestLeaseSet2_VerifySignature tests cryptographic signature verification
 func TestLeaseSet2_VerifySignature(t *testing.T) {
 	crypto := NewCrypto()
 	dest, err := NewDestination(crypto)
@@ -317,28 +317,32 @@ func TestLeaseSet2_VerifySignature(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 1024))
-	stream.WriteByte(LEASESET_TYPE_STANDARD)
-	dest.WriteToStream(stream)
-	stream.WriteUint32(uint32(time.Now().Unix()))
-	stream.WriteUint32(uint32(time.Now().Add(10 * time.Minute).Unix()))
-	stream.WriteUint16(0)
-	stream.WriteMapping(map[string]string{})
-	stream.WriteByte(0)
+	// Create LeaseSet2 data (everything before signature)
+	dataStream := NewStream(make([]byte, 0, 1024))
+	dataStream.WriteByte(LEASESET_TYPE_STANDARD)
+	dest.WriteToStream(dataStream)
+	dataStream.WriteUint32(uint32(time.Now().Unix()))
+	dataStream.WriteUint32(uint32(time.Now().Add(10 * time.Minute).Unix()))
+	dataStream.WriteUint16(0)
+	dataStream.WriteMapping(map[string]string{})
+	dataStream.WriteByte(0) // 0 leases
 
-	// Valid signature (40 bytes)
-	signature := make([]byte, 40)
-	stream.Write(signature)
+	// Sign the data using the destination's signing key (appends signature to stream)
+	err = crypto.SignStream(&dest.sgk, dataStream)
+	if err != nil {
+		t.Fatalf("Failed to sign LeaseSet2 data: %v", err)
+	}
 
-	parseStream := NewStream(stream.Bytes())
+	// Parse the complete LeaseSet2 (data + signature)
+	parseStream := NewStream(dataStream.Bytes())
 	ls, err := NewLeaseSet2FromStream(parseStream, crypto)
 	if err != nil {
 		t.Fatalf("Failed to parse LeaseSet2: %v", err)
 	}
 
-	// Basic signature validation should pass (checks length)
+	// Cryptographic signature verification should pass for properly signed data
 	if !ls.VerifySignature() {
-		t.Error("Expected signature verification to pass basic checks")
+		t.Error("Expected signature verification to pass for properly signed LeaseSet2")
 	}
 }
 
