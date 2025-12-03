@@ -353,8 +353,9 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 		c.onMsgBandwithLimit(stream)
 	case I2CP_MSG_SESSION_STATUS:
 		c.onMsgSessionStatus(stream)
-	case I2CP_MSG_REPORT_ABUSE:
-		c.onMsgReportAbuse(stream)
+	// I2CP_MSG_REPORT_ABUSE (type 29) intentionally not handled - reserved but never implemented
+	// This message type exists in the spec but was never fully implemented in Java I2P
+	// Treating as unknown message type per AUDIT.md recommendation
 	case I2CP_MSG_REQUEST_VARIABLE_LEASESET:
 		c.onMsgReqVariableLease(stream)
 	case I2CP_MSG_HOST_REPLY:
@@ -664,13 +665,15 @@ func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
 // onMsgReportAbuse handles deprecated ReportAbuseMessage (type 29)
 // DEPRECATED: Never fully implemented in I2P, unsupported
 // per I2CP specification - reserved for abuse reporting (unused)
+// onMsgReportAbuse is NOT dispatched from onMessage() - reserved but never implemented.
+// This handler exists for protocol documentation but should never be called.
+// I2CP message type 29 was reserved in the spec but never implemented in Java I2P router.
+// If a router sends this message, it will be handled by the default case (unknown message).
+// See AUDIT.md for details on protocol conformance.
 func (c *Client) onMsgReportAbuse(stream *Stream) {
-	Warning("Received deprecated ReportAbuseMessage - ignoring (never implemented)")
-
-	// This message type was reserved but never fully implemented in I2P
-	// Routers do not send this message, and clients should not expect it
-	// We simply log and ignore it for protocol completeness
-	Debug("ReportAbuse message ignored - unsupported legacy feature")
+	Warning("Received unsupported ReportAbuseMessage (type 29) - reserved but never implemented")
+	Error("Protocol violation: Router sent unsupported message type 29 (ReportAbuse)")
+	// This should never be called since the dispatcher doesn't route this message type
 }
 
 // onMsgBandwithLimit handles BandwidthLimitsMessage (type 23) from router
