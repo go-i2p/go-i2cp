@@ -31,6 +31,29 @@ func TestSessionID(t *testing.T) {
 	}
 }
 
+// TestSessionIDAlias verifies SessionID() is an alias for ID()
+func TestSessionIDAlias(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	// Test initial ID with both methods
+	if session.ID() != session.SessionID() {
+		t.Error("ID() and SessionID() should return the same value")
+	}
+
+	// Test after setting ID
+	testID := uint16(9876)
+	session.SetID(testID)
+
+	if session.SessionID() != testID {
+		t.Errorf("expected SessionID() to return %d, got %d", testID, session.SessionID())
+	}
+
+	if session.ID() != session.SessionID() {
+		t.Error("ID() and SessionID() should always return the same value")
+	}
+}
+
 // TestSessionIsPrimary verifies primary session flag operations
 func TestSessionIsPrimary(t *testing.T) {
 	client := NewClient(nil)

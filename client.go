@@ -853,7 +853,7 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 		}
 	}
 	Debug("Parsed %d leases for session %d", tunnels, sessionId)
-	c.msgCreateLeaseSet(sess, tunnels, leases, true)
+	c.msgCreateLeaseSet(sessionId, sess, tunnels, leases, true)
 }
 
 func (c *Client) onMsgHostReply(stream *Stream) {
@@ -1160,7 +1160,7 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 	Debug("BlindingInfo callback not yet implemented")
 }
 
-func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Lease, queue bool) {
+func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
 	var err error
 	var nullbytes [256]byte
 	var leaseSet *Stream
@@ -1177,7 +1177,7 @@ func (c *Client) msgCreateLeaseSet(session *Session, tunnels uint8, leases []*Le
 		nullbytes[i] = 0
 	}
 	// construct the message
-	c.messageStream.WriteUint16(session.id)
+	c.messageStream.WriteUint16(sessionId)
 	c.messageStream.Write(nullbytes[:20])
 	c.messageStream.Write(nullbytes[:256])
 	// Build leaseset stream and sign it

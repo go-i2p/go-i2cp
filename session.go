@@ -214,6 +214,13 @@ func (session *Session) ID() uint16 {
 	return session.id
 }
 
+// SessionID returns the session ID assigned by the router
+// per I2CP specification - unique identifier for session within I2CP connection
+// This is an idiomatic alias for ID() following Go naming conventions
+func (session *Session) SessionID() uint16 {
+	return session.ID()
+}
+
 // SetID sets the session ID (internal use only)
 // per I2CP specification - called by client when session is created by router
 func (session *Session) SetID(id uint16) {
