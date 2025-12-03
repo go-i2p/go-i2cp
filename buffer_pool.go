@@ -14,24 +14,24 @@ import (
 //   - 4096 bytes: Large messages (destination creation, large payloads)
 //   - 16384 bytes: Extra large messages (bulk data transfer)
 type bufferPool struct {
-	pool512  sync.Pool
-	pool1K   sync.Pool
-	pool4K   sync.Pool
-	pool16K  sync.Pool
-	enabled  bool
-	mu       sync.RWMutex
-	
+	pool512 sync.Pool
+	pool1K  sync.Pool
+	pool4K  sync.Pool
+	pool16K sync.Pool
+	enabled bool
+	mu      sync.RWMutex
+
 	// Metrics for monitoring pool effectiveness (optional)
 	// Using uint64 for atomic operations
-	gets512  uint64
-	gets1K   uint64
-	gets4K   uint64
-	gets16K  uint64
+	gets512       uint64
+	gets1K        uint64
+	gets4K        uint64
+	gets16K       uint64
 	getsOversized uint64
-	puts512  uint64
-	puts1K   uint64
-	puts4K   uint64
-	puts16K  uint64
+	puts512       uint64
+	puts1K        uint64
+	puts4K        uint64
+	puts16K       uint64
 }
 
 // Global buffer pool instance
@@ -92,11 +92,11 @@ func (bp *bufferPool) GetBuffer(size int) []byte {
 	bp.mu.RLock()
 	enabled := bp.enabled
 	bp.mu.RUnlock()
-	
+
 	if !enabled {
 		return make([]byte, 0, size)
 	}
-	
+
 	// Select pool based on size (find smallest bucket that fits)
 	var bufPtr *[]byte
 	switch {
@@ -117,7 +117,7 @@ func (bp *bufferPool) GetBuffer(size int) []byte {
 		atomic.AddUint64(&bp.getsOversized, 1)
 		return make([]byte, 0, size)
 	}
-	
+
 	// Reset buffer to empty but preserve capacity
 	buf := (*bufPtr)[:0]
 	return buf
@@ -129,19 +129,19 @@ func (bp *bufferPool) PutBuffer(buf []byte) {
 	bp.mu.RLock()
 	enabled := bp.enabled
 	bp.mu.RUnlock()
-	
+
 	if !enabled {
 		return // Let GC handle it
 	}
-	
+
 	// Don't pool buffers that are too large or nil
 	if buf == nil || cap(buf) > 16384 {
 		return
 	}
-	
+
 	// Reset buffer to empty (preserve capacity)
 	buf = buf[:0]
-	
+
 	// Return to appropriate pool based on capacity
 	switch cap(buf) {
 	case 512:
@@ -181,11 +181,11 @@ type BufferPoolStats struct {
 func GetBufferPoolStats() *BufferPoolStats {
 	globalBufferPool.mu.RLock()
 	defer globalBufferPool.mu.RUnlock()
-	
+
 	if !globalBufferPool.enabled {
 		return nil
 	}
-	
+
 	return &BufferPoolStats{
 		Gets512:       atomic.LoadUint64(&globalBufferPool.gets512),
 		Gets1K:        atomic.LoadUint64(&globalBufferPool.gets1K),
@@ -214,7 +214,7 @@ func ReleaseStream(s *Stream) {
 	if s == nil || s.Buffer == nil {
 		return
 	}
-	
+
 	// Get the underlying byte slice
 	buf := s.Bytes()
 	globalBufferPool.PutBuffer(buf)

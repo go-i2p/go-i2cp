@@ -7,10 +7,10 @@ import (
 // Baseline: NewStream without pooling
 func BenchmarkNewStreamNoPoll(b *testing.B) {
 	DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 1024))
 		stream.WriteString("test data")
@@ -23,10 +23,10 @@ func BenchmarkNewStreamNoPoll(b *testing.B) {
 func BenchmarkNewStreamPooled(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		stream := NewStreamPooled(1024)
 		stream.WriteString("test data")
@@ -38,10 +38,10 @@ func BenchmarkNewStreamPooled(b *testing.B) {
 func BenchmarkBufferPool512(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		buf := globalBufferPool.GetBuffer(512)
 		buf = append(buf, []byte("test")...)
@@ -52,10 +52,10 @@ func BenchmarkBufferPool512(b *testing.B) {
 func BenchmarkBufferPool1K(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		buf := globalBufferPool.GetBuffer(1024)
 		buf = append(buf, []byte("test")...)
@@ -66,10 +66,10 @@ func BenchmarkBufferPool1K(b *testing.B) {
 func BenchmarkBufferPool4K(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		buf := globalBufferPool.GetBuffer(4096)
 		buf = append(buf, []byte("test")...)
@@ -80,10 +80,10 @@ func BenchmarkBufferPool4K(b *testing.B) {
 func BenchmarkBufferPool16K(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		buf := globalBufferPool.GetBuffer(16384)
 		buf = append(buf, []byte("test")...)
@@ -95,10 +95,10 @@ func BenchmarkBufferPool16K(b *testing.B) {
 func BenchmarkBufferPoolParallel(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			buf := globalBufferPool.GetBuffer(1024)
@@ -111,10 +111,10 @@ func BenchmarkBufferPoolParallel(b *testing.B) {
 // Benchmark realistic I2CP message creation
 func BenchmarkRealisticMessageNoPoll(b *testing.B) {
 	DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 512))
 		stream.WriteUint16(uint16(i))
@@ -127,10 +127,10 @@ func BenchmarkRealisticMessageNoPoll(b *testing.B) {
 func BenchmarkRealisticMessagePooled(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		stream := NewStreamPooled(512)
 		stream.WriteUint16(uint16(i))
@@ -143,10 +143,10 @@ func BenchmarkRealisticMessagePooled(b *testing.B) {
 // Benchmark high-frequency small allocations (worst case for GC)
 func BenchmarkHighFrequencySmallNoPoll(b *testing.B) {
 	DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
 			stream := NewStream(make([]byte, 0, 64))
@@ -159,10 +159,10 @@ func BenchmarkHighFrequencySmallNoPoll(b *testing.B) {
 func BenchmarkHighFrequencySmallPooled(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
 			stream := NewStreamPooled(64)
@@ -176,10 +176,10 @@ func BenchmarkHighFrequencySmallPooled(b *testing.B) {
 func BenchmarkPoolGetPut(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		buf := globalBufferPool.GetBuffer(1024)
 		globalBufferPool.PutBuffer(buf)
@@ -190,10 +190,10 @@ func BenchmarkPoolGetPut(b *testing.B) {
 func BenchmarkGetBufferPoolStats(b *testing.B) {
 	EnableBufferPool()
 	defer DisableBufferPool()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = GetBufferPoolStats()
 	}
