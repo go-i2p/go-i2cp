@@ -238,3 +238,156 @@ func TestCertificateBackwardCompatibility(t *testing.T) {
 		}
 	})
 }
+
+// TestCertificate_WriteToMessage_LegacyPath tests the fallback path
+// in WriteToMessage when cert.cert is nil (legacy mode)
+func TestCertificate_WriteToMessage_LegacyPath(t *testing.T) {
+	t.Run("Legacy null certificate with no data", func(t *testing.T) {
+		// Create a certificate using legacy fields only (cert.cert = nil)
+		cert := &Certificate{
+			cert:     nil, // Force legacy path
+			certType: CERTIFICATE_NULL,
+			length:   0,
+			data:     nil,
+		}
+
+		stream := NewStream(make([]byte, 0, 100))
+		if err := cert.WriteToMessage(stream); err != nil {
+			t.Fatalf("WriteToMessage failed: %v", err)
+		}
+
+		bytes := stream.Bytes()
+		if len(bytes) != 3 {
+			t.Fatalf("Expected 3 bytes (type + length), got %d", len(bytes))
+		}
+		if bytes[0] != CERTIFICATE_NULL {
+			t.Errorf("Expected type %d, got %d", CERTIFICATE_NULL, bytes[0])
+		}
+		// Length should be 0
+		length := uint16(bytes[1])<<8 | uint16(bytes[2])
+		if length != 0 {
+			t.Errorf("Expected length 0, got %d", length)
+		}
+	})
+
+	t.Run("Legacy certificate with data", func(t *testing.T) {
+		testData := []byte{0x01, 0x02, 0x03, 0x04}
+		cert := &Certificate{
+			cert:     nil, // Force legacy path
+			certType: 5,   // Some certificate type
+			length:   uint16(len(testData)),
+			data:     testData,
+		}
+
+		stream := NewStream(make([]byte, 0, 100))
+		if err := cert.WriteToMessage(stream); err != nil {
+			t.Fatalf("WriteToMessage failed: %v", err)
+		}
+
+		bytes := stream.Bytes()
+		// Expected: [type:1][length:2][data:4] = 7 bytes
+		expectedLen := 1 + 2 + len(testData)
+		if len(bytes) != expectedLen {
+			t.Fatalf("Expected %d bytes, got %d", expectedLen, len(bytes))
+		}
+
+		// Verify type
+		if bytes[0] != 5 {
+			t.Errorf("Expected type 5, got %d", bytes[0])
+		}
+
+		// Verify length
+		length := uint16(bytes[1])<<8 | uint16(bytes[2])
+		if length != uint16(len(testData)) {
+			t.Errorf("Expected length %d, got %d", len(testData), length)
+		}
+
+		// Verify data
+		data := bytes[3:]
+		if len(data) != len(testData) {
+			t.Fatalf("Expected data length %d, got %d", len(testData), len(data))
+		}
+		for i := range testData {
+			if data[i] != testData[i] {
+				t.Errorf("Data mismatch at index %d: expected %d, got %d", i, testData[i], data[i])
+			}
+		}
+	})
+
+	t.Run("Legacy certificate with empty data but non-zero length", func(t *testing.T) {
+		// Edge case: length > 0 but data is nil/empty
+		cert := &Certificate{
+			cert:     nil,
+			certType: 3,
+			length:   0,            // Zero length, no data should be written
+			data:     []byte{0xFF}, // This shouldn't be written
+		}
+
+		stream := NewStream(make([]byte, 0, 100))
+		if err := cert.WriteToMessage(stream); err != nil {
+			t.Fatalf("WriteToMessage failed: %v", err)
+		}
+
+		bytes := stream.Bytes()
+		if len(bytes) != 3 {
+			t.Fatalf("Expected 3 bytes (type + length only), got %d", len(bytes))
+		}
+	})
+
+	t.Run("Legacy certificate with maximum length", func(t *testing.T) {
+		// Test with a larger data payload
+		largeData := make([]byte, 1024)
+		for i := range largeData {
+			largeData[i] = byte(i % 256)
+		}
+
+		cert := &Certificate{
+			cert:     nil,
+			certType: 7,
+			length:   uint16(len(largeData)),
+			data:     largeData,
+		}
+
+		stream := NewStream(make([]byte, 0, 2000))
+		if err := cert.WriteToMessage(stream); err != nil {
+			t.Fatalf("WriteToMessage failed: %v", err)
+		}
+
+		bytes := stream.Bytes()
+		expectedLen := 1 + 2 + len(largeData)
+		if len(bytes) != expectedLen {
+			t.Fatalf("Expected %d bytes, got %d", expectedLen, len(bytes))
+		}
+
+		// Verify the data was written correctly
+		data := bytes[3:]
+		for i := range largeData {
+			if data[i] != largeData[i] {
+				t.Errorf("Data mismatch at index %d: expected %d, got %d", i, largeData[i], data[i])
+				break
+			}
+		}
+	})
+
+	t.Run("WriteToStream uses legacy path", func(t *testing.T) {
+		cert := &Certificate{
+			cert:     nil,
+			certType: CERTIFICATE_NULL,
+			length:   0,
+			data:     nil,
+		}
+
+		stream := NewStream(make([]byte, 0, 100))
+		if err := cert.WriteToStream(stream); err != nil {
+			t.Fatalf("WriteToStream failed: %v", err)
+		}
+
+		bytes := stream.Bytes()
+		if len(bytes) != 3 {
+			t.Fatalf("Expected 3 bytes, got %d", len(bytes))
+		}
+		if bytes[0] != CERTIFICATE_NULL {
+			t.Errorf("Expected type %d, got %d", CERTIFICATE_NULL, bytes[0])
+		}
+	})
+}
