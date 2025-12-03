@@ -692,6 +692,11 @@ Contributions are welcome! Please follow these guidelines:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
+**For Maintainers:**
+- Release process documented in [RELEASE.md](RELEASE.md)
+- Version support policy in [CHANGELOG.md](CHANGELOG.md)
+- Development roadmap in [ROADMAP.md](ROADMAP.md)
+
 
 
 ## License
