@@ -302,6 +302,8 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 		receivedMessages int
 		receivedPayload  []byte
 		messageReceived  = make(chan struct{})
+		receiverReady    = make(chan struct{})
+		receiverDest     *Destination
 	)
 
 	// Create receiver session with message callback
@@ -325,6 +327,9 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 		},
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Receiver session status: %d", status)
+			if status == I2CP_SESSION_STATUS_CREATED {
+				close(receiverReady)
+			}
 		},
 	})
 
@@ -335,10 +340,6 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	if err := receiverClient.CreateSession(receiverCtx, receiverSession); err != nil {
 		t.Fatalf("Failed to create receiver session: %v", err)
 	}
-
-	t.Logf("Receiver session created with ID: %d", receiverSession.ID())
-	receiverDest := receiverSession.Destination()
-	t.Logf("Receiver destination (B32): %s", receiverDest.b32)
 
 	// Start receiver I/O processing
 	receiverIOCtx, receiverIOCancel := context.WithTimeout(context.Background(), messageTimeout)
@@ -362,6 +363,17 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 		}
 	}()
 
+	// Wait for receiver session to be created by router
+	t.Log("Waiting for receiver session creation...")
+	select {
+	case <-receiverReady:
+		t.Logf("Receiver session created with ID: %d", receiverSession.ID())
+		receiverDest = receiverSession.Destination()
+		t.Logf("Receiver destination (B32): %s", receiverDest.b32)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for receiver session creation")
+	}
+
 	// Give receiver time to establish tunnels
 	t.Log("Waiting for receiver tunnels to establish...")
 	time.Sleep(10 * time.Second)
@@ -378,9 +390,13 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 
 	t.Log("Sender client connected")
 
+	senderReady := make(chan struct{})
 	senderSession := NewSession(senderClient, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Sender session status: %d", status)
+			if status == I2CP_SESSION_STATUS_CREATED {
+				close(senderReady)
+			}
 		},
 	})
 
@@ -391,9 +407,6 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	if err := senderClient.CreateSession(senderCtx, senderSession); err != nil {
 		t.Fatalf("Failed to create sender session: %v", err)
 	}
-
-	t.Logf("Sender session created with ID: %d", senderSession.ID())
-	t.Logf("Sender destination (B32): %s", senderSession.Destination().b32)
 
 	// Start sender I/O processing
 	senderIOCtx, senderIOCancel := context.WithTimeout(context.Background(), messageTimeout)
@@ -416,6 +429,16 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 			}
 		}
 	}()
+
+	// Wait for sender session to be created by router
+	t.Log("Waiting for sender session creation...")
+	select {
+	case <-senderReady:
+		t.Logf("Sender session created with ID: %d", senderSession.ID())
+		t.Logf("Sender destination (B32): %s", senderSession.Destination().b32)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for sender session creation")
+	}
 
 	// Give sender time to establish tunnels
 	t.Log("Waiting for sender tunnels to establish...")

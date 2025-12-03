@@ -338,12 +338,14 @@ func GetMessageStatusCategory(status SessionMessageStatus) string {
 }
 
 // Session Status Constants
-// Moved from: session.go
+// I2CP specification: SessionStatusMessage (type 20) status field values
+// Based on Java I2P reference implementation and observed router behavior
 type SessionStatus int
 
 const (
-	I2CP_SESSION_STATUS_DESTROYED SessionStatus = iota
-	I2CP_SESSION_STATUS_CREATED
-	I2CP_SESSION_STATUS_UPDATED
-	I2CP_SESSION_STATUS_INVALID
+	I2CP_SESSION_STATUS_CREATED   SessionStatus = iota // 0 - Session created successfully
+	I2CP_SESSION_STATUS_DESTROYED                      // 1 - Session destroyed
+	I2CP_SESSION_STATUS_UPDATED                        // 2 - Session configuration updated
+	I2CP_SESSION_STATUS_INVALID                        // 3 - Session invalid (see errors.go: ErrSessionInvalid)
+	I2CP_SESSION_STATUS_REFUSED                        // 4 - Session creation refused (0.9.12+, see errors.go: ErrSessionRefused)
 )
