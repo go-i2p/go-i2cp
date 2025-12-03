@@ -774,7 +774,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var sessionStatus uint8
 	var err error
 	Debug("Received SessionStatus message.")
-	
+
 	// CRITICAL FIX: I2CP SessionStatus message format is [status: uint8][sessionID: uint16]
 	// NOT [sessionID: uint16][status: uint8]
 	// Evidence: 3-byte messages (1+2=3), router sends correct session IDs but we were
