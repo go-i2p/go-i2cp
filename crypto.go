@@ -73,7 +73,9 @@ func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
 	var r, s *big.Int
 	out := NewStream(make([]byte, 40))
 	c.sh1.Reset()
-	sum := c.sh1.Sum(stream.Bytes())
+	// Hash the data (Write returns the data, Sum computes the hash)
+	c.sh1.Write(stream.Bytes())
+	sum := c.sh1.Sum(nil) // Sum(nil) returns the hash without appending to anything
 	r, s, err = dsa.Sign(c.rng, &sgk.priv, sum)
 	err = writeDsaSigToStream(r, s, out)
 	stream.Write(out.Bytes())

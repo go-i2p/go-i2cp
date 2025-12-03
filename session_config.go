@@ -122,10 +122,57 @@ func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (confi
 }
 
 func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto) {
-	config.destination.WriteToMessage(stream)
-	config.writeMappingToMessage(stream)
-	stream.WriteUint64(uint64(time.Now().Unix() * 1000))
-	crypto.WriteSignatureToStream(&config.destination.sgk, stream)
+	// I2CP CreateSessionMessage format (per Java I2P SessionConfig.java):
+	// 1. Destination bytes
+	// 2. Properties mapping
+	// 3. Creation date (8 bytes - milliseconds since epoch)
+	// 4. Signature over fields 1-3
+
+	// Build data to sign - everything BEFORE the signature
+	dataToSign := NewStream(make([]byte, 0, 512))
+	config.destination.WriteToMessage(dataToSign)
+	config.writeMappingToMessage(dataToSign)
+	dataToSign.WriteUint64(uint64(time.Now().Unix() * 1000))
+
+	Debug("Session config data to sign: %d bytes", dataToSign.Len())
+	if dataToSign.Len() > 0 {
+		Debug("Data to sign (first 64 bytes): %x", dataToSign.Bytes()[:min(64, dataToSign.Len())])
+	}
+
+	// Generate signature over the data
+	signature, err := config.signSessionConfig(dataToSign.Bytes(), crypto)
+	if err != nil {
+		Fatal("Failed to sign session config: %v", err)
+		return
+	}
+
+	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
+
+	// Write the complete message: data + signature
+	stream.Write(dataToSign.Bytes())
+	stream.Write(signature)
+	Debug("Complete CreateSession message: %d bytes", stream.Len())
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// signSessionConfig generates a signature over session config data
+// per I2CP specification - must match destination's signature type
+func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]byte, error) {
+	// Use DSA-SHA1 signature (default for legacy I2CP destinations)
+	if config.destination.sgk.dsaKeyPair != nil {
+		Debug("Signing with DSA-SHA1 keypair")
+		return config.destination.sgk.dsaKeyPair.Sign(data)
+	}
+
+	// Fallback to legacy signature method if new crypto not available
+	return nil, fmt.Errorf("no valid signature keypair available")
 }
 
 func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
