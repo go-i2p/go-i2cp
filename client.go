@@ -1033,64 +1033,6 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 	}
 }
 
-// onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router
-//
-// PROTOCOL NOTE: Per Java I2P reference implementation (I2PClientMessageHandlerMap.java),
-// CreateLeaseSet2Message is CLIENT→ROUTER direction only. Routers do NOT send this message
-// to clients. The correct router→client message for LeaseSet updates is
-// RequestVariableLeaseSetMessage (type 37), handled in onMsgReqVariableLease.
-//
-// This handler is preserved for backwards compatibility and testing purposes but is NOT
-// dispatched in the main message switch. See AUDIT.md Critical Issue #1.
-//
-// Java Reference: ClientMessageEventListener.java:144 - only handles client→router direction
-func (c *Client) onMsgCreateLeaseSet2(stream *Stream) {
-	Debug("Received CreateLeaseSet2Message from router")
-
-	// Read session ID (2 bytes)
-	sessionId, err := stream.ReadUint16()
-	if err != nil {
-		Error("Failed to read session ID from CreateLeaseSet2Message: %v", err)
-		return
-	}
-
-	// Look up session with proper locking
-	c.lock.Lock()
-	session, exists := c.sessions[sessionId]
-	c.lock.Unlock()
-
-	if !exists {
-		Warning("Received CreateLeaseSet2Message for unknown session %d", sessionId)
-		return
-	}
-
-	// Parse LeaseSet2 from stream
-	leaseSet, err := NewLeaseSet2FromStream(stream, c.crypto)
-	if err != nil {
-		Error("Failed to parse LeaseSet2 for session %d: %v", sessionId, err)
-		return
-	}
-
-	Debug("Parsed LeaseSet2 for session %d: type=%d, leases=%d, expires=%s",
-		sessionId, leaseSet.Type(), leaseSet.LeaseCount(),
-		leaseSet.Expires().Format("2006-01-02 15:04:05"))
-
-	// Validate signature (basic check)
-	if !leaseSet.VerifySignature() {
-		Warning("LeaseSet2 signature validation failed for session %d (basic check)", sessionId)
-		// Continue anyway - full crypto verification would be done with proper keys
-	}
-
-	// Check for expiration (warning only)
-	if leaseSet.IsExpired() {
-		Warning("Received expired LeaseSet2 for session %d (expires: %s)",
-			sessionId, leaseSet.Expires().Format("2006-01-02 15:04:05"))
-	}
-
-	// Dispatch to session callback
-	session.dispatchLeaseSet2(leaseSet)
-}
-
 // onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
 // per I2CP specification 0.9.43+ - encrypted LeaseSet blinding parameters
 func (c *Client) onMsgBlindingInfo(stream *Stream) {
