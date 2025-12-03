@@ -265,6 +265,77 @@ const (
 // DEPRECATED: Use uint8 MSG_STATUS_* constants directly
 type SessionMessageStatus = uint8
 
+// IsMessageStatusSuccess returns true if the message status indicates successful delivery.
+// Success statuses include accepted, best-effort success, guaranteed success, and local success.
+func IsMessageStatusSuccess(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_ACCEPTED,
+		MSG_STATUS_BEST_EFFORT_SUCCESS,
+		MSG_STATUS_GUARANTEED_SUCCESS,
+		MSG_STATUS_LOCAL_SUCCESS:
+		return true
+	}
+	return false
+}
+
+// IsMessageStatusFailure returns true if the message status indicates a delivery failure.
+// This includes all failure codes except transient/retriable failures.
+func IsMessageStatusFailure(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_BEST_EFFORT_FAILURE,
+		MSG_STATUS_GUARANTEED_FAILURE,
+		MSG_STATUS_LOCAL_FAILURE,
+		MSG_STATUS_ROUTER_FAILURE,
+		MSG_STATUS_BAD_SESSION,
+		MSG_STATUS_BAD_MESSAGE,
+		MSG_STATUS_MESSAGE_EXPIRED,
+		MSG_STATUS_BAD_LOCAL_LEASESET,
+		MSG_STATUS_UNSUPPORTED_ENCRYPTION,
+		MSG_STATUS_BAD_DESTINATION,
+		MSG_STATUS_BAD_LEASESET,
+		MSG_STATUS_EXPIRED_LEASESET,
+		MSG_STATUS_NO_LEASESET,
+		MSG_STATUS_SEND_BEST_EFFORT_FAILURE,
+		MSG_STATUS_LOOPBACK_DENIED:
+		return true
+	}
+	return false
+}
+
+// IsMessageStatusRetriable returns true if the message status indicates a transient failure
+// that may succeed if retried later. This includes queue overflow, network failures,
+// and temporary tunnel unavailability.
+func IsMessageStatusRetriable(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_OVERFLOW_FAILURE, // Queue full - retry later
+		MSG_STATUS_NO_LOCAL_TUNNELS, // Tunnels building - retry
+		MSG_STATUS_NETWORK_FAILURE:  // Transient network error
+		return true
+	}
+	return false
+}
+
+// GetMessageStatusCategory returns a human-readable category for the message status.
+// Categories: "success", "failure", "retriable", "pending", or "unknown"
+func GetMessageStatusCategory(status SessionMessageStatus) string {
+	if IsMessageStatusSuccess(status) {
+		return "success"
+	}
+	if IsMessageStatusRetriable(status) {
+		return "retriable"
+	}
+	if IsMessageStatusFailure(status) {
+		return "failure"
+	}
+	if status == MSG_STATUS_AVAILABLE {
+		return "pending" // Deprecated status
+	}
+	if status == MSG_STATUS_META_LEASESET {
+		return "meta" // Special status for MetaLeaseSet
+	}
+	return "unknown"
+}
+
 // Session Status Constants
 // Moved from: session.go
 type SessionStatus int
