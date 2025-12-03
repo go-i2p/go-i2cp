@@ -84,6 +84,13 @@ type Client struct {
 
 	// Metrics collection (optional production monitoring)
 	metrics MetricsCollector // nil = metrics disabled
+
+	// Message batching (performance optimization)
+	batchEnabled       bool          // Whether message batching is enabled
+	batchFlushTimer    time.Duration // Time to wait before flushing batch (default 10ms)
+	batchSizeThreshold int           // Size threshold for immediate flush (default 16KB)
+	batchTicker        *time.Ticker  // Ticker for periodic batch flushing
+	batchMu            sync.Mutex    // Protects batch state
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -99,6 +106,11 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c.setDefaultProperties()
 	c.lookup = make(map[string]uint32, 1000)
 	c.lookupReq = make(map[uint32]LookupEntry, 1000)
+
+	// Initialize message batching with defaults
+	c.batchEnabled = false // Disabled by default for backward compatibility
+	c.batchFlushTimer = 10 * time.Millisecond
+	c.batchSizeThreshold = 16 * 1024 // 16KB
 	c.sessions = make(map[uint16]*Session)
 	c.outputQueue = make([]*Stream, 0)
 	c.shutdown = make(chan struct{})
@@ -138,6 +150,14 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 		Debug("Putting %d bytes message on the output queue.", send.Len())
 		c.lock.Lock()
 		c.outputQueue = append(c.outputQueue, send)
+
+		// Check if batching is enabled and size threshold exceeded
+		if c.batchEnabled && c.getTotalQueueSize() >= c.batchSizeThreshold {
+			c.lock.Unlock()
+			// Flush immediately when threshold exceeded
+			Debug("Batch size threshold exceeded (%d bytes), flushing immediately", c.getTotalQueueSize())
+			return c.flushOutputQueue()
+		}
 		c.lock.Unlock()
 	} else {
 		// Track bandwidth and message sent
