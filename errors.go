@@ -120,6 +120,10 @@ var (
 	// Sessions must be created using NewSession() or NewSessionWithContext() to ensure proper initialization.
 	// Zero-value Session{} instances are not safe to use.
 	ErrSessionNotInitialized = errors.New("i2cp: session not initialized (use NewSession)")
+
+	// ErrInvalidArgument indicates a nil or invalid argument was passed to a public API method.
+	// All public methods validate their parameters and return this error for nil values.
+	ErrInvalidArgument = errors.New("i2cp: invalid argument (nil or empty value)")
 )
 
 // MessageError represents an error related to I2CP message processing.

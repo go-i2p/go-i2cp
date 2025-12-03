@@ -1525,6 +1525,11 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		return err
 	}
 
+	// Validate parameters
+	if sess == nil {
+		return fmt.Errorf("session cannot be nil: %w", ErrInvalidArgument)
+	}
+
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before session creation: %w", err)
@@ -1660,6 +1665,14 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	// Ensure client was properly initialized with NewClient()
 	if err := c.ensureInitialized(); err != nil {
 		return 0, err
+	}
+
+	// Validate parameters
+	if session == nil {
+		return 0, fmt.Errorf("session cannot be nil: %w", ErrInvalidArgument)
+	}
+	if address == "" {
+		return 0, fmt.Errorf("address cannot be empty: %w", ErrInvalidArgument)
 	}
 
 	// Check context before starting
