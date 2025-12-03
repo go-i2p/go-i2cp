@@ -443,7 +443,9 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	sessionId, err = stream.ReadUint16()
 	messageId, err = stream.ReadUint32()
 	_ = messageId // currently unused
+	c.lock.Lock()
 	session, ok := c.sessions[sessionId]
+	c.lock.Unlock()
 	if !ok {
 		Fatal("Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
 	}
@@ -537,7 +539,9 @@ func (c *Client) onMsgStatus(stream *Stream) {
 	Debug("Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
 
 	// Find session and dispatch status if available
+	c.lock.Lock()
 	sess := c.sessions[sessionId]
+	c.lock.Unlock()
 	if sess != nil {
 		// Dispatch message status to session callbacks
 		// I2CP 0.9.4+ MessageStatusMessage (type 22) - supports status codes 0-23
@@ -788,16 +792,25 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		}
 		c.currentSession.id = sessionID
 
-		// Dispatch status callback BEFORE registering in sessions map to avoid race condition
-		// where another goroutine might access the session before user initialization completes
-		c.currentSession.dispatchStatus(SessionStatus(sessionStatus))
-
-		// Now register session in map after user callback has completed
+		// CRITICAL FIX: Register session in map BEFORE dispatching callback
+		// This prevents race condition where router sends RequestVariableLeaseSet
+		// immediately after SessionStatus(CREATED), and onMsgReqVariableLease()
+		// tries to lookup the session before registration completes.
+		// See: GO-I2CP RACE CONDITION FIX - SESSION REGISTRATION TIMING ISSUE
+		c.lock.Lock()
 		c.sessions[sessionID] = c.currentSession
+		sess := c.currentSession
 		c.currentSession = nil
+		c.lock.Unlock()
+
+		// Now dispatch status callback - session is already registered and can
+		// handle incoming RequestVariableLeaseSet and other messages
+		sess.dispatchStatus(SessionStatus(sessionStatus))
 	} else {
 		// For non-CREATED status updates, session should already exist
+		c.lock.Lock()
 		sess = c.sessions[sessionID]
+		c.lock.Unlock()
 		if sess == nil {
 			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
 		} else {
@@ -823,7 +836,9 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 		Error("Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
 		return
 	}
+	c.lock.Lock()
 	sess = c.sessions[sessionId]
+	c.lock.Unlock()
 	if sess == nil {
 		Error("Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
 		return
@@ -890,7 +905,9 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	}
 
 	// Find session
+	c.lock.Lock()
 	sess = c.sessions[sessionId]
+	c.lock.Unlock()
 	if sess == nil {
 		Error("Session with id %d doesn't exist for HostReply", sessionId)
 		return
@@ -968,7 +985,9 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 	}
 
 	// Find session
+	c.lock.Lock()
 	sess = c.sessions[sessionId]
+	c.lock.Unlock()
 	if sess == nil {
 		Error("ReconfigureSessionMessage received for unknown session ID %d", sessionId)
 		return
