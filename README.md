@@ -670,6 +670,66 @@ go test -bench=. -benchmem
 - Use `//go:build integration` tag for tests requiring real router
 - Current coverage: **63%** with **215+ passing tests**
 
+## Configuration
+
+go-i2cp can be tuned for different use cases - from maximum anonymity to high performance.
+
+### Quick Configuration Profiles
+
+**High Anonymity** (default - recommended for sensitive use):
+```ini
+inbound.quantity=3
+inbound.length=3
+outbound.quantity=3
+outbound.length=3
+```
+
+**Balanced** (good privacy with acceptable performance):
+```ini
+inbound.quantity=2
+inbound.length=2
+outbound.quantity=2
+outbound.length=2
+```
+
+**Low Latency** (interactive applications, reduced anonymity):
+```ini
+inbound.quantity=2
+inbound.length=1
+outbound.quantity=2
+outbound.length=1
+```
+
+### Configuration File
+
+Create `~/.i2cp.conf` with your settings:
+```ini
+# Tunnel configuration
+inbound.quantity=3
+inbound.length=2
+outbound.quantity=3
+outbound.length=2
+
+# Performance options
+i2cp.fastReceive=true
+i2cp.gzip=true
+crypto.tagsToSend=40
+```
+
+### Programmatic Configuration
+
+```go
+config := go_i2cp.NewSessionConfigFromDestinationFile("myapp.dat", crypto)
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_INBOUND_QUANTITY, "3")
+config.SetProperty(go_i2cp.SESSION_CONFIG_PROP_INBOUND_LENGTH, "2")
+```
+
+For complete tuning guidance, see **[CONFIGURATION.md](CONFIGURATION.md)** which covers:
+- Performance vs privacy tradeoffs
+- Use-case-specific configurations (web servers, messaging, file sharing)
+- Troubleshooting performance issues
+- Resource optimization for mobile/embedded devices
+
 ## Contributing
 
 Contributions are welcome! Please follow these guidelines:
