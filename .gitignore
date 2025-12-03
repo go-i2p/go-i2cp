@@ -131,6 +131,3 @@ __debug_bin
 # Documentation that should be ignored
 SIGNATURE_FIX.md
 
-# Exception: Always track .github directory (CI/CD, issue templates, etc.)
-!.github/
-!.github/**
