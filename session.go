@@ -42,10 +42,15 @@ func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	sess.client = client
 
 	// Create destination with proper error handling
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		// Log error but continue with nil destination - will be handled later
-		Error("Failed to create destination for new session: %v", err)
+	// Check if client.crypto is valid before calling NewDestination
+	var dest *Destination
+	var err error
+	if client != nil && client.crypto != nil {
+		dest, err = NewDestination(client.crypto)
+		if err != nil {
+			// Log error but continue with nil destination - will be handled later
+			Error("Failed to create destination for new session: %v", err)
+		}
 	}
 
 	sess.config = &SessionConfig{destination: dest}
@@ -55,11 +60,35 @@ func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	return
 }
 
+// ensureInitialized checks if the Session has been properly initialized.
+// Returns ErrSessionNotInitialized if the session was created with zero-value (Session{})
+// instead of using NewSession() or NewSessionWithContext().
+//
+// This method checks critical fields that must be non-nil for the session to function:
+// - client: Required for all I2CP operations
+// - config: Required for session configuration
+// - callbacks: Required for message handling
+//
+// This is a defensive check to prevent nil pointer panics from zero-value Session usage.
+func (session *Session) ensureInitialized() error {
+	if session.client == nil {
+		return ErrSessionNotInitialized
+	}
+	if session.config == nil {
+		return ErrSessionNotInitialized
+	}
+	if session.callbacks == nil {
+		return ErrSessionNotInitialized
+	}
+	return nil
+}
+
 // SendMessage sends a basic message without expiration control
 // per I2CP specification - implements basic message delivery via SendMessageMessage (type 5)
 func (session *Session) SendMessage(destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
-	if session.client == nil {
-		return fmt.Errorf("session not connected to client")
+	// Ensure session was properly initialized with NewSession()
+	if err := session.ensureInitialized(); err != nil {
+		return err
 	}
 
 	if destination == nil {
@@ -112,8 +141,9 @@ func (session *Session) SendMessageWithContext(ctx context.Context, destination 
 // per I2CP specification section 7.1 - supports dynamic tunnel and crypto parameter updates
 // Returns error if reconfiguration fails or properties are invalid
 func (session *Session) ReconfigureSession(properties map[string]string) error {
-	if session.client == nil {
-		return fmt.Errorf("session not connected to client")
+	// Ensure session was properly initialized with NewSession()
+	if err := session.ensureInitialized(); err != nil {
+		return err
 	}
 
 	if properties == nil || len(properties) == 0 {
@@ -239,6 +269,11 @@ func (session *Session) SetPrimarySession(primary *Session) error {
 // per I2CP specification - implements proper session lifecycle management with cleanup
 // Sends DestroySession message to router and waits for cleanup completion
 func (session *Session) Close() error {
+	// Ensure session was properly initialized with NewSession()
+	if err := session.ensureInitialized(); err != nil {
+		return err
+	}
+
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -561,8 +596,9 @@ func (session *Session) dispatchBlindingInfo(blindingScheme, blindingFlags uint1
 // per I2CP specification 0.7.1+ - implements SendMessageExpiresMessage (type 36) for enhanced delivery control
 // Supports per-message reliability override and tag management
 func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, flags uint16, expirationSeconds uint64) error {
-	if session.client == nil {
-		return fmt.Errorf("session not connected to client")
+	// Ensure session was properly initialized with NewSession()
+	if err := session.ensureInitialized(); err != nil {
+		return err
 	}
 
 	if dest == nil {
@@ -621,8 +657,9 @@ func (session *Session) SendMessageExpiresWithContext(ctx context.Context, dest 
 // LookupDestination performs a destination lookup using HostLookupMessage
 // per I2CP specification 0.9.11+ - implements destination and hostname resolution
 func (session *Session) LookupDestination(address string, timeout time.Duration) (*Destination, error) {
-	if session.client == nil {
-		return nil, fmt.Errorf("session not connected to client")
+	// Ensure session was properly initialized with NewSession()
+	if err := session.ensureInitialized(); err != nil {
+		return nil, err
 	}
 
 	if address == "" {

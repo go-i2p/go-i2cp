@@ -10,6 +10,11 @@ import (
 // sizeThreshold: size in bytes to trigger immediate flush (e.g., 16KB)
 // This starts a background goroutine that periodically flushes the output queue.
 func (c *Client) EnableBatching(flushTimer time.Duration, sizeThreshold int) {
+	// Silently return if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return
+	}
+
 	c.batchMu.Lock()
 	defer c.batchMu.Unlock()
 
@@ -33,6 +38,11 @@ func (c *Client) EnableBatching(flushTimer time.Duration, sizeThreshold int) {
 // DisableBatching disables message batching and stops the flush timer.
 // Any pending messages in the queue will be flushed before disabling.
 func (c *Client) DisableBatching() error {
+	// Return nil if not initialized (batching can't be enabled anyway)
+	if err := c.ensureInitialized(); err != nil {
+		return nil
+	}
+
 	c.batchMu.Lock()
 	defer c.batchMu.Unlock()
 
@@ -59,6 +69,11 @@ func (c *Client) DisableBatching() error {
 
 // IsBatchingEnabled returns whether message batching is currently enabled.
 func (c *Client) IsBatchingEnabled() bool {
+	// Return false if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return false
+	}
+
 	c.batchMu.Lock()
 	defer c.batchMu.Unlock()
 	return c.batchEnabled

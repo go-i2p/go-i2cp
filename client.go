@@ -146,6 +146,29 @@ func (c *Client) setDefaultProperties() {
 	ParseConfig(config, c.SetProperty)
 }
 
+// ensureInitialized checks if the Client has been properly initialized.
+// Returns ErrClientNotInitialized if the client was created with zero-value (Client{})
+// instead of using NewClient().
+//
+// This method checks critical fields that must be non-nil for the client to function:
+// - crypto: Required for all cryptographic operations
+// - properties: Required for configuration
+// - sessions: Required for session management
+//
+// This is a defensive check to prevent nil pointer panics from zero-value Client usage.
+func (c *Client) ensureInitialized() error {
+	if c.crypto == nil {
+		return ErrClientNotInitialized
+	}
+	if c.properties == nil {
+		return ErrClientNotInitialized
+	}
+	if c.sessions == nil {
+		return ErrClientNotInitialized
+	}
+	return nil
+}
+
 func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) {
 	send := NewStream(make([]byte, 0, stream.Len()+4+1))
 	err = send.WriteUint32(uint32(stream.Len()))
@@ -1391,6 +1414,11 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 //	defer cancel()
 //	err := client.Connect(ctx)
 func (c *Client) Connect(ctx context.Context) error {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before connect: %w", err)
@@ -1492,6 +1520,11 @@ func (c *Client) Connect(ctx context.Context) error {
 //	defer cancel()
 //	err := client.CreateSession(ctx, session)
 func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before session creation: %w", err)
@@ -1552,6 +1585,11 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 //	defer cancel()
 //	err := client.ProcessIO(ctx)
 func (c *Client) ProcessIO(ctx context.Context) error {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
 	// Check context before processing
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before ProcessIO: %w", err)
@@ -1619,6 +1657,11 @@ func (c *Client) ProcessIO(ctx context.Context) error {
 //	defer cancel()
 //	requestId, err := client.DestinationLookup(ctx, session, "example.i2p")
 func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return 0, err
+	}
+
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return 0, fmt.Errorf("context cancelled before lookup: %w", err)
@@ -1687,6 +1730,11 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 //
 //	defer client.Close()
 func (c *Client) Close() error {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
 	Info("Closing client %p", c)
 
 	// Signal shutdown to all operations
@@ -1847,6 +1895,11 @@ func (c *Client) autoReconnect(ctx context.Context) error {
 }
 
 func (c *Client) SetProperty(name, value string) {
+	// Silently return if not initialized (properties map is nil)
+	if c.properties == nil {
+		return
+	}
+
 	if _, ok := c.properties[name]; ok {
 		c.properties[name] = value
 		switch name {
@@ -1872,6 +1925,11 @@ func (c *Client) IsConnected() bool {
 // Pass nil to disable metrics collection.
 // This method is safe to call on a running client.
 func (c *Client) SetMetrics(metrics MetricsCollector) {
+	// Silently return if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return
+	}
+
 	c.lock.Lock()
 	c.metrics = metrics
 	c.lock.Unlock()
@@ -1889,6 +1947,11 @@ func (c *Client) SetMetrics(metrics MetricsCollector) {
 
 // GetMetrics returns the current metrics collector, or nil if disabled.
 func (c *Client) GetMetrics() MetricsCollector {
+	// Return nil if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return nil
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	return c.metrics

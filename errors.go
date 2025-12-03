@@ -110,6 +110,16 @@ var (
 	// ErrClientClosed indicates an operation was attempted on a closed client.
 	// All operations will fail after Close() has been called.
 	ErrClientClosed = errors.New("i2cp: client is closed")
+
+	// ErrClientNotInitialized indicates an operation was attempted on an uninitialized client.
+	// Clients must be created using NewClient() to ensure proper initialization.
+	// Zero-value Client{} instances are not safe to use.
+	ErrClientNotInitialized = errors.New("i2cp: client not initialized (use NewClient)")
+
+	// ErrSessionNotInitialized indicates an operation was attempted on an uninitialized session.
+	// Sessions must be created using NewSession() or NewSessionWithContext() to ensure proper initialization.
+	// Zero-value Session{} instances are not safe to use.
+	ErrSessionNotInitialized = errors.New("i2cp: session not initialized (use NewSession)")
 )
 
 // MessageError represents an error related to I2CP message processing.
