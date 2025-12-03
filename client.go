@@ -81,6 +81,9 @@ type Client struct {
 	reconnectMaxRetries int           // Maximum number of reconnection attempts (0 = infinite)
 	reconnectBackoff    time.Duration // Initial backoff duration between reconnect attempts
 	reconnectMu         sync.Mutex    // Protects reconnection state
+
+	// Metrics collection (optional production monitoring)
+	metrics MetricsCollector // nil = metrics disabled
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -137,6 +140,11 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 		c.outputQueue = append(c.outputQueue, send)
 		c.lock.Unlock()
 	} else {
+		// Track bandwidth and message sent
+		if c.metrics != nil {
+			c.metrics.AddBytesSent(uint64(send.Len()))
+			c.metrics.IncrementMessageSent(typ)
+		}
 		_, err = c.tcp.Send(send)
 	}
 	return
@@ -149,12 +157,14 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	firstFive := NewStream(make([]byte, 5))
 	i, err = c.tcp.Receive(firstFive)
 	if i == 0 {
+		c.trackError("network")
 		if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
 			c.callbacks.OnDisconnect(c, "Didn't receive anything", nil)
 		}
 		return fmt.Errorf("no data received from router")
 	}
 	if err != nil {
+		c.trackError("network")
 		Error("Failed to receive message header: %s", err.Error())
 		return err
 	}
@@ -173,6 +183,7 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 
 	// Enhanced message length validation with type-specific handling
 	if msgType == I2CP_MSG_SET_DATE && length > 0xffff {
+		c.trackError("protocol")
 		Fatal("Unexpected response for SetDate message, check that your router SSL settings match the ~/.i2cp.conf configuration")
 		return fmt.Errorf("invalid SetDate message length: %d", length)
 	}
@@ -189,12 +200,14 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	}
 
 	if length > maxAllowedLength {
+		c.trackError("protocol")
 		Error("Message length %d exceeds maximum allowed %d for message type %d", length, maxAllowedLength, msgType)
 		return fmt.Errorf("message too large: %d bytes (max %d for type %d)", length, maxAllowedLength, msgType)
 	}
 
 	// Validate expected message type if specified
 	if (typ != I2CP_MSG_ANY) && (msgType != typ) {
+		c.trackError("protocol")
 		Error("Expected message type %d, received %d", typ, msgType)
 		return fmt.Errorf("unexpected message type: expected %d, got %d", typ, msgType)
 	}
@@ -240,6 +253,12 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	}
 
 	Debug("Received message type %d with %d bytes", msgType, length)
+
+	// Track bandwidth and message received
+	if c.metrics != nil {
+		c.metrics.AddBytesReceived(uint64(length + 5)) // +5 for header
+		c.metrics.IncrementMessageReceived(msgType)
+	}
 
 	if dispatch {
 		c.onMessage(msgType, stream)
@@ -1370,6 +1389,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	// Establish TCP/TLS connection
 	err := c.tcp.Connect()
 	if err != nil {
+		c.trackError("network")
 		return fmt.Errorf("failed to connect TCP: %w", err)
 	}
 
@@ -1424,6 +1444,12 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	c.connected = true
 	success = true
+
+	// Update metrics connection state
+	if c.metrics != nil {
+		c.metrics.SetConnectionState("connected")
+	}
+
 	return nil
 }
 
@@ -1474,6 +1500,13 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		if res.err != nil {
 			return fmt.Errorf("failed to receive session status: %w", res.err)
 		}
+	}
+
+	// Update metrics for active sessions
+	if c.metrics != nil {
+		c.lock.Lock()
+		c.metrics.SetActiveSessions(len(c.sessions))
+		c.lock.Unlock()
 	}
 
 	return nil
@@ -1663,6 +1696,12 @@ func (c *Client) Close() error {
 	c.tcp.Disconnect()
 	c.connected = false
 
+	// Update metrics connection state
+	if c.metrics != nil {
+		c.metrics.SetConnectionState("disconnected")
+		c.metrics.SetActiveSessions(0)
+	}
+
 	Info("Client %p closed successfully", c)
 	return nil
 }
@@ -1797,4 +1836,38 @@ func (c *Client) SetProperty(name, value string) {
 
 func (c *Client) IsConnected() bool {
 	return c.tcp.IsConnected()
+}
+
+// SetMetrics enables metrics collection with the provided collector.
+// Pass nil to disable metrics collection.
+// This method is safe to call on a running client.
+func (c *Client) SetMetrics(metrics MetricsCollector) {
+	c.lock.Lock()
+	c.metrics = metrics
+	c.lock.Unlock()
+
+	// Update active sessions count if metrics enabled
+	if metrics != nil {
+		metrics.SetActiveSessions(len(c.sessions))
+		if c.connected {
+			metrics.SetConnectionState("connected")
+		} else {
+			metrics.SetConnectionState("disconnected")
+		}
+	}
+}
+
+// GetMetrics returns the current metrics collector, or nil if disabled.
+func (c *Client) GetMetrics() MetricsCollector {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.metrics
+}
+
+// trackError records an error in metrics if enabled.
+// This is a helper method for internal use.
+func (c *Client) trackError(errorType string) {
+	if c.metrics != nil {
+		c.metrics.IncrementError(errorType)
+	}
 }
