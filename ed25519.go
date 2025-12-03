@@ -2,7 +2,7 @@ package go_i2cp
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 
 	cryptoed25519 "github.com/go-i2p/crypto/ed25519"
@@ -20,7 +20,7 @@ import (
 //   - Sign() delegates to crypto.Signer interface (NewSigner().SignHash())
 //   - Verify() delegates to crypto.Verifier interface (NewVerifier().VerifyHash())
 //   - NewEd25519KeyPair() uses crypto.GenerateEd25519KeyPair()
-//   - Maintains I2CP-specific SHA-256 pre-hashing for protocol compatibility
+//   - Maintains I2CP-specific SHA-512 pre-hashing for EdDSA-SHA512-Ed25519 compatibility
 //   - Backward compatible API - all existing tests pass without modification
 //
 // The crypto package provides:
@@ -126,8 +126,8 @@ func (kp *Ed25519KeyPair) Sign(message []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
 
-	// For I2CP compatibility, hash the message first using SHA-256
-	hasher := sha256.New()
+	// For I2CP compatibility, hash the message first using SHA-512 (EdDSA-SHA512-Ed25519)
+	hasher := sha512.New()
 	hasher.Write(message)
 	messageHash := hasher.Sum(nil)
 
@@ -172,8 +172,8 @@ func (kp *Ed25519KeyPair) Verify(message, signature []byte) bool {
 		return false
 	}
 
-	// Hash the message for I2CP compatibility
-	hasher := sha256.New()
+	// Hash the message for I2CP compatibility (EdDSA-SHA512-Ed25519)
+	hasher := sha512.New()
 	hasher.Write(message)
 	messageHash := hasher.Sum(nil)
 

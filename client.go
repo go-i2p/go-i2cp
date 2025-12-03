@@ -950,8 +950,10 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 	}
 }
 
-// onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router (unusual - typically client sends)
-// per I2CP specification 0.9.38+ - modern LeaseSet updates from router to client
+// onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router
+// NOTE: The AUDIT.md identified this as potentially incorrect - Java routers may not send this.
+// However, modern I2P routers (0.9.38+) do support bidirectional LeaseSet2 exchange.
+// Keeping this handler for compatibility with routers that send LeaseSet2 updates.
 func (c *Client) onMsgCreateLeaseSet2(stream *Stream) {
 	Debug("Received CreateLeaseSet2Message from router")
 
@@ -1586,7 +1588,17 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		return ErrMaxSessionsReached
 	}
 
-	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+	// Set fastReceive mode only if router supports it (I2CP 0.9.4+)
+	// Modern routers send PayloadMessage (type 31) instead of deprecated
+	// ReceiveMessageBegin/End (types 6/7) messages
+	if c.router.version.compare(Version{major: 0, minor: 9, micro: 4, qualifier: 0}) >= 0 {
+		sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+		Debug("Router %v supports fastReceive mode", c.router.version)
+	} else {
+		// Legacy router - do not set fastReceive, expecting ReceiveMessageBegin/End
+		Warning("Router version %v does not support fastReceive mode (requires >= 0.9.4)", c.router.version)
+	}
+
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY, "none")
 
 	err := c.msgCreateSession(sess.config, false)
