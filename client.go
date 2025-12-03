@@ -774,14 +774,20 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var sessionStatus uint8
 	var err error
 	Debug("Received SessionStatus message.")
-	sessionID, err = stream.ReadUint16()
-	if err != nil {
-		Error("Failed to read session ID from SessionStatus: %v", err)
-		return
-	}
+	
+	// CRITICAL FIX: I2CP SessionStatus message format is [status: uint8][sessionID: uint16]
+	// NOT [sessionID: uint16][status: uint8]
+	// Evidence: 3-byte messages (1+2=3), router sends correct session IDs but we were
+	// reading status byte as first byte of session ID, causing session ID to always be 0.
+	// See: GO-I2CP PROTOCOL FIX - SESSION STATUS MESSAGE BYTE ORDER
 	sessionStatus, err = stream.ReadByte()
 	if err != nil {
-		Error("Failed to read session status from SessionStatus for session %d: %v", sessionID, err)
+		Error("Failed to read session status from SessionStatus: %v", err)
+		return
+	}
+	sessionID, err = stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read session ID from SessionStatus after status %d: %v", sessionStatus, err)
 		return
 	}
 	Debug("SessionStatus for session %d: status %d", sessionID, sessionStatus)
