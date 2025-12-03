@@ -95,8 +95,6 @@ err = go_i2cp.RetryWithBackoff(ctx, 3, time.Second, func() error {
 })
 ```
 
-
-
 ## Bandwidth Management
 
 Monitor and control bandwidth usage with callback-based rate limiting:
@@ -122,8 +120,6 @@ client := go_i2cp.NewClient(&go_i2cp.ClientCallbacks{
 ```
 
 See [examples/bandwidth-limits/](examples/bandwidth-limits/) for complete rate limiting implementation.
-
-
 
 ## Session Configuration
 
@@ -224,15 +220,10 @@ go test -race ./...
 go test -bench=. -benchmem
 ```
 
-
-z
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-
-
 ## License
 
 MIT License - See LICENSE file
-
