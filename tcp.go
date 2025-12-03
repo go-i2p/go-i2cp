@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -170,6 +171,10 @@ func (tcp *Tcp) Connect() (err error) {
 		}
 	}
 
+	// Initialize buffered reader for non-destructive peeking
+	// This prevents CanRead() from consuming bytes from the stream
+	tcp.reader = bufio.NewReader(tcp.conn)
+
 	return nil
 }
 
@@ -182,7 +187,12 @@ func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
 }
 
 func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
-	i, err = tcp.conn.Read(buf.Bytes())
+	// Use buffered reader to preserve data consumed by CanRead()
+	if tcp.reader != nil {
+		i, err = tcp.reader.Read(buf.Bytes())
+	} else {
+		i, err = tcp.conn.Read(buf.Bytes())
+	}
 	return
 }
 
@@ -191,8 +201,29 @@ func (tcp *Tcp) CanRead() bool {
 		return false
 	}
 
+	// Use buffered reader's Peek() for non-destructive data availability check
+	// This fixes the critical bug where CanRead() consumed bytes from the stream
+	if tcp.reader != nil {
+		// Peek at 1 byte without consuming it from the buffer
+		_, err := tcp.reader.Peek(1)
+		if err == nil {
+			// Data is available and buffered
+			return true
+		}
+		// Handle EOF (connection closed)
+		if err == io.EOF {
+			if tcp.address != nil {
+				Debug("%s detected closed connection", tcp.address.String())
+			}
+			defer tcp.Disconnect()
+			return false
+		}
+		// No data available or other error
+		return false
+	}
+
+	// Fallback for unbuffered connection (should not occur in normal operation)
 	// Set a very short read deadline (1ms) to check data availability without blocking
-	// This is a non-blocking check to see if data is ready to read
 	deadline := time.Now().Add(1 * time.Millisecond)
 	tcp.conn.SetReadDeadline(deadline)
 
@@ -206,7 +237,6 @@ func (tcp *Tcp) CanRead() bool {
 
 	// Handle different error conditions
 	if err == io.EOF {
-		// Connection closed by remote
 		if tcp.address != nil {
 			Debug("%s detected closed connection", tcp.address.String())
 		}
@@ -217,21 +247,14 @@ func (tcp *Tcp) CanRead() bool {
 	if err != nil {
 		// Check for timeout (expected when no data available)
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			// Timeout means no data currently available, but connection is open
 			return false
 		}
-		// Other errors indicate connection problems
 		Debug("CanRead error (non-timeout): %v", err)
 		return false
 	}
 
-	// Successfully read one byte - data is available
-	// WARNING: This consumes one byte from the stream!
-	// This is a limitation of the current implementation.
-	// A proper fix would use buffered I/O or syscall peeking.
-	// For I2CP protocol, this is problematic as it corrupts the message stream.
-	// TODO: Rewrite to use bufio.Reader for proper peeking
-	Debug("CanRead: Data available (WARNING: consumed 1 byte)")
+	// Data available (but 1 byte was consumed - only in fallback path)
+	Warning("CanRead: Used fallback path that consumes data - reader not initialized")
 	return true
 }
 
@@ -256,6 +279,7 @@ func (tcp *Tcp) GetProperty(property TcpProperty) string {
 type Tcp struct {
 	address    net.Addr
 	conn       net.Conn
+	reader     *bufio.Reader // Buffered reader for non-destructive peeking (fixes CanRead() bug)
 	tlsConfig  *tls.Config
 	properties [NR_OF_TCP_PROPERTIES]string
 }
