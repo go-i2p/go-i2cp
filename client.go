@@ -1458,7 +1458,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) {
 
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
 	Debug("Sending SendMessageMessage")
-	out := bytes.NewBuffer(make([]byte, 0xffff))
+	out := &bytes.Buffer{}
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
 	dest.WriteToMessage(c.messageStream)
@@ -1472,6 +1472,14 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 	c.messageStream.WriteUint32(uint32(out.Len()))
 	c.messageStream.Write(out.Bytes())
 	c.messageStream.WriteUint32(nonce)
+	
+	// Validate total message size per I2CP specification (max 64KB)
+	totalMessageSize := c.messageStream.Len()
+	if totalMessageSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
+		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
+			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
+	}
+	
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
 		Error("Error while sending SendMessageMessage: %v", err)
 		return fmt.Errorf("failed to send SendMessageMessage: %w", err)
@@ -1483,7 +1491,7 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 // per I2CP specification 0.7.1+ - implements expiring message delivery with flags and timeout
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
 	Debug("Sending SendMessageExpiresMessage")
-	out := bytes.NewBuffer(make([]byte, 0xffff))
+	out := &bytes.Buffer{}
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
 	dest.WriteToMessage(c.messageStream)
@@ -1499,6 +1507,14 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	c.messageStream.WriteUint32(nonce)
 	c.messageStream.WriteUint16(flags)
 	c.messageStream.WriteUint64(expirationSeconds)
+	
+	// Validate total message size per I2CP specification (max 64KB)
+	totalMessageSize := c.messageStream.Len()
+	if totalMessageSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
+		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
+			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
+	}
+	
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
 		Error("Error while sending SendMessageExpiresMessage: %v", err)
 		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
