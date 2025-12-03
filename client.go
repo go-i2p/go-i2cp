@@ -94,6 +94,10 @@ type Client struct {
 	// Metrics collection (optional production monitoring)
 	metrics MetricsCollector // nil = metrics disabled
 
+	// Circuit breaker (I2CP enhancement for router failure protection)
+	// Prevents cascading failures by failing fast when router is unreachable
+	circuitBreaker *CircuitBreaker // nil = circuit breaking disabled
+
 	// Message batching (performance optimization)
 	batchEnabled       bool          // Whether message batching is enabled
 	batchFlushTimer    time.Duration // Time to wait before flushing batch (default 10ms)
@@ -120,6 +124,12 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c.batchEnabled = false // Disabled by default for backward compatibility
 	c.batchFlushTimer = 10 * time.Millisecond
 	c.batchSizeThreshold = 16 * 1024 // 16KB
+
+	// Initialize circuit breaker with production defaults
+	// 5 failures = reasonable threshold for router issues
+	// 30 seconds = enough time for router to recover
+	c.circuitBreaker = NewCircuitBreaker(5, 30*time.Second)
+
 	c.sessions = make(map[uint16]*Session)
 	c.outputQueue = make([]*Stream, 0)
 	c.shutdown = make(chan struct{})
@@ -197,7 +207,16 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 			c.metrics.AddBytesSent(uint64(send.Len()))
 			c.metrics.IncrementMessageSent(typ)
 		}
-		_, err = c.tcp.Send(send)
+
+		// Use circuit breaker if available to protect against router failures
+		if c.circuitBreaker != nil {
+			err = c.circuitBreaker.Execute(func() error {
+				_, sendErr := c.tcp.Send(send)
+				return sendErr
+			})
+		} else {
+			_, err = c.tcp.Send(send)
+		}
 	}
 	return
 }
@@ -1470,7 +1489,17 @@ func (c *Client) Connect(ctx context.Context) error {
 	// Send protocol initialization byte
 	c.outputStream.Reset()
 	c.outputStream.WriteByte(I2CP_PROTOCOL_INIT)
-	_, err = c.tcp.Send(c.outputStream)
+
+	// Use circuit breaker if available
+	if c.circuitBreaker != nil {
+		err = c.circuitBreaker.Execute(func() error {
+			_, sendErr := c.tcp.Send(c.outputStream)
+			return sendErr
+		})
+	} else {
+		_, err = c.tcp.Send(c.outputStream)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to send protocol init: %w", err)
 	}
@@ -1617,10 +1646,23 @@ func (c *Client) ProcessIO(ctx context.Context) error {
 		}
 
 		Debug("Sending %d bytes message", stream.Len())
-		ret, err := c.tcp.Send(stream)
+
+		var ret int
+		var sendErr error
+		// Use circuit breaker if available
+		if c.circuitBreaker != nil {
+			sendErr = c.circuitBreaker.Execute(func() error {
+				var err error
+				ret, err = c.tcp.Send(stream)
+				return err
+			})
+		} else {
+			ret, sendErr = c.tcp.Send(stream)
+		}
+
 		if ret < 0 {
 			c.lock.Unlock()
-			return fmt.Errorf("failed to send queued message: %w", err)
+			return fmt.Errorf("failed to send queued message: %w", sendErr)
 		}
 		if ret == 0 {
 			break
@@ -1968,6 +2010,60 @@ func (c *Client) GetMetrics() MetricsCollector {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	return c.metrics
+}
+
+// GetCircuitBreakerState returns the current state of the circuit breaker.
+// Returns CircuitClosed if circuit breaker is disabled (nil).
+//
+// This allows applications to monitor circuit breaker state and implement
+// custom behavior based on router connectivity health.
+//
+// Example:
+//
+//	if client.GetCircuitBreakerState() == CircuitOpen {
+//	    // Router is unreachable, wait before retrying
+//	    time.Sleep(30 * time.Second)
+//	}
+func (c *Client) GetCircuitBreakerState() CircuitState {
+	// Return closed state if not initialized or circuit breaker disabled
+	if err := c.ensureInitialized(); err != nil {
+		return CircuitClosed
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.circuitBreaker == nil {
+		return CircuitClosed
+	}
+
+	return c.circuitBreaker.State()
+}
+
+// ResetCircuitBreaker manually resets the circuit breaker to closed state.
+// This is useful for manual recovery after fixing router connectivity issues.
+//
+// Returns ErrClientNotInitialized if the client was not properly initialized.
+//
+// Example:
+//
+//	// After fixing router configuration
+//	if err := client.ResetCircuitBreaker(); err != nil {
+//	    log.Printf("Failed to reset circuit breaker: %v", err)
+//	}
+func (c *Client) ResetCircuitBreaker() error {
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.Reset()
+	}
+
+	return nil
 }
 
 // trackError records an error in metrics if enabled.
