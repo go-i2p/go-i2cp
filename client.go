@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -900,6 +901,48 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	sess.dispatchDestination(requestId, lup.address, dest)
 }
 
+// validateReconfigureProperties validates reconfiguration property values per I2CP specification.
+// This prevents invalid values (negative counts, excessive tunnel quantities) from being applied
+// to session configuration, matching Java router validation behavior.
+func validateReconfigureProperties(properties map[string]string) error {
+	for key, value := range properties {
+		// Validate tunnel quantities (must be 0-16 per I2CP spec)
+		if strings.HasSuffix(key, ".quantity") {
+			quantity, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("invalid tunnel quantity value '%s' for %s: %w", value, key, err)
+			}
+			if quantity < 0 || quantity > 16 {
+				return fmt.Errorf("tunnel quantity %d out of range [0, 16] for %s", quantity, key)
+			}
+		}
+
+		// Validate tunnel lengths (must be 0-7 per I2CP spec)
+		if strings.HasSuffix(key, ".length") {
+			length, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("invalid tunnel length value '%s' for %s: %w", value, key, err)
+			}
+			if length < 0 || length > 7 {
+				return fmt.Errorf("tunnel length %d out of range [0, 7] for %s", length, key)
+			}
+		}
+
+		// Validate length variance (must be 0-3 per I2CP spec)
+		if strings.HasSuffix(key, ".lengthVariance") {
+			variance, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("invalid length variance value '%s' for %s: %w", value, key, err)
+			}
+			if variance < 0 || variance > 3 {
+				return fmt.Errorf("length variance %d out of range [0, 3] for %s", variance, key)
+			}
+		}
+	}
+
+	return nil
+}
+
 // onMsgReconfigureSession handles ReconfigureSessionMessage (type 2) for dynamic session updates
 // per I2CP specification section 7.1 - supports runtime tunnel and crypto parameter changes
 func (c *Client) onMsgReconfigureSession(stream *Stream) {
@@ -931,6 +974,12 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 	}
 
 	Debug("Reconfiguring session %d with %d properties", sessionId, len(properties))
+
+	// Validate property values before applying
+	if err := validateReconfigureProperties(properties); err != nil {
+		Error("Invalid reconfiguration properties for session %d: %v", sessionId, err)
+		return
+	}
 
 	// Apply properties to session configuration
 	if sess.config != nil {
