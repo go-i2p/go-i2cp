@@ -1,0 +1,157 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in go-i2cp
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us resolve the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: When I call Client.CreateSession(), I get...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the behavior
+      placeholder: |
+        1. Create a new client with...
+        2. Configure session with...
+        3. Call method...
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: The session should be created successfully...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened (include error messages, stack traces)
+      placeholder: |
+        Error: session creation failed: context deadline exceeded
+        Stack trace:
+        ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: go-i2cp Version
+      description: Which version are you using? (run `go list -m github.com/go-i2p/go-i2cp`)
+      placeholder: v0.13.0
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go Version
+      description: Which Go version? (run `go version`)
+      placeholder: go1.24.4 linux/amd64
+    validations:
+      required: true
+
+  - type: input
+    id: i2p-version
+    attributes:
+      label: I2P Router Version
+      description: Which I2P router version are you using?
+      placeholder: 0.9.66
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Which operating system?
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - FreeBSD
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Relevant configuration (redact sensitive info like passwords)
+      placeholder: |
+        ```ini
+        inbound.quantity=3
+        inbound.length=2
+        i2cp.fastReceive=true
+        ```
+      render: ini
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal Code Example
+      description: Minimal code to reproduce the issue
+      placeholder: |
+        ```go
+        package main
+        
+        import go_i2cp "github.com/go-i2p/go-i2cp"
+        
+        func main() {
+            client := go_i2cp.NewClient(nil)
+            // ... code that reproduces the bug
+        }
+        ```
+      render: go
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: Copy and paste relevant log output (set debug logging with environment variables)
+      placeholder: |
+        2025-12-02 10:30:45 [DEBUG] Creating session...
+        2025-12-02 10:30:46 [ERROR] Failed to connect...
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify the following before submitting
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have tested with the latest version of go-i2cp
+          required: true
+        - label: I have included a minimal code example
+          required: true
+        - label: I have redacted any sensitive information (passwords, keys, etc.)
+          required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or information that might help

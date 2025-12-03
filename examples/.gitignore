@@ -1,8 +1,32 @@
-# Ignore compiled binaries in subdirectories
+# Ignore all compiled binaries in example subdirectories
+# Pattern: directory-name/binary-name (binary name matches directory)
+bandwidth-limits/bandwidth-limits
+bandwidth-limits/bandwidth_limits_example
 context-usage/context-usage
-modern-crypto/modern-crypto
+context-usage/context_usage
 encrypted-leaseset/encrypted-leaseset
+encrypted-leaseset/encrypted_leaseset_example
 external-callbacks/external-callbacks
+external-callbacks/main
+metrics/metrics
+metrics/main
+modern-crypto/modern-crypto
+modern-crypto/modern_crypto_demo
+session-creation-fix/session-creation-fix
+session-creation-fix/main
+signature-fix-test/signature-fix-test
+signature-fix-test/main
 tls-connection/tls-connection
-# Ignore test binaries
+tls-connection/tls_connection_example
+
+# Ignore all executables (fallback pattern)
+*/main
+*/*_example
+*/*_demo
+
+# Test binaries
 *.test
+
+# Temporary build artifacts
+*/*.tmp
+*/*.log

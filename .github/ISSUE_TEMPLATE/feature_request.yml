@@ -1,0 +1,125 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for go-i2cp
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please provide details to help us understand your request.
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What kind of feature are you requesting?
+      options:
+        - New I2CP message handler
+        - Performance improvement
+        - API enhancement
+        - Documentation improvement
+        - New example/tutorial
+        - Development tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Is your feature request related to a problem?
+      placeholder: I'm always frustrated when... / It would be easier if...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like
+      placeholder: I would like go-i2cp to support...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: I tried using... but it didn't work because...
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Describe your use case and how this feature would help
+      placeholder: |
+        I'm building an application that needs to...
+        This feature would allow me to...
+
+  - type: textarea
+    id: api-example
+    attributes:
+      label: API Design (Optional)
+      description: If you have ideas about how the API should look, share them here
+      placeholder: |
+        ```go
+        // Example API usage
+        client.NewFeature(params)
+        ```
+      render: go
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature for your use case?
+      options:
+        - Critical (blocking my project)
+        - High (important but I have a workaround)
+        - Medium (nice to have)
+        - Low (minor improvement)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: i2cp-compliance
+    attributes:
+      label: I2CP Protocol Compliance
+      description: Does this feature involve I2CP protocol implementation?
+      options:
+        - "Yes - implements missing I2CP feature"
+        - "No - library enhancement only"
+        - "Not sure"
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Are you willing to help implement this feature?
+      options:
+        - label: I am willing to submit a pull request for this feature
+        - label: I can help with testing
+        - label: I can help with documentation
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify the following before submitting
+      options:
+        - label: I have searched existing issues and discussions
+          required: true
+        - label: I have checked the ROADMAP.md for similar planned features
+          required: true
+        - label: This feature aligns with go-i2cp's goals (low-level I2CP library)
+          required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, links to I2CP spec, or examples from other implementations

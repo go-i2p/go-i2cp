@@ -1,7 +1,26 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
 # Compiled Object files, Static and Dynamic libs (Shared Objects)
 *.o
 *.a
-*.so
 
 # Folders
 _obj
@@ -19,35 +38,99 @@ _cgo_export.*
 
 _testmain.go
 
-*.exe
-*.test
+# Profiling data
 *.prof
+cpu.pprof
+mem.pprof
+
+# Benchmarking data
+*.bench
+
+# Coverage reports
+*.coverage
+coverage.txt
+coverage.html
 
 # Intellij IDE
 .idea/
 *.iml
-
-# test
-test_*
-
-# log
-*.log
-
-# Mac
-.DS_Store
+*.ipr
+*.iws
 
 # VS Code
 .vscode/
+*.code-workspace
 
-# Unix hidden files
-.*
+# GoLand
+.idea/
 
+# Eclipse
+.project
+.classpath
+.settings/
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# Log files
+*.log
+err
+
+# Test artifacts
+test_*
+
+# Documentation drafts
 spec.txt
 review.md
 SAMv3.md
 testplan.md
-err
-*.log
-*.test
 *.txt
-*.out
+
+# Build artifacts
+dist/
+build/
+
+# Air - Live reload
+tmp/
+
+# Delve debugger
+__debug_bin
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# I2P specific
+*.i2p
+*.dat
+
+# Private keys and certificates (security)
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Documentation that should be ignored
+SIGNATURE_FIX.md
+
+# Exception: Always track .github directory (CI/CD, issue templates, etc.)
+!.github/
+!.github/**
