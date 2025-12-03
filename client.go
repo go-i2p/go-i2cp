@@ -361,8 +361,11 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 		c.onMsgHostReply(stream)
 	case I2CP_MSG_RECONFIGURE_SESSION:
 		c.onMsgReconfigureSession(stream)
-	case I2CP_MSG_CREATE_LEASE_SET2:
-		c.onMsgCreateLeaseSet2(stream)
+	// I2CP_MSG_CREATE_LEASE_SET2 (type 41) is CLIENT→ROUTER only per Java I2P reference.
+	// Routers do NOT send this message to clients. The correct router→client message
+	// for LeaseSet updates is RequestVariableLeaseSetMessage (type 37).
+	// Handler preserved below for testing but not dispatched for protocol conformance.
+	// See AUDIT.md Critical Issue #1 for details.
 	case I2CP_MSG_BLINDING_INFO:
 		c.onMsgBlindingInfo(stream)
 	default:
@@ -1002,9 +1005,16 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 }
 
 // onMsgCreateLeaseSet2 handles CreateLeaseSet2Message (type 41) from router
-// NOTE: The AUDIT.md identified this as potentially incorrect - Java routers may not send this.
-// However, modern I2P routers (0.9.38+) do support bidirectional LeaseSet2 exchange.
-// Keeping this handler for compatibility with routers that send LeaseSet2 updates.
+//
+// PROTOCOL NOTE: Per Java I2P reference implementation (I2PClientMessageHandlerMap.java),
+// CreateLeaseSet2Message is CLIENT→ROUTER direction only. Routers do NOT send this message
+// to clients. The correct router→client message for LeaseSet updates is
+// RequestVariableLeaseSetMessage (type 37), handled in onMsgReqVariableLease.
+//
+// This handler is preserved for backwards compatibility and testing purposes but is NOT
+// dispatched in the main message switch. See AUDIT.md Critical Issue #1.
+//
+// Java Reference: ClientMessageEventListener.java:144 - only handles client→router direction
 func (c *Client) onMsgCreateLeaseSet2(stream *Stream) {
 	Debug("Received CreateLeaseSet2Message from router")
 
