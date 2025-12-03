@@ -2066,6 +2066,141 @@ func (c *Client) ResetCircuitBreaker() error {
 	return nil
 }
 
+// RouterVersion returns the I2P router's version information.
+// Returns a zero-value Version struct if the client is not initialized or not connected.
+//
+// This method is safe to call before connecting to the router, but will return
+// meaningful data only after a successful connection (after Connect() completes).
+//
+// I2CP Spec: Router version is exchanged during GetDateMessage (type 32) response.
+//
+// Example:
+//
+//	version := client.RouterVersion()
+//	fmt.Printf("Router version: %d.%d.%d\n", version.major, version.minor, version.micro)
+func (c *Client) RouterVersion() Version {
+	// Return zero-value if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return Version{}
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.router.version
+}
+
+// RouterCapabilities returns the router's capability flags as a bitmask.
+// Returns 0 if the client is not initialized or not connected.
+//
+// Known capability flags:
+//   - ROUTER_CAN_HOST_LOOKUP (1): Router supports hostname resolution (I2CP 0.9.10+)
+//
+// This method is safe to call before connecting to the router, but will return
+// meaningful data only after a successful connection.
+//
+// I2CP Spec: Capabilities are determined from router version during connection.
+//
+// Example:
+//
+//	caps := client.RouterCapabilities()
+//	if (caps & ROUTER_CAN_HOST_LOOKUP) != 0 {
+//	    fmt.Println("Router supports hostname lookups")
+//	}
+func (c *Client) RouterCapabilities() uint32 {
+	// Return 0 if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return 0
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.router.capabilities
+}
+
+// RouterDate returns the router's timestamp in I2P time format (milliseconds since epoch).
+// Returns 0 if the client is not initialized or not connected.
+//
+// This timestamp is used for time synchronization and lease expiration calculations.
+// The router date is typically close to the current system time but may differ
+// if the router's clock is skewed.
+//
+// I2CP Spec: Router date is exchanged during GetDateMessage (type 32) response.
+//
+// Example:
+//
+//	date := client.RouterDate()
+//	routerTime := time.Unix(int64(date/1000), int64((date%1000)*1000000))
+//	fmt.Printf("Router time: %v\n", routerTime)
+func (c *Client) RouterDate() uint64 {
+	// Return 0 if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return 0
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.router.date
+}
+
+// SupportsHostLookup returns whether the router supports hostname resolution.
+// Returns false if the client is not initialized or not connected.
+//
+// Hostname lookup capability was added in I2CP protocol version 0.9.10.
+// Applications should check this capability before calling DestinationLookup
+// with hostname strings (non-base64 destinations).
+//
+// I2CP Spec: HostLookupMessage (type 38) requires router version >= 0.9.10.
+//
+// Example:
+//
+//	if !client.SupportsHostLookup() {
+//	    return fmt.Errorf("router does not support hostname lookups")
+//	}
+//	client.DestinationLookup(ctx, session, "example.i2p")
+func (c *Client) SupportsHostLookup() bool {
+	// Return false if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return false
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+}
+
+// SupportsMultiSession returns whether the router supports multi-session contexts.
+// Returns false if the client is not initialized or not connected.
+//
+// Multi-session support (primary sessions with subsessions) was added in
+// I2CP protocol version 0.9.21. Subsessions share the tunnel pool of their
+// primary session, enabling efficient resource usage for related services.
+//
+// Applications should check this capability before creating subsessions.
+// Attempting to create subsessions on routers that don't support this
+// feature will result in ErrMultiSessionUnsupported errors.
+//
+// I2CP Spec: Multi-session support requires router version >= 0.9.21.
+//
+// Example:
+//
+//	if !client.SupportsMultiSession() {
+//	    return fmt.Errorf("router does not support multi-session contexts")
+//	}
+//	// Safe to create subsessions
+func (c *Client) SupportsMultiSession() bool {
+	// Return false if not initialized
+	if err := c.ensureInitialized(); err != nil {
+		return false
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	// Multi-session support added in I2CP 0.9.21
+	requiredVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
+	return c.router.version.compare(requiredVersion) >= 0
+}
+
 // trackError records an error in metrics if enabled.
 // This is a helper method for internal use.
 func (c *Client) trackError(errorType string) {
