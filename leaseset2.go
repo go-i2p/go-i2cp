@@ -289,7 +289,7 @@ func getSigningPublicKeyFromDestination(dest *Destination) ([]byte, uint32, erro
 
 	// Check algorithm type from signature key pair
 	algorithmType := dest.sgk.algorithmType
-	
+
 	// For DSA keys, extract from signPubKey
 	if algorithmType == DSA_SHA1 || algorithmType == 0 {
 		if dest.signPubKey == nil {

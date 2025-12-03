@@ -129,7 +129,7 @@ func verifyDSASignatureLegacy(pubKeyBytes, message []byte, r, s *big.Int) bool {
 
 	// Create signature from r,s components (40 bytes total)
 	signature := make([]byte, 40)
-	
+
 	// Convert r to bytes (20 bytes)
 	rBytes := r.Bytes()
 	if len(rBytes) > 20 {
@@ -154,7 +154,7 @@ func verifyDSASignatureLegacy(pubKeyBytes, message []byte, r, s *big.Int) bool {
 type SignatureVerifier interface {
 	// Verify verifies a signature against a message
 	Verify(message, signature []byte) error
-	
+
 	// AlgorithmType returns the signature algorithm type (DSA_SHA1, ED25519_SHA256, etc.)
 	AlgorithmType() uint32
 }
@@ -197,7 +197,7 @@ type Ed25519Verifier struct {
 // NewEd25519Verifier creates a new Ed25519 verifier from public key bytes
 func NewEd25519Verifier(pubKeyBytes []byte) (*Ed25519Verifier, error) {
 	if len(pubKeyBytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid Ed25519 public key length: got %d, expected %d", 
+		return nil, fmt.Errorf("invalid Ed25519 public key length: got %d, expected %d",
 			len(pubKeyBytes), ed25519.PublicKeySize)
 	}
 
