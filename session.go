@@ -303,12 +303,13 @@ func (session *Session) Close() error {
 		Debug("Cleared %d pending messages for session %d", pendingCount, session.id)
 	}
 
-	// Mark as closed
+	// Dispatch destroyed status BEFORE marking as closed
+	// This allows callbacks to access session state during destruction notification
+	session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
+
+	// Mark as closed after callbacks have been notified
 	session.closed = true
 	session.closedAt = time.Now()
-
-	// Dispatch destroyed status
-	session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
 
 	return nil
 }
