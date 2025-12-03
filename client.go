@@ -1543,11 +1543,29 @@ func (c *Client) Connect(ctx context.Context) error {
 // CreateSession creates a new I2P session with context support.
 // The context can be used to cancel the session creation or set a timeout.
 //
+// IMPORTANT: You must run ProcessIO() in a background goroutine BEFORE calling CreateSession.
+// The session creation response (SessionStatusMessage) will be received and processed by ProcessIO.
+// The session status callback will be invoked when the router confirms session creation.
+//
 // Example:
 //
+//	// Start ProcessIO in background
+//	go func() {
+//	    for {
+//	        if err := client.ProcessIO(ctx); err != nil {
+//	            // Handle error
+//	            return
+//	        }
+//	        time.Sleep(100 * time.Millisecond)
+//	    }
+//	}()
+//
+//	// Create session
 //	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 //	defer cancel()
 //	err := client.CreateSession(ctx, session)
+//
+// The session will be confirmed via the OnStatus callback in SessionCallbacks.
 func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 	// Ensure client was properly initialized with NewClient()
 	if err := c.ensureInitialized(); err != nil {
@@ -1579,27 +1597,12 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 
 	c.currentSession = sess
 
-	// Receive session status response with context checking
-	type result struct {
-		err error
-	}
-	resultChan := make(chan result, 1)
+	// NOTE: The SessionStatus response will be received and processed by ProcessIO.
+	// The session will be registered in onMsgSessionStatus when the router responds.
+	// The OnStatus callback will be invoked with I2CP_SESSION_STATUS_CREATED.
+	Debug("CreateSession message sent for session, awaiting response via ProcessIO")
 
-	go func() {
-		err := c.recvMessage(I2CP_MSG_ANY, c.messageStream, true)
-		resultChan <- result{err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled during session creation: %w", ctx.Err())
-	case res := <-resultChan:
-		if res.err != nil {
-			return fmt.Errorf("failed to receive session status: %w", res.err)
-		}
-	}
-
-	// Update metrics for active sessions
+	// Update metrics for pending session
 	if c.metrics != nil {
 		c.lock.Lock()
 		c.metrics.SetActiveSessions(len(c.sessions))

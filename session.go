@@ -1003,3 +1003,143 @@ func (session *Session) ClearPendingMessages() int {
 
 	return count
 }
+
+// Config returns the session's configuration.
+// Returns nil if the session was not properly initialized.
+//
+// The returned SessionConfig contains tunnel settings, cryptographic options,
+// and the destination identity for this session.
+//
+// I2CP Spec: Session configuration is sent during CreateSessionMessage (type 1).
+//
+// Example:
+//
+//	config := session.Config()
+//	if config != nil {
+//	    fmt.Printf("Session destination: %s\n", config.destination.Base64())
+//	}
+func (session *Session) Config() *SessionConfig {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.config
+}
+
+// GetTunnelQuantity returns the number of tunnels configured for this session.
+// The inbound parameter determines which direction: true for inbound, false for outbound.
+// Returns 0 if the session is not properly initialized or the property is not set.
+//
+// Tunnel quantity affects anonymity and performance:
+//   - Higher values (3-5): Better anonymity and reliability, more overhead
+//   - Lower values (1-2): Lower latency, less anonymity
+//   - Default (from client properties): 3 tunnels for balanced anonymity/performance
+//
+// I2CP Spec: Tunnel configuration is part of session properties mapping.
+//
+// Example:
+//
+//	inboundCount := session.GetTunnelQuantity(true)
+//	outboundCount := session.GetTunnelQuantity(false)
+//	fmt.Printf("Tunnels: %d inbound, %d outbound\n", inboundCount, outboundCount)
+func (session *Session) GetTunnelQuantity(inbound bool) int {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.config == nil {
+		return 0
+	}
+
+	var prop SessionConfigProperty
+	if inbound {
+		prop = SESSION_CONFIG_PROP_INBOUND_QUANTITY
+	} else {
+		prop = SESSION_CONFIG_PROP_OUTBOUND_QUANTITY
+	}
+
+	value := session.config.properties[prop]
+	if value == "" {
+		return 0
+	}
+
+	// Parse string to int
+	var quantity int
+	fmt.Sscanf(value, "%d", &quantity)
+	return quantity
+}
+
+// GetTunnelLength returns the hop count (length) for tunnels in this session.
+// The inbound parameter determines which direction: true for inbound, false for outbound.
+// Returns 0 if the session is not properly initialized or the property is not set.
+//
+// Tunnel length affects anonymity and latency:
+//   - Higher values (3+): Stronger anonymity, higher latency
+//   - Lower values (1-2): Lower latency, weaker anonymity
+//   - Default (from client properties): 3 hops for strong anonymity
+//
+// I2CP Spec: Tunnel configuration is part of session properties mapping.
+//
+// Example:
+//
+//	inboundLength := session.GetTunnelLength(true)
+//	outboundLength := session.GetTunnelLength(false)
+//	fmt.Printf("Tunnel lengths: %d inbound hops, %d outbound hops\n",
+//	    inboundLength, outboundLength)
+func (session *Session) GetTunnelLength(inbound bool) int {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.config == nil {
+		return 0
+	}
+
+	var prop SessionConfigProperty
+	if inbound {
+		prop = SESSION_CONFIG_PROP_INBOUND_LENGTH
+	} else {
+		prop = SESSION_CONFIG_PROP_OUTBOUND_LENGTH
+	}
+
+	value := session.config.properties[prop]
+	if value == "" {
+		return 0
+	}
+
+	// Parse string to int
+	var length int
+	fmt.Sscanf(value, "%d", &length)
+	return length
+}
+
+// GetProperty returns the value of a specific session configuration property.
+// Returns an empty string if the session is not properly initialized or the property is not set.
+//
+// Available properties include tunnel configuration (quantity, length, variance),
+// cryptographic options (tagsToSend, lowTagThreshold), and I2CP protocol settings
+// (fastReceive, gzip, messageReliability).
+//
+// See SessionConfigProperty constants for the full list of available properties.
+//
+// I2CP Spec: Session properties are sent as a mapping in CreateSessionMessage (type 1).
+//
+// Example:
+//
+//	fastReceive := session.GetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE)
+//	if fastReceive == "true" {
+//	    fmt.Println("Fast receive mode enabled")
+//	}
+//
+//	nickname := session.GetProperty(SESSION_CONFIG_PROP_INBOUND_NICKNAME)
+//	fmt.Printf("Inbound tunnel nickname: %s\n", nickname)
+func (session *Session) GetProperty(prop SessionConfigProperty) string {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.config == nil {
+		return ""
+	}
+
+	if prop < 0 || prop >= NR_OF_SESSION_CONFIG_PROPERTIES {
+		return ""
+	}
+
+	return session.config.properties[prop]
+}

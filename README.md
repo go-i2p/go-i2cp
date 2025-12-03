@@ -26,6 +26,32 @@ go get github.com/go-i2p/go-i2cp
 
 ## Quick Start
 
+### Simple Synchronous Pattern (Recommended for Testing)
+
+```go
+client := go_i2cp.NewClient(nil)
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+if err := client.Connect(ctx); err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+
+session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{})
+
+// CreateSessionSync handles ProcessIO internally and blocks until ready
+ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+if err := client.CreateSessionSync(ctx, session); err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println("Session ready!")
+```
+
+### Production Async Pattern
+
 ```go
 client := go_i2cp.NewClient(nil)
 ctx := context.Background()
@@ -35,13 +61,37 @@ if err := client.Connect(ctx); err != nil {
 }
 defer client.Close()
 
-session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{})
+// Start ProcessIO loop (required for async pattern)
+go func() {
+    for {
+        if err := client.ProcessIO(ctx); err != nil {
+            return
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+}()
+
+// Create session with callback
+sessionReady := make(chan bool, 1)
+session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{
+    OnStatus: func(s *go_i2cp.Session, status go_i2cp.SessionStatus) {
+        if status == go_i2cp.I2CP_SESSION_STATUS_CREATED {
+            sessionReady <- true
+        }
+    },
+})
+
 if err := client.CreateSession(ctx, session); err != nil {
     log.Fatal(err)
 }
+
+<-sessionReady  // Wait for confirmation
+fmt.Println("Session ready!")
 ```
 
 See [examples/](examples/) for complete working examples.
+
+**IMPORTANT**: If you experience session creation hangs with Java I2P router, see [SESSION_CREATION_FIX.md](SESSION_CREATION_FIX.md) for detailed migration guide.
 
 ## Authentication
 
