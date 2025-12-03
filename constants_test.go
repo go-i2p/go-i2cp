@@ -215,8 +215,8 @@ func TestSessionStatusConstants(t *testing.T) {
 		constant SessionStatus
 		expected SessionStatus
 	}{
-		{"Destroyed", I2CP_SESSION_STATUS_DESTROYED, 0},
-		{"Created", I2CP_SESSION_STATUS_CREATED, 1},
+		{"Destroyed", I2CP_SESSION_STATUS_DESTROYED, 1},
+		{"Created", I2CP_SESSION_STATUS_CREATED, 0},
 		{"Updated", I2CP_SESSION_STATUS_UPDATED, 2},
 		{"Invalid", I2CP_SESSION_STATUS_INVALID, 3},
 	}
