@@ -2,7 +2,7 @@ package go_i2cp
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	"math/big"
 
@@ -99,8 +99,8 @@ func verifyEd25519Signature(pubKeyBytes, message, signature []byte) bool {
 		return false
 	}
 
-	// For I2CP compatibility, hash the message with SHA-256
-	hasher := sha256.New()
+	// For I2CP compatibility, hash the message with SHA-512 (EdDSA-SHA512-Ed25519)
+	hasher := sha512.New()
 	hasher.Write(message)
 	messageHash := hasher.Sum(nil)
 

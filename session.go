@@ -99,6 +99,12 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 		return fmt.Errorf("payload cannot be nil")
 	}
 
+	// Validate message size per I2CP specification (max 64KB payload)
+	payloadSize := payload.Len()
+	if payloadSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
+		return fmt.Errorf("message payload size %d exceeds I2CP maximum %d bytes", payloadSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
+	}
+
 	// Use structured logging with session context
 	Debug("Sending message from session %d: protocol=%d, srcPort=%d, destPort=%d, nonce=%d",
 		session.id, protocol, srcPort, destPort, nonce)

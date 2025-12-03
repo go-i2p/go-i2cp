@@ -421,10 +421,15 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	t.Log("Waiting for sender tunnels to establish...")
 	time.Sleep(10 * time.Second)
 
-	// Send message from sender to receiver
-	t.Log("Sending test message...")
-	payload := NewStream(testPayload)
-	nonce := uint32(time.Now().Unix())
+\t// Send message from sender to receiver
+\tt.Log("Sending test message...")
+\t// Use smaller payload to stay within I2CP 64KB limit (accounting for protocol overhead)
+\tpayloadSize := len(testPayload)
+\tif payloadSize > 60000 { // 60KB to allow for protocol overhead
+\t\tpayloadSize = 60000
+\t}
+\tpayload := NewStream(testPayload[:payloadSize])
+\tnonce := uint32(time.Now().Unix())
 
 	err := senderSession.SendMessage(
 		receiverDest,
