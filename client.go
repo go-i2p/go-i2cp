@@ -259,21 +259,15 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 		return fmt.Errorf("invalid SetDate message length: %d", length)
 	}
 
-	// Allow larger messages for specific message types that legitimately need them
-	maxAllowedLength := uint32(I2CP_MESSAGE_SIZE)
-	switch msgType {
-	case I2CP_MSG_CREATE_LEASE_SET, I2CP_MSG_SEND_MESSAGE, I2CP_MSG_PAYLOAD_MESSAGE:
-		// These message types can be larger due to embedded data/leasesets
-		maxAllowedLength = uint32(0x100000) // 1MB limit for data messages
-	case I2CP_MSG_DISCONNECT:
-		// Disconnect messages can contain arbitrary length reason strings
-		maxAllowedLength = uint32(0x10000) // 64KB limit for disconnect reasons
-	}
+	// Enforce I2CP protocol maximum message size limit
+	// The I2CP specification defines a maximum message size of 65535 bytes (64KB)
+	// for all message types to ensure consistent behavior across implementations
+	const I2CP_MAX_MESSAGE_SIZE = 0xffff // 64KB - I2CP protocol limit
 
-	if length > maxAllowedLength {
+	if length > I2CP_MAX_MESSAGE_SIZE {
 		c.trackError("protocol")
-		Error("Message length %d exceeds maximum allowed %d for message type %d", length, maxAllowedLength, msgType)
-		return fmt.Errorf("message too large: %d bytes (max %d for type %d)", length, maxAllowedLength, msgType)
+		Error("Message length %d exceeds I2CP protocol limit %d", length, I2CP_MAX_MESSAGE_SIZE)
+		return fmt.Errorf("message exceeds I2CP limit: %d > %d bytes", length, I2CP_MAX_MESSAGE_SIZE)
 	}
 
 	// Validate expected message type if specified
@@ -787,14 +781,22 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 			return
 		}
 		c.currentSession.id = sessionID
+
+		// Dispatch status callback BEFORE registering in sessions map to avoid race condition
+		// where another goroutine might access the session before user initialization completes
+		c.currentSession.dispatchStatus(SessionStatus(sessionStatus))
+
+		// Now register session in map after user callback has completed
 		c.sessions[sessionID] = c.currentSession
 		c.currentSession = nil
-	}
-	sess = c.sessions[sessionID]
-	if sess == nil {
-		Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
 	} else {
-		sess.dispatchStatus(SessionStatus(sessionStatus))
+		// For non-CREATED status updates, session should already exist
+		sess = c.sessions[sessionID]
+		if sess == nil {
+			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
+		} else {
+			sess.dispatchStatus(SessionStatus(sessionStatus))
+		}
 	}
 }
 
