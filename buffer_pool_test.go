@@ -69,6 +69,9 @@ func TestGetBufferOversized(t *testing.T) {
 	EnableBufferPool()
 	defer DisableBufferPool()
 
+	// Capture initial counter value BEFORE the oversized allocation
+	initialOversized := globalBufferPool.getsOversized
+
 	// Request size larger than largest pool
 	buf := globalBufferPool.GetBuffer(32768)
 
@@ -77,7 +80,6 @@ func TestGetBufferOversized(t *testing.T) {
 	}
 
 	// Should not be pooled
-	initialOversized := globalBufferPool.getsOversized
 	globalBufferPool.PutBuffer(buf)
 
 	// Stats should reflect oversized allocation
