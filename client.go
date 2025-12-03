@@ -3,7 +3,6 @@ package go_i2cp
 import (
 	"bytes"
 	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -460,9 +459,9 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	}
 	payload := bytes.NewBuffer(make([]byte, 0xffff))
 	var decompress io.ReadCloser
-	decompress, err = zlib.NewReader(msgStream)
+	decompress, err = gzip.NewReader(msgStream)
 	if err != nil {
-		Error("Failed to create zlib reader for message payload: %v", err)
+		Error("Failed to create gzip reader for message payload: %v", err)
 		return
 	}
 	_, err = io.Copy(payload, decompress)
