@@ -53,6 +53,15 @@ var defaultProperties = map[string]string{
 	"i2cp.SSL.insecure":              "false",
 	"i2cp.tcp.host":                  "127.0.0.1",
 	"i2cp.tcp.port":                  "7654",
+	// Tunnel configuration (I2CP defaults for anonymity/performance balance)
+	// Higher values = more anonymity but more overhead
+	// 3 tunnels with 3 hops each provides strong anonymity
+	"inbound.quantity":        "3", // Number of inbound tunnels
+	"inbound.length":          "3", // Hops per inbound tunnel
+	"outbound.quantity":       "3", // Number of outbound tunnels
+	"outbound.length":         "3", // Hops per outbound tunnel
+	"inbound.backupQuantity":  "0", // Number of backup inbound tunnels
+	"outbound.backupQuantity": "0", // Number of backup outbound tunnels
 }
 
 type Client struct {

@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
@@ -70,6 +71,28 @@ type SessionConfig struct {
 	properties  [NR_OF_SESSION_CONFIG_PROPERTIES]string
 	date        uint64
 	destination *Destination
+}
+
+// NewSessionConfig creates a new SessionConfig with auto-generated destination.
+// This is the simplest way to create a session configuration without loading from a file.
+// The destination is created using standard cryptography (currently Ed25519 by default).
+//
+// Example:
+//
+//	config := NewSessionConfig()
+//	// config is ready to use with default settings
+//
+// If you need to load a destination from a file, use NewSessionConfigFromDestinationFile instead.
+func NewSessionConfig() (*SessionConfig, error) {
+	crypto := NewCrypto()
+	dest, err := NewDestination(crypto)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create destination: %w", err)
+	}
+
+	return &SessionConfig{
+		destination: dest,
+	}, nil
 }
 
 func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (config SessionConfig) {

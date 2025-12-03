@@ -6,6 +6,73 @@ import (
 	"testing"
 )
 
+// TestNewSessionConfig tests the simple NewSessionConfig constructor
+func TestNewSessionConfig(t *testing.T) {
+	t.Run("creates valid config with auto-generated destination", func(t *testing.T) {
+		config, err := NewSessionConfig()
+		if err != nil {
+			t.Fatalf("NewSessionConfig() failed: %v", err)
+		}
+
+		if config == nil {
+			t.Fatal("Expected non-nil config, got nil")
+		}
+
+		if config.destination == nil {
+			t.Error("Expected destination to be auto-created, got nil")
+		}
+
+		// Verify destination has valid base64 and base32 representations
+		if config.destination.b64 == "" {
+			t.Error("Expected destination to have base64 representation")
+		}
+
+		if config.destination.b32 == "" {
+			t.Error("Expected destination to have base32 representation")
+		}
+	})
+
+	t.Run("creates different destinations each time", func(t *testing.T) {
+		config1, err := NewSessionConfig()
+		if err != nil {
+			t.Fatalf("NewSessionConfig() failed: %v", err)
+		}
+
+		config2, err := NewSessionConfig()
+		if err != nil {
+			t.Fatalf("NewSessionConfig() failed: %v", err)
+		}
+
+		if config1.destination.b64 == config2.destination.b64 {
+			t.Error("Expected different destinations, got same")
+		}
+	})
+
+	t.Run("config is ready for immediate use", func(t *testing.T) {
+		config, err := NewSessionConfig()
+		if err != nil {
+			t.Fatalf("NewSessionConfig() failed: %v", err)
+		}
+
+		// Should be able to write to message without panicking
+		stream := NewStream(make([]byte, 0, 1024))
+		crypto := NewCrypto()
+
+		// This should not panic
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("config.writeToMessage() panicked: %v", r)
+			}
+		}()
+
+		config.writeToMessage(stream, crypto)
+
+		if stream.Len() == 0 {
+			t.Error("Expected non-empty stream after writeToMessage")
+		}
+	})
+}
+
 // TestSessionConfig_propFromString tests the private propFromString method
 func TestSessionConfig_propFromString(t *testing.T) {
 	config := SessionConfig{}
