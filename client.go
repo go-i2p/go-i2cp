@@ -399,11 +399,11 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 
 func (c *Client) onMsgSetDate(stream *Stream) {
 	Debug("Received SetDate message.")
-	
+
 	// DEBUG: Dump raw message bytes
 	rawBytes := stream.Bytes()
 	Debug("SetDate raw bytes (length=%d): %v", len(rawBytes), rawBytes)
-	
+
 	// Read router date (8 bytes, big-endian uint64)
 	routerDate, err := stream.ReadUint64()
 	if err != nil {
@@ -412,7 +412,7 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 		return
 	}
 	Debug("Read router.date = %d", routerDate)
-	
+
 	// Read version string length (1 byte)
 	verLength, err := stream.ReadByte()
 	if err != nil {
@@ -420,7 +420,7 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 		return
 	}
 	Debug("Read version length = %d", verLength)
-	
+
 	// Read version string
 	version := make([]byte, verLength)
 	_, err = stream.Read(version)
@@ -428,11 +428,11 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 		Error("Failed to read version string: %s", err.Error())
 		return
 	}
-	
+
 	c.router.date = routerDate
 	c.router.version = parseVersion(string(version))
 	Debug("Router version %s, date %d", string(version), c.router.date)
-	
+
 	if c.router.version.compare(Version{major: 0, minor: 9, micro: 10, qualifier: 0}) >= 0 {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
 	}
@@ -441,7 +441,7 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 	// Per I2CP spec: session config date must be within ±30 seconds of router time
 	localTime := uint64(time.Now().Unix() * 1000)
 	c.routerTimeMu.Lock()
-	
+
 	// Handle edge case: router sends zero/invalid date (e.g., during initialization)
 	// Zero date would cause session timestamp to become 0, triggering Java NullPointerException
 	if c.router.date == 0 {
@@ -450,7 +450,7 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 	} else {
 		c.routerTimeDelta = int64(c.router.date) - int64(localTime)
 		c.routerTimeMu.Unlock()
-		
+
 		Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, c.router.date)
 		if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
 			Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
