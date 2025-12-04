@@ -89,6 +89,10 @@ type Client struct {
 	routerTimeDelta int64      // milliseconds offset: router_time - local_time
 	routerTimeMu    sync.RWMutex // Protects router time delta access
 
+	// Multi-session support (MAJOR FIX: I2CP spec § Multi-Session as of 0.9.21)
+	// Tracks primary session (first created) vs subsessions for proper lifecycle management
+	primarySessionID *uint16 // ID of the first created session (nil if no sessions yet)
+
 	// Reconnection support (I2CP enhancement for production reliability)
 	reconnectEnabled    bool          // Whether auto-reconnect is enabled
 	reconnectAttempts   int           // Current number of reconnection attempts
@@ -827,6 +831,28 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		// tries to lookup the session before registration completes.
 		// See: GO-I2CP RACE CONDITION FIX - SESSION REGISTRATION TIMING ISSUE
 		c.lock.Lock()
+		
+		// MAJOR FIX: Multi-session tracking per I2CP spec § Multi-Session (as of 0.9.21)
+		// Track first session as primary, subsequent sessions as subsessions
+		if c.primarySessionID == nil {
+			// This is the first session - mark as primary
+			id := sessionID
+			c.primarySessionID = &id
+			c.currentSession.isPrimary = true
+			c.currentSession.primarySession = nil // Primary has no parent
+			Debug("Session %d is primary session", sessionID)
+		} else {
+			// This is a subsession - link to primary
+			c.currentSession.isPrimary = false
+			if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
+				c.currentSession.primarySession = primarySess
+				Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
+			} else {
+				Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
+			}
+		}
+		
+		// Register the session
 		c.sessions[sessionID] = c.currentSession
 		sess := c.currentSession
 		c.currentSession = nil
@@ -912,7 +938,8 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	}
 
 	// Parse destination if lookup succeeded (result == 0)
-	if result == 0 {
+	var errorDetail string
+	if result == HOST_REPLY_SUCCESS {
 		dest, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
 			Error("Failed to parse destination from HostReply: %v", err)
@@ -920,17 +947,26 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 		}
 		Debug("HostReply lookup succeeded for request %d", requestId)
 	} else {
-		// Lookup failed - log the error code
-		Debug("HostReply lookup failed for request %d with result code %d", requestId, result)
-
-		// Check if blinding info is required for encrypted LeaseSet (I2CP 0.9.43+)
-		// Result codes 2, 3, 4 indicate the destination requires blinding parameters
-		if result == HOST_REPLY_PASSWORD_REQUIRED ||
-			result == HOST_REPLY_PRIVATE_KEY_REQUIRED ||
-			result == HOST_REPLY_PASSWORD_AND_KEY_REQUIRED {
-			Warning("Lookup failed: encrypted LeaseSet requires blinding info (result code %d) - %v",
-				result, ErrBlindingRequired)
+		// MAJOR FIX: Enhanced error handling for all HostReply codes (I2CP 0.9.43+)
+		switch result {
+		case HOST_REPLY_FAILURE:
+			errorDetail = "General lookup failure"
+		case HOST_REPLY_PASSWORD_REQUIRED:
+			errorDetail = "Encrypted LeaseSet requires lookup password"
+		case HOST_REPLY_PRIVATE_KEY_REQUIRED:
+			errorDetail = "Per-client authentication requires private key"
+		case HOST_REPLY_PASSWORD_AND_KEY_REQUIRED:
+			errorDetail = "Both password and private key required"
+		case HOST_REPLY_DECRYPTION_FAILURE:
+			errorDetail = "Failed to decrypt LeaseSet with provided credentials"
+		case HOST_REPLY_LEASESET_LOOKUP_FAILURE:
+			errorDetail = "LeaseSet not found in network database"
+		case HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED:
+			errorDetail = "Lookup type not supported by router"
+		default:
+			errorDetail = fmt.Sprintf("Unknown error code %d", result)
 		}
+		Warning("HostReply lookup failed for request %d: %s (code %d)", requestId, errorDetail, result)
 	}
 
 	// Find session
@@ -943,8 +979,10 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	}
 
 	// Get and remove lookup entry
+	c.lock.Lock() // MAJOR FIX: Thread-safe access to lookupReq map
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
+	c.lock.Unlock()
 
 	if lup.address == "" {
 		Warning("No lookup entry found for request ID %d", requestId)
@@ -1485,6 +1523,12 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
 			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
 	}
+	// MAJOR FIX: Warn if near boundary - spec says "about 64KB" (router-dependent)
+	const I2CP_SAFE_MESSAGE_SIZE = 65520 // Leave 16-byte margin
+	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
+		Warning("Message size %d near I2CP limit (%d), some routers may reject",
+			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
+	}
 
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
 		Error("Error while sending SendMessageMessage: %v", err)
@@ -1497,6 +1541,19 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 // per I2CP specification 0.7.1+ - implements expiring message delivery with flags and timeout
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
 	Debug("Sending SendMessageExpiresMessage")
+	
+	// MAJOR FIX: Validate flags per I2CP spec § SendMessageExpiresMessage
+	// Bits 15-11 must be zero (reserved)
+	const SEND_MSG_FLAGS_RESERVED_MASK uint16 = 0xF800
+	if flags & SEND_MSG_FLAGS_RESERVED_MASK != 0 {
+		return fmt.Errorf("invalid SendMessageExpires flags: reserved bits set (0x%04x)", flags)
+	}
+	// Bits 10-9 are deprecated reliability override (warn if set)
+	const SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600
+	if flags & SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
+		Warning("SendMessageExpires flags contain deprecated reliability override (bits 10-9)")
+	}
+	
 	out := &bytes.Buffer{}
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
@@ -1519,6 +1576,12 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	if totalMessageSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
 		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
 			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
+	}
+	// MAJOR FIX: Warn if near boundary - spec says "about 64KB" (router-dependent)
+	const I2CP_SAFE_MESSAGE_SIZE = 65520 // Leave 16-byte margin
+	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
+		Warning("SendMessageExpires size %d near I2CP limit (%d), some routers may reject",
+			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
 	}
 
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
@@ -1903,13 +1966,19 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	}
 
 	lup = LookupEntry{address: address, session: session}
+	
+	// MAJOR FIX: Thread-safe access to lookupReq map (I2CP HostLookup race condition)
+	c.lock.Lock()
 	c.lookupRequestId += 1
 	requestId := c.lookupRequestId
 	c.lookupReq[requestId] = lup
+	c.lock.Unlock()
 
 	// Check context before sending lookup
 	if err := ctx.Err(); err != nil {
+		c.lock.Lock()
 		delete(c.lookupReq, requestId)
+		c.lock.Unlock()
 		return 0, fmt.Errorf("context cancelled before sending lookup: %w", err)
 	}
 
@@ -1921,11 +1990,15 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, out.Bytes(), true)
 		}
 		if err != nil {
+			c.lock.Lock()
 			delete(c.lookupReq, requestId)
+			c.lock.Unlock()
 			return 0, fmt.Errorf("failed to send host lookup: %w", err)
 		}
 	} else {
+		c.lock.Lock()
 		c.lookup[address] = requestId
+		c.lock.Unlock()
 		c.msgDestLookup(out.Bytes(), true)
 	}
 
