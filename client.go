@@ -70,6 +70,7 @@ type Client struct {
 	tcp             Tcp
 	outputStream    *Stream
 	messageStream   *Stream
+	receiveStream   *Stream // Dedicated buffer for receiving messages (prevents corruption from messageStream reuse)
 	router          RouterInfo
 	outputQueue     []*Stream
 	sessions        map[uint16]*Session
@@ -130,6 +131,7 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	LogInit(ERROR)
 	c.outputStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
 	c.messageStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
+	c.receiveStream = NewStream(make([]byte, 0, I2CP_MESSAGE_SIZE))
 	c.setDefaultProperties()
 	c.lookup = make(map[string]uint32, 1000)
 	c.lookupReq = make(map[uint32]LookupEntry, 1000)
@@ -293,7 +295,7 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 
 	// Allocate appropriately sized buffer for message body
 	if length > 0 {
-		messageBody := NewStream(make([]byte, length))
+		messageBody := NewStream(make([]byte, 0, length)) // Create empty buffer with capacity
 		totalReceived := 0
 
 		// Handle partial reads for large messages
@@ -397,17 +399,40 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 
 func (c *Client) onMsgSetDate(stream *Stream) {
 	Debug("Received SetDate message.")
-	var err error
-	c.router.date, err = stream.ReadUint64()
-	var verLength uint8
-	verLength, err = stream.ReadByte()
+	
+	// DEBUG: Dump raw message bytes
+	rawBytes := stream.Bytes()
+	Debug("SetDate raw bytes (length=%d): %v", len(rawBytes), rawBytes)
+	
+	// Read router date (8 bytes, big-endian uint64)
+	routerDate, err := stream.ReadUint64()
+	if err != nil {
+		Error("Failed to read router date: %s", err.Error())
+		c.router.date = uint64(time.Now().Unix() * 1000) // Fallback to local time
+		return
+	}
+	Debug("Read router.date = %d", routerDate)
+	
+	// Read version string length (1 byte)
+	verLength, err := stream.ReadByte()
+	if err != nil {
+		Error("Failed to read version length: %s", err.Error())
+		return
+	}
+	Debug("Read version length = %d", verLength)
+	
+	// Read version string
 	version := make([]byte, verLength)
 	_, err = stream.Read(version)
+	if err != nil {
+		Error("Failed to read version string: %s", err.Error())
+		return
+	}
+	
+	c.router.date = routerDate
 	c.router.version = parseVersion(string(version))
 	Debug("Router version %s, date %d", string(version), c.router.date)
-	if err != nil {
-		Error("Could not read SetDate correctly data")
-	}
+	
 	if c.router.version.compare(Version{major: 0, minor: 9, micro: 10, qualifier: 0}) >= 0 {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
 	}
@@ -416,13 +441,23 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 	// Per I2CP spec: session config date must be within ±30 seconds of router time
 	localTime := uint64(time.Now().Unix() * 1000)
 	c.routerTimeMu.Lock()
-	c.routerTimeDelta = int64(c.router.date) - int64(localTime)
-	c.routerTimeMu.Unlock()
-
-	Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, c.router.date)
-	if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
-		Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
+	
+	// Handle edge case: router sends zero/invalid date (e.g., during initialization)
+	// Zero date would cause session timestamp to become 0, triggering Java NullPointerException
+	if c.router.date == 0 {
+		Warning("Router sent zero/invalid date - falling back to unsynchronized local time")
+		c.routerTimeDelta = 0
+	} else {
+		c.routerTimeDelta = int64(c.router.date) - int64(localTime)
+		c.routerTimeMu.Unlock()
+		
+		Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, c.router.date)
+		if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
+			Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
+		}
+		return
 	}
+	c.routerTimeMu.Unlock()
 }
 
 func (c *Client) onMsgDisconnect(stream *Stream) {
@@ -1429,6 +1464,10 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug("Sending CreateSessionMessage")
 
+	// Build the session config message first (this sets config.date)
+	c.messageStream.Reset()
+	config.writeToMessage(c.messageStream, c.crypto, c)
+
 	// SPEC COMPLIANCE: Validate session config date per I2CP § CreateSessionMessage
 	// "If the Date in the Session Config is too far (more than +/- 30 seconds) from the
 	// router's current time, the session will be rejected."
@@ -1436,7 +1475,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	routerTimeDelta := c.routerTimeDelta
 	c.routerTimeMu.RUnlock()
 
-	configDate := config.date // milliseconds since epoch
+	configDate := config.date // milliseconds since epoch (set by writeToMessage)
 	localNow := uint64(time.Now().UnixMilli())
 	routerNow := uint64(int64(localNow) + routerTimeDelta)
 
@@ -1458,8 +1497,6 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 		}
 	}
 
-	c.messageStream.Reset()
-	config.writeToMessage(c.messageStream, c.crypto, c)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateSessionMessage.")
 		return err
@@ -1804,7 +1841,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	resultChan := make(chan result, 1)
 
 	go func() {
-		err := c.recvMessage(I2CP_MSG_SET_DATE, c.messageStream, true)
+		err := c.recvMessage(I2CP_MSG_SET_DATE, c.receiveStream, true)
 		resultChan <- result{err: err}
 	}()
 
@@ -2024,7 +2061,7 @@ func (c *Client) ProcessIO(ctx context.Context) error {
 		default:
 		}
 
-		if err = c.recvMessage(I2CP_MSG_ANY, c.messageStream, true); err != nil {
+		if err = c.recvMessage(I2CP_MSG_ANY, c.receiveStream, true); err != nil {
 			return fmt.Errorf("failed to receive message: %w", err)
 		}
 	}

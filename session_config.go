@@ -145,6 +145,9 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 		configTimestamp = uint64(time.Now().Unix() * 1000)
 		Warning("No client provided, using unsynchronized local time")
 	}
+	
+	// Store timestamp in config for validation
+	config.date = configTimestamp
 	dataToSign.WriteUint64(configTimestamp)
 
 	Debug("Session config data to sign: %d bytes", dataToSign.Len())
