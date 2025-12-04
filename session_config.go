@@ -225,3 +225,31 @@ func (config *SessionConfig) SetProperty(prop SessionConfigProperty, value strin
 func (config *SessionConfig) GetProperty(prop SessionConfigProperty) string {
 	return config.properties[prop]
 }
+
+// ValidateTimestamp validates that the session config timestamp is within ±30 seconds
+// of the current time, as required by the I2CP specification.
+//
+// Per I2CP § SessionConfig Notes:
+// "The creation date must be within +/- 30 seconds of the current time when processed
+// by the router, or the config will be rejected."
+//
+// This validation should be called before sending CreateSessionMessage to ensure
+// early detection of clock synchronization issues.
+func (config *SessionConfig) ValidateTimestamp() error {
+	if config.date == 0 {
+		return fmt.Errorf("session config timestamp not set")
+	}
+
+	now := uint64(time.Now().Unix() * 1000)
+	delta := int64(now) - int64(config.date)
+
+	// I2CP spec requires ±30 seconds (30000 milliseconds)
+	const maxDeltaMs = 30000
+	if delta < -maxDeltaMs || delta > maxDeltaMs {
+		return fmt.Errorf("session config timestamp %d is %d ms from current time (max ±%d ms allowed per I2CP spec)",
+			config.date, delta, maxDeltaMs)
+	}
+
+	Debug("Session config timestamp validation passed: delta=%d ms (within ±%d ms)", delta, maxDeltaMs)
+	return nil
+}
