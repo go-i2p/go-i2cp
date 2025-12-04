@@ -32,14 +32,21 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 		return nil, fmt.Errorf("failed to generate signature keypair: %w", err)
 	}
 	dest.signPubKey = dest.sgk.pub.Y
-	
-	// Generate encryption public key (ElGamal-2048 for NULL certificate)
-	// For legacy ElGamal encryption, generate random 256-byte public key
-	_, err = crypto.rng.Read(dest.pubKey[:])
+
+	// Generate ECIES-X25519 encryption keypair
+	// For NULL certificate (legacy format), the 256-byte pubKey field contains:
+	// - X25519 public key (32 bytes) + zero padding (224 bytes)
+	// Modern destinations use KEY certificates with different formats
+	x25519Kp, err := crypto.X25519KeyExchangeKeygen()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate encryption public key: %w", err)
+		return nil, fmt.Errorf("failed to generate X25519 keypair: %w", err)
 	}
-	
+
+	// Copy X25519 public key (32 bytes) to start of pubKey field
+	// Remaining 224 bytes stay as zeros (padding for legacy format)
+	x25519PubKey := x25519Kp.PublicKey()
+	copy(dest.pubKey[:32], x25519PubKey[:])
+
 	dest.generateB32()
 	dest.generateB64()
 	return

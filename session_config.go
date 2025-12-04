@@ -131,13 +131,13 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	// Build data to sign - everything BEFORE the signature
 	dataToSign := NewStream(make([]byte, 0, 512))
 	Debug("dataToSign initial length: %d", dataToSign.Len())
-	
+
 	if err := config.destination.WriteToMessage(dataToSign); err != nil {
 		Fatal("Failed to write destination to dataToSign: %v", err)
 		return
 	}
 	Debug("dataToSign after destination: %d bytes (first 32: %x)", dataToSign.Len(), dataToSign.Bytes()[:min(32, dataToSign.Len())])
-	
+
 	if err := config.writeMappingToMessage(dataToSign); err != nil {
 		Fatal("Failed to write mapping to dataToSign: %v", err)
 		return
