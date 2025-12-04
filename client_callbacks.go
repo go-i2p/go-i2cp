@@ -59,4 +59,22 @@ type ClientCallBacks struct {
 	//	    // Apply rate limiting using limits.ClientInbound/ClientOutbound
 	//	}
 	OnBandwidthLimits func(*Client, *BandwidthLimits)
+
+	// OnHostLookupWithOptions is called when the router responds to a HostLookup request
+	// that included options mapping (I2CP 0.9.66+, types 2-4).
+	// This enables service record retrieval per Proposal 167.
+	// Parameters:
+	//   - client: The client receiving the response
+	//   - requestID: Lookup request ID for correlation
+	//   - destination: The resolved destination (nil if lookup failed)
+	//   - options: Service record options (e.g., service ports, endpoints, metadata)
+	//
+	// Example:
+	//
+	//	OnHostLookupWithOptions: func(c *Client, reqID uint32, dest *Destination, opts map[string]string) {
+	//	    if smtpPort, ok := opts["service.smtp.port"]; ok {
+	//	        log.Printf("Destination has SMTP service on port %s", smtpPort)
+	//	    }
+	//	}
+	OnHostLookupWithOptions func(*Client, uint32, *Destination, map[string]string)
 }

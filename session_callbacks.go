@@ -87,4 +87,27 @@ type SessionCallbacks struct {
 	//	    }
 	//	}
 	OnBlindingInfo func(session *Session, blindingScheme, blindingFlags uint16, blindingParams []byte)
+
+	// OnMetaLeaseSet is called when a send attempt fails because the destination uses a MetaLeaseSet.
+	// I2CP 0.9.41+ (MessageStatus code 22) - Indicates multi-homed destination requiring resolution.
+	// Parameters:
+	//   - session: The session that attempted to send
+	//   - originalDest: The MetaLeaseSet destination that was targeted
+	//   - messageNonce: Nonce of the failed message (for retry tracking)
+	//
+	// Recovery procedure:
+	//  1. Call session.LookupDestination() with the originalDest hash to retrieve MetaLeaseSet contents
+	//  2. Parse the MetaLeaseSet to extract available destination hashes
+	//  3. Select one hash (application logic - e.g., random, round-robin, or preference-based)
+	//  4. Retry SendMessage using the selected destination hash
+	//
+	// Example:
+	//
+	//	OnMetaLeaseSet: func(sess *Session, dest *Destination, nonce uint32) {
+	//	    log.Printf("Destination is MetaLeaseSet, resolving...")
+	//	    // Request MetaLeaseSet contents via HostLookup
+	//	    sess.LookupDestination(dest.Base64())
+	//	    // In OnDestination callback, parse meta and select actual destination
+	//	}
+	OnMetaLeaseSet func(session *Session, originalDest *Destination, messageNonce uint32)
 }

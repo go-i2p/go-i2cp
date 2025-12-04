@@ -1329,7 +1329,20 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 // getAuthenticationMethod determines which authentication method is being used
 // based on the client's configuration properties.
 // Returns one of: AUTH_METHOD_NONE, AUTH_METHOD_USERNAME_PWD, or AUTH_METHOD_SSL_TLS
+// Returns error code for unsupported authentication methods (AUTH_METHOD_PER_CLIENT_DH, AUTH_METHOD_PER_CLIENT_PSK)
 func (c *Client) getAuthenticationMethod() uint8 {
+	// Check for unsupported per-client authentication methods (3-4)
+	// SPEC COMPLIANCE: I2CP § BlindingInfoMessage defines DH (3) and PSK (4) auth
+	// These are not yet implemented in go-i2cp
+	if c.properties["i2cp.auth.method"] == "3" {
+		Warning("Per-client DH authentication (method 3) requested but not implemented")
+		return AUTH_METHOD_PER_CLIENT_DH
+	}
+	if c.properties["i2cp.auth.method"] == "4" {
+		Warning("Per-client PSK authentication (method 4) requested but not implemented")
+		return AUTH_METHOD_PER_CLIENT_PSK
+	}
+
 	// Check TLS authentication first (method 2)
 	if c.properties["i2cp.SSL"] == "true" {
 		return AUTH_METHOD_SSL_TLS
@@ -1360,6 +1373,14 @@ func (c *Client) msgGetDate(queue bool) {
 
 	// Determine authentication method
 	authMethod := c.getAuthenticationMethod()
+
+	// SPEC COMPLIANCE: Validate authentication method is supported
+	if authMethod >= AUTH_METHOD_PER_CLIENT_DH {
+		Error("Authentication method %d (per-client DH/PSK) not yet implemented in go-i2cp", authMethod)
+		Warning("Router requires unsupported authentication - connection will likely fail")
+		Warning("Supported methods: 0 (none), 1 (username/password), 2 (TLS)")
+		// Continue anyway to let router reject with proper error message
+	}
 
 	// Build authentication info mapping based on method
 	switch authMethod {
@@ -1400,6 +1421,36 @@ func (c *Client) msgGetDate(queue bool) {
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug("Sending CreateSessionMessage")
+
+	// SPEC COMPLIANCE: Validate session config date per I2CP § CreateSessionMessage
+	// "If the Date in the Session Config is too far (more than +/- 30 seconds) from the
+	// router's current time, the session will be rejected."
+	c.routerTimeMu.RLock()
+	routerTimeDelta := c.routerTimeDelta
+	c.routerTimeMu.RUnlock()
+
+	configDate := config.date // milliseconds since epoch
+	localNow := uint64(time.Now().UnixMilli())
+	routerNow := uint64(int64(localNow) + routerTimeDelta)
+
+	// Calculate skew between config date and router time
+	var skew int64
+	if configDate > routerNow {
+		skew = int64(configDate - routerNow)
+	} else {
+		skew = int64(routerNow - configDate)
+	}
+
+	// Warn if approaching 30-second limit (use 25s threshold to leave margin)
+	if skew > 25000 {
+		Warning("SessionConfig timestamp skew is %d ms (limit 30000 ms) - session may be rejected", skew)
+		Warning("Local time: %d, Router time: %d, Config date: %d", localNow, routerNow, configDate)
+		if skew > 30000 {
+			return fmt.Errorf("SessionConfig date %d is %d ms from router time (max 30000 ms allowed)",
+				configDate, skew)
+		}
+	}
+
 	c.messageStream.Reset()
 	config.writeToMessage(c.messageStream, c.crypto, c)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
@@ -1586,11 +1637,30 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	if flags&SEND_MSG_FLAGS_RESERVED_MASK != 0 {
 		return fmt.Errorf("invalid SendMessageExpires flags: reserved bits set (0x%04x)", flags)
 	}
-	// Bits 10-9 are deprecated reliability override (warn if set)
+
+	// SPEC COMPLIANCE: Bits 10-9 are deprecated reliability override ("to be removed" per spec)
+	// Reject these rather than just warning, as spec indicates removal
 	const SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600
 	if flags&SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
-		Warning("SendMessageExpires flags contain deprecated reliability override (bits 10-9)")
+		return fmt.Errorf("deprecated reliability override flags (bits 10-9) no longer supported per I2CP spec")
 	}
+
+	// SPEC COMPLIANCE: Validate tag threshold (bits 7-4) - must be 0-15
+	tagThreshold := (flags >> 4) & 0x0F
+	if tagThreshold > 15 {
+		return fmt.Errorf("invalid tag threshold: %d (max 15)", tagThreshold)
+	}
+
+	// SPEC COMPLIANCE: Validate tag count (bits 3-0) - must be 0-15
+	tagCount := flags & 0x0F
+	if tagCount > 15 {
+		return fmt.Errorf("invalid tag count: %d (max 15)", tagCount)
+	}
+
+	// Log interpreted flag values for debugging
+	noLeaseSet := (flags & 0x0100) != 0
+	Debug("SendMessageExpires flags: noLeaseSet=%v, tagThreshold=%d, tagCount=%d",
+		noLeaseSet, tagThreshold, tagCount)
 
 	out := &bytes.Buffer{}
 	c.messageStream.Reset()
@@ -2023,7 +2093,7 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	if routerCanHostLookup {
 		var err error
 		if out == nil || out.Len() == 0 {
-			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOST, []byte(address), true)
+			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOSTNAME, []byte(address), true)
 		} else {
 			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, out.Bytes(), true)
 		}

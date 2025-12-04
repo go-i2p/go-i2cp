@@ -120,11 +120,14 @@ const (
 // Moved from: client.go
 const ROUTER_CAN_HOST_LOOKUP uint32 = 1
 
-// Host Lookup Type Constants
-// Moved from: client.go
+// Host Lookup Type Constants (I2CP § HostLookupMessage)
+// Per I2CP 0.9.11+, extended in 0.9.66 with options mappings (Proposal 167 - Service Records)
 const (
-	HOST_LOOKUP_TYPE_HASH = iota
-	HOST_LOOKUP_TYPE_HOST = iota
+	HOST_LOOKUP_TYPE_HASH                  = 0 // Basic hash lookup (since 0.9.11)
+	HOST_LOOKUP_TYPE_HOSTNAME              = 1 // Basic hostname lookup (since 0.9.11)
+	HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS     = 2 // Hash + LeaseSet options mapping (since 0.9.66)
+	HOST_LOOKUP_TYPE_HOSTNAME_WITH_OPTIONS = 3 // Hostname + LeaseSet options mapping (since 0.9.66)
+	HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS     = 4 // Destination + LeaseSet options mapping (since 0.9.66)
 )
 
 // Certificate Type Constants
