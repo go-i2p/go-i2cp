@@ -28,14 +28,37 @@ type LeaseSet2 struct {
 // OfflineSignature represents offline signing data for LeaseSet2.
 // Offline signatures allow separation of online and offline keys for enhanced security.
 //
+// MINOR FIX: Offline Signature Limitations Documentation
+//
+// Current Status:
+//   - ✅ OfflineSignature parsed from CreateLeaseSet2Message
+//   - ✅ Offline signature data stored in LeaseSet2
+//   - ✅ Getter methods available for all fields
+//   - ❌ Signature verification NOT implemented
+//   - ❌ Transient key validation NOT implemented
+//   - ❌ Expiration checking NOT implemented
+//
+// Impact:
+//   - Offline signatures are accepted without cryptographic verification
+//   - Applications cannot validate that a transient key was actually authorized
+//   - Expired offline signatures will not be rejected
+//   - No protection against forged offline signatures
+//
+// For proper offline signature support, applications must implement:
+//  1. Verify offline signature: crypto.VerifyOfflineSignature(signingKey, expires, transientKey, signature)
+//  2. Check expiration: if time.Now().Unix() > int64(expires) { return ErrExpired }
+//  3. Use transient key for LeaseSet signature verification (not signing key)
+//
+// See I2CP § LeaseSet2 Offline Signature and § Signature Types for specifications.
+//
 // I2CP Specification: LeaseSet2 offline signature format
 type OfflineSignature struct {
 	signingKeyType uint16 // Signing key type (e.g., ED25519_SHA256)
-	signingKey     []byte // Public signing key
-	expires        uint32 // Expiration timestamp (seconds since epoch)
+	signingKey     []byte // Public signing key (long-term key, NOT CRYPTOGRAPHICALLY VERIFIED)
+	expires        uint32 // Expiration timestamp in seconds since epoch (NOT CHECKED)
 	transientType  uint16 // Transient signing key type
-	transientKey   []byte // Transient public signing key
-	signature      []byte // Signature of the offline data
+	transientKey   []byte // Transient public signing key (NOT VERIFIED against signature)
+	signature      []byte // Signature of the offline data (NOT VERIFIED)
 }
 
 // NewLeaseSet2FromStream parses a LeaseSet2 structure from an I2CP Stream.

@@ -17,7 +17,8 @@ const (
 	I2CP_CLIENT_VERSION                 = "0.9.33"
 	I2CP_PROTOCOL_INIT            uint8 = 0x2a
 	I2CP_MESSAGE_SIZE                   = 0xffff
-	I2CP_MAX_MESSAGE_PAYLOAD_SIZE       = 65536 // 64KB max payload per I2CP spec
+	I2CP_MAX_MESSAGE_PAYLOAD_SIZE       = 65536 // 64KB max payload per I2CP spec (spec says "about 64 KB")
+	I2CP_SAFE_MESSAGE_SIZE              = 64000 // Conservative limit for universal router compatibility
 	I2CP_MAX_SESSIONS                   = 0xffff
 	I2CP_MAX_SESSIONS_PER_CLIENT        = 32
 	// Session ID 0xFFFF is reserved per I2CP spec for "no session" operations

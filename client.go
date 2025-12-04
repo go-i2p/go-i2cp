@@ -352,8 +352,12 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 	case I2CP_MSG_DISCONNECT:
 		c.onMsgDisconnect(stream)
 	case I2CP_MSG_RECEIVE_MESSAGE_BEGIN:
+		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.4+
+		Warning("Received deprecated RECEIVE_MESSAGE_BEGIN (type 6) - not used in fastReceive mode (default since 0.9.4)")
 		c.onMsgReceiveMessageBegin(stream)
 	case I2CP_MSG_RECEIVE_MESSAGE_END:
+		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.4+
+		Warning("Received deprecated RECEIVE_MESSAGE_END (type 7) - not used in fastReceive mode (default since 0.9.4)")
 		c.onMsgReceiveMessageEnd(stream)
 	case I2CP_MSG_PAYLOAD_MESSAGE:
 		c.onMsgPayload(stream)
@@ -362,14 +366,17 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 	case I2CP_MSG_DEST_REPLY:
 		c.onMsgDestReply(stream)
 	case I2CP_MSG_REQUEST_LEASESET:
+		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.7+
+		Warning("Received deprecated REQUEST_LEASESET (type 21) - router should send REQUEST_VARIABLE_LEASESET (type 37)")
 		c.onMsgRequestLeaseSet(stream)
 	case I2CP_MSG_BANDWIDTH_LIMITS:
 		c.onMsgBandwithLimit(stream)
 	case I2CP_MSG_SESSION_STATUS:
 		c.onMsgSessionStatus(stream)
-	// I2CP_MSG_REPORT_ABUSE (type 29) intentionally not handled - reserved but never implemented
-	// This message type exists in the spec but was never fully implemented in Java I2P
-	// Treating as unknown message type per AUDIT.md recommendation
+	case I2CP_MSG_REPORT_ABUSE:
+		// MINOR FIX: Handle deprecated REPORT_ABUSE message per I2CP spec
+		// This message type exists in the spec but was never fully implemented in Java I2P
+		Warning("Received deprecated REPORT_ABUSE (type 29) - UNUSED, UNSUPPORTED, treating as no-op")
 	case I2CP_MSG_REQUEST_VARIABLE_LEASESET:
 		c.onMsgReqVariableLease(stream)
 	case I2CP_MSG_HOST_REPLY:
@@ -1612,11 +1619,10 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
 			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
 	}
-	// MAJOR FIX: Warn if near boundary - spec says "about 64KB" (router-dependent)
-	const I2CP_SAFE_MESSAGE_SIZE = 65520 // Leave 16-byte margin
+	// MINOR FIX: Warn if exceeding conservative size - spec says "about 64KB" (router-dependent)
 	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
-		Warning("Message size %d near I2CP limit (%d), some routers may reject",
-			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
+		Warning("Message size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
+			totalMessageSize, I2CP_SAFE_MESSAGE_SIZE, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
 	}
 
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
@@ -1685,11 +1691,10 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
 			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
 	}
-	// MAJOR FIX: Warn if near boundary - spec says "about 64KB" (router-dependent)
-	const I2CP_SAFE_MESSAGE_SIZE = 65520 // Leave 16-byte margin
+	// MINOR FIX: Warn if exceeding conservative size - spec says "about 64KB" (router-dependent)
 	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
-		Warning("SendMessageExpires size %d near I2CP limit (%d), some routers may reject",
-			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
+		Warning("SendMessageExpires size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
+			totalMessageSize, I2CP_SAFE_MESSAGE_SIZE, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
 	}
 
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
@@ -2104,6 +2109,8 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 			return 0, fmt.Errorf("failed to send host lookup: %w", err)
 		}
 	} else {
+		// MINOR FIX: Warn when falling back to deprecated DestLookup for old routers
+		Warning("Router version %v < 0.9.11 detected, using deprecated DestLookup (HostLookup unavailable)", c.router.version)
 		c.lock.Lock()
 		c.lookup[address] = requestId
 		c.lock.Unlock()
