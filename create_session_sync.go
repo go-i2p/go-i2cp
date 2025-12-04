@@ -29,7 +29,7 @@ import (
 // Example:
 //
 //	session := NewSession(client, SessionCallbacks{
-//	    OnMessage: func(s *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+//	    OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 //	        fmt.Println("Received message!")
 //	    },
 //	})

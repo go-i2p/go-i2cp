@@ -19,8 +19,8 @@ func main() {
 	// Define callbacks using the exported fields
 	// This pattern now works from external packages!
 	callbacks := go_i2cp.SessionCallbacks{
-		OnMessage: func(session *go_i2cp.Session, protocol uint8, srcPort, destPort uint16, payload *go_i2cp.Stream) {
-			fmt.Printf("Received message: protocol=%d, srcPort=%d, destPort=%d\n", protocol, srcPort, destPort)
+		OnMessage: func(session *go_i2cp.Session, srcDest *go_i2cp.Destination, protocol uint8, srcPort, destPort uint16, payload *go_i2cp.Stream) {
+			fmt.Printf("Received message from %s: protocol=%d, srcPort=%d, destPort=%d\n", srcDest.Base32(), protocol, srcPort, destPort)
 
 			// Example: Filter for I2P streaming protocol (protocol 6)
 			if protocol == 6 {

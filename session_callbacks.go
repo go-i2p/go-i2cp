@@ -21,11 +21,12 @@ type SessionCallbacks struct {
 	// OnMessage is called when a message is received from another I2P destination.
 	// Parameters:
 	//   - session: The session that received the message
+	//   - srcDest: Source I2P destination that sent the message
 	//   - protocol: Protocol number (application-defined)
 	//   - srcPort: Source port (application-defined)
 	//   - destPort: Destination port (application-defined)
 	//   - payload: Message payload as a Stream (can be read with ReadUint*/ReadBytes methods)
-	OnMessage func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream)
+	OnMessage func(session *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream)
 
 	// OnStatus is called when the session status changes.
 	// Parameters:

@@ -308,7 +308,7 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 
 	// Create receiver session with message callback
 	receiverSession := NewSession(receiverClient, SessionCallbacks{
-		OnMessage: func(s *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
 
@@ -316,8 +316,8 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 			receivedPayload = make([]byte, payload.Len())
 			payload.Read(receivedPayload)
 
-			t.Logf("Receiver: Got message - protocol=%d, srcPort=%d, destPort=%d, size=%d",
-				protocol, srcPort, destPort, len(receivedPayload))
+			t.Logf("Receiver: Got message from %s - protocol=%d, srcPort=%d, destPort=%d, size=%d",
+				srcDest.Base32(), protocol, srcPort, destPort, len(receivedPayload))
 
 			// Signal message received
 			select {
@@ -534,11 +534,11 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	)
 
 	targetSession := NewSession(targetClient, SessionCallbacks{
-		OnMessage: func(s *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			targetMu.Lock()
 			defer targetMu.Unlock()
 			targetMessages++
-			t.Logf("Target: Received message - protocol=%d, size=%d", protocol, payload.Len())
+			t.Logf("Target: Received message from %s - protocol=%d, size=%d", srcDest.Base32(), protocol, payload.Len())
 
 			select {
 			case messageReceived <- struct{}{}:
@@ -771,7 +771,7 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 	)
 
 	receiverSession := NewSession(receiverClient, SessionCallbacks{
-		OnMessage: func(s *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
 

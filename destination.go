@@ -179,9 +179,13 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
-	// Ed25519 public keys are 32 bytes, no padding needed for modern KEY certificates
+	// I2CP Destination format ALWAYS uses 128-byte signing key field
+	// Per Java I2P Destination.java: pubKey(256) + signingPubKey(128) + certificate
+	// Even for Ed25519 (32 bytes), we must pad to 128 bytes for I2CP compatibility
 	signKeyBytes := dest.signPubKey.Bytes()
-	if _, err = stream.Write(signKeyBytes); err != nil {
+	paddedSignKey := make([]byte, DSA_SHA1_PUB_KEY_SIZE)
+	copy(paddedSignKey[DSA_SHA1_PUB_KEY_SIZE-len(signKeyBytes):], signKeyBytes)
+	if _, err = stream.Write(paddedSignKey); err != nil {
 		return fmt.Errorf("failed to write signing public key: %w", err)
 	}
 	if err = dest.cert.WriteToMessage(stream); err != nil {
@@ -247,4 +251,14 @@ func (dest *Destination) generateB64() {
 	}
 	// Use common/base64 for I2P-specific base64 encoding (already uses - and ~ chars)
 	dest.b64 = base64.EncodeToString(stream.Bytes())
+}
+
+// Base32 returns the Base32 address of the destination (e.g., "abc123....xyz.b32.i2p")
+func (dest *Destination) Base32() string {
+	return dest.b32
+}
+
+// Base64 returns the Base64 address of the destination
+func (dest *Destination) Base64() string {
+	return dest.b64
 }

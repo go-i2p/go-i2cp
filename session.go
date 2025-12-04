@@ -361,7 +361,7 @@ func (session *Session) handleContextCancellation(ctx context.Context) {
 
 // dispatchMessage dispatches received messages to registered callbacks
 // per I2CP specification - handles MessagePayloadMessage (type 31) delivery
-func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16, payload *Stream) {
+func (session *Session) dispatchMessage(srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 	// Check if session is closed
 	if session.IsClosed() {
 		Warning("Ignoring message dispatch to closed session %d", session.id)
@@ -373,8 +373,8 @@ func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16
 		return
 	}
 
-	Debug("Dispatching message to session %d: protocol=%d, srcPort=%d, destPort=%d",
-		session.id, protocol, srcPort, destPort)
+	Debug("Dispatching message to session %d: from=%s, protocol=%d, srcPort=%d, destPort=%d",
+		session.id, srcDest.Base32(), protocol, srcPort, destPort)
 
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
@@ -384,7 +384,7 @@ func (session *Session) dispatchMessage(protocol uint8, srcPort, destPort uint16
 			}
 		}()
 
-		session.callbacks.OnMessage(session, protocol, srcPort, destPort, payload)
+		session.callbacks.OnMessage(session, srcDest, protocol, srcPort, destPort, payload)
 	}
 
 	if session.syncCallbacks {

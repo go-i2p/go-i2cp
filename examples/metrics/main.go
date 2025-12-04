@@ -43,8 +43,8 @@ func main() {
 
 	// Create session
 	session := i2cp.NewSession(client, i2cp.SessionCallbacks{
-		OnMessage: func(s *i2cp.Session, protocol uint8, srcPort, destPort uint16, payload *i2cp.Stream) {
-			fmt.Printf("Received message: protocol=%d, size=%d\n", protocol, payload.Len())
+		OnMessage: func(s *i2cp.Session, srcDest *i2cp.Destination, protocol uint8, srcPort, destPort uint16, payload *i2cp.Stream) {
+			fmt.Printf("Received message from %s: protocol=%d, size=%d\n", srcDest.Base32(), protocol, payload.Len())
 		},
 		OnStatus: func(s *i2cp.Session, status i2cp.SessionStatus) {
 			fmt.Printf("Session status: %d\n", status)

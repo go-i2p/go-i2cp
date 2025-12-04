@@ -506,6 +506,7 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	var protocol uint8
 	var sessionId, srcPort, destPort uint16
 	var messageId, payloadSize uint32
+	var srcDest *Destination
 	var err error
 	Debug("Received PayloadMessage message")
 	sessionId, err = stream.ReadUint16()
@@ -519,6 +520,13 @@ func (c *Client) onMsgPayload(stream *Stream) {
 	}
 	payloadSize, err = stream.ReadUint32()
 	_ = payloadSize // currently unused
+	// Parse source destination (I2CP spec: destination follows payload size)
+	srcDest, err = NewDestinationFromMessage(stream, c.crypto)
+	if err != nil {
+		Error("Failed to parse source destination from MessagePayload: %v", err)
+		return
+	}
+	Debug("Message from source: %s", srcDest.Base32())
 	// validate gzip header
 	msgStream := bytes.NewBuffer(stream.Bytes())
 	_, err = stream.Read(testHeader[:])
@@ -567,7 +575,7 @@ func (c *Client) onMsgPayload(stream *Stream) {
 			return
 		}
 		Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
-		session.dispatchMessage(protocol, srcPort, destPort, &Stream{payload})
+		session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
 	} else {
 		Debug("Empty payload received for session %d", sessionId)
 	}

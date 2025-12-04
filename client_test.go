@@ -24,7 +24,7 @@ func TestClient_CreateSession(t *testing.T) {
 		},
 		OnStatus: func(session *Session, status SessionStatus) {
 		},
-		OnMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 		},
 	})
 	session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
