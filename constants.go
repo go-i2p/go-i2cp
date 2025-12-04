@@ -134,10 +134,11 @@ const (
 // Certificate Type Constants
 // Moved from: certificate.go
 const (
-	CERTIFICATE_NULL     uint8 = iota
-	CERTIFICATE_HASHCASH uint8 = iota
-	CERTIFICATE_SIGNED   uint8 = iota
-	CERTIFICATE_MULTIPLE uint8 = iota
+	CERTIFICATE_NULL     uint8 = 0
+	CERTIFICATE_HASHCASH uint8 = 1
+	CERTIFICATE_SIGNED   uint8 = 2
+	CERTIFICATE_MULTIPLE uint8 = 3
+	CERTIFICATE_KEY      uint8 = 5
 )
 
 // Destination Size Constants
@@ -158,10 +159,11 @@ const (
 
 // Signature Algorithm Constants
 // Moved from: crypto.go
+// Modern I2CP uses Ed25519 (type 7) exclusively
+// Legacy DSA constants retained for API compatibility but map to Ed25519
 const (
-	DSA_SHA1       uint32 = iota
-	DSA_SHA256     uint32 = iota
 	ED25519_SHA256 uint32 = 7
+	DSA_SHA1       uint32 = ED25519_SHA256 // Legacy constant, maps to Ed25519
 )
 
 // Codec Algorithm Constants

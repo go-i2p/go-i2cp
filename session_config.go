@@ -192,13 +192,19 @@ func min(a, b int) int {
 // signSessionConfig generates a signature over session config data
 // per I2CP specification - must match destination's signature type
 func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]byte, error) {
-	// Use DSA-SHA1 signature (default for legacy I2CP destinations)
+	// Try Ed25519 first (modern, fast signatures)
+	if config.destination.sgk.ed25519KeyPair != nil {
+		Debug("Signing with Ed25519 keypair")
+		return config.destination.sgk.ed25519KeyPair.Sign(data)
+	}
+
+	// Fall back to DSA-SHA1 (legacy)
 	if config.destination.sgk.dsaKeyPair != nil {
 		Debug("Signing with DSA-SHA1 keypair")
 		return config.destination.sgk.dsaKeyPair.Sign(data)
 	}
 
-	// Fallback to legacy signature method if new crypto not available
+	// No valid signature keypair available
 	return nil, fmt.Errorf("no valid signature keypair available")
 }
 

@@ -241,44 +241,23 @@ func (c *Crypto) PublicKeyFromStream(keyType uint32, stream *Stream) (key *big.I
 
 // Generate a signature keypair
 func (c *Crypto) SignatureKeygen(algorithmTyp uint32) (sgk SignatureKeyPair, err error) {
-	switch algorithmTyp {
-	case DSA_SHA1:
-		// Use new DSA wrapper from crypto package
-		dsaKp, err := c.DSASignatureKeygen()
-		if err != nil {
-			return sgk, fmt.Errorf("failed to generate DSA key pair: %w", err)
-		}
-
-		// Convert new DSAKeyPair to legacy SignatureKeyPair for backward compatibility
-		// This allows existing code to continue working while we migrate to the new types
-		sgk.algorithmType = DSA_SHA1
-		sgk.dsaKeyPair = dsaKp
-
-		// Also populate legacy fields for backward compatibility
-		// Extract raw bytes and reconstruct old big.Int format
-		privKeyBytes := dsaKp.PrivateKey()
-		pubKeyBytes := dsaKp.PublicKey()
-
-		// Initialize DSA parameters from crypto struct
-		sgk.priv.G = c.params.G
-		sgk.priv.Q = c.params.Q
-		sgk.priv.P = c.params.P
-		sgk.pub.G = c.params.G
-		sgk.pub.Q = c.params.Q
-		sgk.pub.P = c.params.P
-
-		// Set private key X from bytes
-		sgk.priv.X = new(big.Int)
-		sgk.priv.X.SetBytes(privKeyBytes)
-
-		// Set public key Y from bytes
-		sgk.pub.Y = new(big.Int)
-		sgk.pub.Y.SetBytes(pubKeyBytes)
-		sgk.priv.Y = sgk.pub.Y // Private key also stores public key Y
-	default:
-		err = fmt.Errorf("unsupported signature algorithm type: %d", algorithmTyp)
+	// Modern I2CP uses Ed25519 exclusively (DSA_SHA1 constant maps to Ed25519)
+	// Generate Ed25519 for fast, modern signatures
+	ed25519Kp, err := c.Ed25519SignatureKeygen()
+	if err != nil {
+		return sgk, fmt.Errorf("failed to generate Ed25519 key pair: %w", err)
 	}
-	return
+
+	// Store in SignatureKeyPair structure
+	sgk.algorithmType = ED25519_SHA256
+	sgk.ed25519KeyPair = ed25519Kp
+
+	// For compatibility, also set pub.Y with public key bytes as big.Int
+	pubKeyBytes := ed25519Kp.PublicKey()
+	sgk.pub.Y = new(big.Int)
+	sgk.pub.Y.SetBytes(pubKeyBytes[:])
+
+	return sgk, nil
 } // Ed25519SignatureKeygen generates a new Ed25519 signature key pair
 func (c *Crypto) Ed25519SignatureKeygen() (*Ed25519KeyPair, error) {
 	return NewEd25519KeyPair()

@@ -25,25 +25,27 @@ type Destination struct {
 
 func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
-	nullCert := NewCertificate(CERTIFICATE_NULL)
-	dest.cert = &nullCert
-	dest.sgk, err = crypto.SignatureKeygen(DSA_SHA1)
+
+	// Modern I2CP uses KEY certificates with Ed25519 (signing) + X25519 (encryption)
+	// Certificate format: [type=5][length][sigType=7][cryptoType=3]
+	keyCert := NewCertificate(CERTIFICATE_KEY)
+	dest.cert = &keyCert
+
+	// Generate Ed25519 signing keypair (fast, modern)
+	dest.sgk, err = crypto.SignatureKeygen(ED25519_SHA256)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate signature keypair: %w", err)
+		return nil, fmt.Errorf("failed to generate Ed25519 signature keypair: %w", err)
 	}
 	dest.signPubKey = dest.sgk.pub.Y
 
-	// Generate ECIES-X25519 encryption keypair
-	// For NULL certificate (legacy format), the 256-byte pubKey field contains:
-	// - X25519 public key (32 bytes) + zero padding (224 bytes)
-	// Modern destinations use KEY certificates with different formats
+	// Generate X25519 encryption keypair (ECIES)
 	x25519Kp, err := crypto.X25519KeyExchangeKeygen()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate X25519 keypair: %w", err)
+		return nil, fmt.Errorf("failed to generate X25519 encryption keypair: %w", err)
 	}
 
-	// Copy X25519 public key (32 bytes) to start of pubKey field
-	// Remaining 224 bytes stay as zeros (padding for legacy format)
+	// For KEY certificates, pubKey contains X25519 public key (32 bytes)
+	// Copy to first 32 bytes, rest stays zero for compatibility
 	x25519PubKey := x25519Kp.PublicKey()
 	copy(dest.pubKey[:32], x25519PubKey[:])
 
@@ -177,12 +179,9 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
-	// Pad signing public key to exactly 128 bytes (DSA_SHA1_PUB_KEY_SIZE)
-	// big.Int.Bytes() returns minimal representation without leading zeros
+	// Ed25519 public keys are 32 bytes, no padding needed for modern KEY certificates
 	signKeyBytes := dest.signPubKey.Bytes()
-	paddedSignKey := make([]byte, DSA_SHA1_PUB_KEY_SIZE)
-	copy(paddedSignKey[DSA_SHA1_PUB_KEY_SIZE-len(signKeyBytes):], signKeyBytes)
-	if _, err = stream.Write(paddedSignKey); err != nil {
+	if _, err = stream.Write(signKeyBytes); err != nil {
 		return fmt.Errorf("failed to write signing public key: %w", err)
 	}
 	if err = dest.cert.WriteToMessage(stream); err != nil {

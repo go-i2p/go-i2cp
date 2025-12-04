@@ -439,12 +439,9 @@ func (ls *LeaseSet2) VerifySignature() bool {
 	}
 
 	// Verify signature based on algorithm type
+	// Modern I2CP uses Ed25519 exclusively (DSA_SHA1 maps to ED25519_SHA256)
 	switch algorithmType {
-	case DSA_SHA1:
-		// Use DSA verification via crypto package
-		return verifyDSASignature(pubKeyBytes, signedData, ls.signature)
-
-	case ED25519_SHA256:
+	case ED25519_SHA256: // Handles both Ed25519 and legacy DSA (which now maps to Ed25519)
 		// Use Ed25519 verification via crypto package
 		return verifyEd25519Signature(pubKeyBytes, signedData, ls.signature)
 
