@@ -65,7 +65,7 @@ func TestNewSessionConfig(t *testing.T) {
 			}
 		}()
 
-		config.writeToMessage(stream, crypto)
+		config.writeToMessage(stream, crypto, nil)
 
 		if stream.Len() == 0 {
 			t.Error("Expected non-empty stream after writeToMessage")

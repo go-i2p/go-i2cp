@@ -121,7 +121,7 @@ func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (confi
 	return config
 }
 
-func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto) {
+func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, client *Client) {
 	// I2CP CreateSessionMessage format (per Java I2P SessionConfig.java):
 	// 1. Destination bytes
 	// 2. Properties mapping
@@ -132,7 +132,20 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto) {
 	dataToSign := NewStream(make([]byte, 0, 512))
 	config.destination.WriteToMessage(dataToSign)
 	config.writeMappingToMessage(dataToSign)
-	dataToSign.WriteUint64(uint64(time.Now().Unix() * 1000))
+
+	// CRITICAL FIX: Use router-synchronized time for session config
+	// Per I2CP spec: timestamp must be within ±30 seconds of router time
+	var configTimestamp uint64
+	if client != nil {
+		client.routerTimeMu.RLock()
+		configTimestamp = uint64(time.Now().Unix()*1000 + client.routerTimeDelta)
+		client.routerTimeMu.RUnlock()
+		Debug("Using router-synchronized timestamp: %d (delta: %d ms)", configTimestamp, client.routerTimeDelta)
+	} else {
+		configTimestamp = uint64(time.Now().Unix() * 1000)
+		Warning("No client provided, using unsynchronized local time")
+	}
+	dataToSign.WriteUint64(configTimestamp)
 
 	Debug("Session config data to sign: %d bytes", dataToSign.Len())
 	if dataToSign.Len() > 0 {

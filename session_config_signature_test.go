@@ -27,7 +27,7 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 
 	// Generate the CreateSession message
 	stream := NewStream(make([]byte, 0, 1024))
-	config.writeToMessage(stream, crypto)
+	config.writeToMessage(stream, crypto, nil)
 
 	// Verify message was generated
 	if stream.Len() == 0 {
@@ -111,7 +111,7 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 	}
 
 	stream := NewStream(make([]byte, 0, 1024))
-	config.writeToMessage(stream, crypto)
+	config.writeToMessage(stream, crypto, nil)
 
 	// The message should end with a 40-byte DSA signature
 	messageBytes := stream.Bytes()
@@ -152,7 +152,7 @@ func TestSessionConfigSignatureWithoutProperties(t *testing.T) {
 	}
 
 	stream := NewStream(make([]byte, 0, 1024))
-	config.writeToMessage(stream, crypto)
+	config.writeToMessage(stream, crypto, nil)
 
 	if stream.Len() == 0 {
 		t.Fatal("Message generation failed")
@@ -198,7 +198,7 @@ func TestCreateSessionMessageSize(t *testing.T) {
 	config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "3")
 
 	stream := NewStream(make([]byte, 0, 1024))
-	config.writeToMessage(stream, crypto)
+	config.writeToMessage(stream, crypto, nil)
 
 	messageSize := stream.Len()
 

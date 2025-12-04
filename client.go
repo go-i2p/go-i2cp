@@ -84,6 +84,11 @@ type Client struct {
 	shutdown        chan struct{}  // Channel to signal shutdown
 	wg              sync.WaitGroup // WaitGroup for goroutine tracking
 
+	// Router time synchronization (CRITICAL FIX: I2CP spec requires ±30 sec accuracy)
+	// Stores offset between router time and local time from SetDateMessage
+	routerTimeDelta int64      // milliseconds offset: router_time - local_time
+	routerTimeMu    sync.RWMutex // Protects router time delta access
+
 	// Reconnection support (I2CP enhancement for production reliability)
 	reconnectEnabled    bool          // Whether auto-reconnect is enabled
 	reconnectAttempts   int           // Current number of reconnection attempts
@@ -389,6 +394,18 @@ func (c *Client) onMsgSetDate(stream *Stream) {
 	}
 	if c.router.version.compare(Version{major: 0, minor: 9, micro: 10, qualifier: 0}) >= 0 {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
+	}
+
+	// CRITICAL FIX: Calculate router time delta for session config timestamp sync
+	// Per I2CP spec: session config date must be within ±30 seconds of router time
+	localTime := uint64(time.Now().Unix() * 1000)
+	c.routerTimeMu.Lock()
+	c.routerTimeDelta = int64(c.router.date) - int64(localTime)
+	c.routerTimeMu.Unlock()
+
+	Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, c.router.date)
+	if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
+		Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
 	}
 }
 
@@ -794,6 +811,11 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_CREATED {
 		if c.currentSession == nil {
 			Error("Received session status created without waiting for it %p", c)
+			return
+		}
+		// CRITICAL FIX: I2CP spec § Session ID - Validate session ID is not 0xFFFF (reserved "no session" marker)
+		if sessionID == I2CP_SESSION_ID_NONE {
+			Error("Router assigned reserved session ID 0xFFFF - spec violation")
 			return
 		}
 		c.currentSession.id = sessionID
@@ -1329,7 +1351,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
 	Debug("Sending CreateSessionMessage")
 	c.messageStream.Reset()
-	config.writeToMessage(c.messageStream, c.crypto)
+	config.writeToMessage(c.messageStream, c.crypto, c)
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateSessionMessage.")
 		return err
@@ -1350,7 +1372,20 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 	var sessionId uint16
 	Debug("Sending HostLookupMessage.")
 	c.messageStream.Reset()
-	sessionId = sess.id
+	
+	// CRITICAL FIX: Handle session ID 0xFFFF special case per I2CP spec
+	// Per I2CP § Session ID: "Session ID 0xffff is used to indicate 'no session',
+	// for example for hostname lookups."
+	if sess == nil {
+		sessionId = I2CP_SESSION_ID_NONE
+		Debug("Using I2CP_SESSION_ID_NONE (0xFFFF) for lookup without session")
+	} else {
+		sessionId = sess.id
+		// Validate session ID is not the reserved value
+		if sessionId == I2CP_SESSION_ID_NONE {
+			return fmt.Errorf("session ID cannot be 0xFFFF (reserved for no-session operations)")
+		}
+	}
 	c.messageStream.WriteUint16(sessionId)
 	c.messageStream.WriteUint32(requestId)
 	c.messageStream.WriteUint32(timeout)
@@ -1397,11 +1432,33 @@ func (c *Client) msgGetBandwidthLimits(queue bool) {
 }
 
 func (c *Client) msgDestroySession(sess *Session, queue bool) {
-	Debug("Sending DestroySessionMessage")
+	// CRITICAL FIX: Handle I2CP spec documented router behavior variance
+	// Per I2CP 0.9.67 § DestroySessionMessage Notes:
+	// "Through API 0.9.66, the Java I2P router and client libraries deviate
+	// substantially from this specification. The router never sends a
+	// SessionStatus(Destroyed) response. If no sessions are left, it sends
+	// a DisconnectMessage. If there are subsessions or the primary session
+	// is remaining, it does not reply."
+	
+	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sess.id, sess.isPrimary)
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
+	
 	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
-		Error("Error while sending DestroySessionMessage")
+		Error("Error while sending DestroySessionMessage: %v", err)
+		return
+	}
+	
+	// Router behavior (per spec notes):
+	// - Primary session + last session: Expect DisconnectMessage (handled in onMsgDisconnect)
+	// - Subsession: Router likely won't respond at all
+	// - Primary session + subsessions remain: Router won't respond
+	// Therefore: DO NOT wait for SessionStatus(Destroyed) - it won't come
+	
+	if sess.isPrimary {
+		Debug("Destroyed primary session %d - router will send DisconnectMessage if last session", sess.id)
+	} else {
+		Debug("Destroyed subsession %d - router will not respond per spec variance", sess.id)
 	}
 }
 
