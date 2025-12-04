@@ -175,10 +175,15 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 
 	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
 
-	// Write the complete message: data + signature
+	// Write the complete message: data + signature type + signature
+	// Per Java I2P Signature.java: signatures are prefixed with type (uint16)
 	stream.Write(dataToSign.Bytes())
+	
+	// Write Ed25519 signature type (7) and signature bytes
+	signatureType := uint16(ED25519_SHA256)
+	stream.WriteUint16(signatureType)
 	stream.Write(signature)
-	Debug("Complete CreateSession message: %d bytes", stream.Len())
+	Debug("Complete CreateSession message: %d bytes (signature type: %d)", stream.Len(), signatureType)
 }
 
 // min returns the minimum of two integers
@@ -190,22 +195,14 @@ func min(a, b int) int {
 }
 
 // signSessionConfig generates a signature over session config data
-// per I2CP specification - must match destination's signature type
+// per I2CP specification - uses Ed25519 signatures exclusively
 func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]byte, error) {
-	// Try Ed25519 first (modern, fast signatures)
-	if config.destination.sgk.ed25519KeyPair != nil {
-		Debug("Signing with Ed25519 keypair")
-		return config.destination.sgk.ed25519KeyPair.Sign(data)
+	if config.destination.sgk.ed25519KeyPair == nil {
+		return nil, fmt.Errorf("Ed25519 keypair not available (legacy DSA not supported)")
 	}
-
-	// Fall back to DSA-SHA1 (legacy)
-	if config.destination.sgk.dsaKeyPair != nil {
-		Debug("Signing with DSA-SHA1 keypair")
-		return config.destination.sgk.dsaKeyPair.Sign(data)
-	}
-
-	// No valid signature keypair available
-	return nil, fmt.Errorf("no valid signature keypair available")
+	
+	Debug("Signing with Ed25519 keypair")
+	return config.destination.sgk.ed25519KeyPair.Sign(data)
 }
 
 func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {

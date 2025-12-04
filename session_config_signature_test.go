@@ -39,8 +39,8 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	// Parse the message to extract signature
 	parseStream := NewStream(stream.Bytes())
 
-	// Read destination (skip)
-	readDest, err := NewDestinationFromMessage(parseStream, crypto)
+	// Read destination (skip - we'll use the original dest for verification)
+	_, err = NewDestinationFromMessage(parseStream, crypto)
 	if err != nil {
 		t.Fatalf("Failed to read destination from message: %v", err)
 	}
@@ -58,21 +58,34 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	}
 	t.Logf("Creation date: %d (ms since epoch)", creationDate)
 
-	// Read signature
-	signature := make([]byte, 40) // DSA signature is 40 bytes
+	// Read signature type (added per Java I2P Signature.java format)
+	signatureType, err := parseStream.ReadUint16()
+	if err != nil {
+		t.Fatalf("Failed to read signature type: %v", err)
+	}
+	t.Logf("Signature type: %d", signatureType)
+
+	// Verify it's Ed25519 (type 7)
+	if signatureType != uint16(ED25519_SHA256) {
+		t.Fatalf("Expected Ed25519 signature type (%d), got %d", ED25519_SHA256, signatureType)
+	}
+
+	// Read Ed25519 signature (64 bytes)
+	signature := make([]byte, 64)
 	n, err := parseStream.Read(signature)
 	if err != nil {
 		t.Fatalf("Failed to read signature: %v", err)
 	}
-	if n != 40 {
-		t.Fatalf("Signature length incorrect: got %d bytes, expected 40", n)
+	if n != 64 {
+		t.Fatalf("Signature length incorrect: got %d bytes, expected 64", n)
 	}
 
 	t.Logf("Signature: %x", signature)
 
 	// Verify signature by reconstructing the data that was signed
+	// Use the original dest, not readDest, to ensure exact match
 	dataToVerify := NewStream(make([]byte, 0, 512))
-	readDest.WriteToMessage(dataToVerify)
+	dest.WriteToMessage(dataToVerify)
 
 	// Rebuild properties mapping
 	m := make(map[string]string)
@@ -89,13 +102,27 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	dataToVerify.WriteMapping(m)
 	dataToVerify.WriteUint64(creationDate)
 
-	// Verify signature using the destination's public key
-	verified := dest.sgk.dsaKeyPair.Verify(dataToVerify.Bytes(), signature)
+	t.Logf("Data to verify length: %d bytes", dataToVerify.Len())
+	t.Logf("Data to verify (first 64 bytes): %x", dataToVerify.Bytes()[:min64(64, dataToVerify.Len())])
+
+	// Verify Ed25519 signature using the destination's public key
+	if dest.sgk.ed25519KeyPair == nil {
+		t.Fatal("Ed25519 keypair not available")
+	}
+	
+	verified := dest.sgk.ed25519KeyPair.Verify(dataToVerify.Bytes(), signature)
 	if !verified {
 		t.Fatal("Signature verification failed")
 	}
 
 	t.Log("Signature verification succeeded")
+}
+
+func min64(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // TestSessionConfigSignatureFormat verifies the signature has correct format
@@ -113,14 +140,21 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 	stream := NewStream(make([]byte, 0, 1024))
 	config.writeToMessage(stream, crypto, nil)
 
-	// The message should end with a 40-byte DSA signature
+	// The message should end with: 2-byte signature type + 64-byte Ed25519 signature
 	messageBytes := stream.Bytes()
-	if len(messageBytes) < 40 {
+	if len(messageBytes) < 66 {
 		t.Fatalf("Message too short to contain signature: %d bytes", len(messageBytes))
 	}
 
-	// Last 40 bytes should be the signature
-	signature := messageBytes[len(messageBytes)-40:]
+	// Last 66 bytes: type (2) + signature (64)
+	signatureSection := messageBytes[len(messageBytes)-66:]
+	signatureType := uint16(signatureSection[0])<<8 | uint16(signatureSection[1])
+	
+	if signatureType != uint16(ED25519_SHA256) {
+		t.Fatalf("Expected Ed25519 signature type (%d), got %d", ED25519_SHA256, signatureType)
+	}
+	
+	signature := signatureSection[2:]
 
 	// Signature should not be all zeros
 	allZeros := true
@@ -135,7 +169,8 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 		t.Fatal("Signature is all zeros - signing failed")
 	}
 
-	t.Logf("Signature (40 bytes): %x", signature)
+	t.Logf("Signature type: %d (Ed25519)", signatureType)
+	t.Logf("Signature (64 bytes): %x", signature)
 }
 
 // TestSessionConfigSignatureWithoutProperties verifies signing works with empty properties
@@ -160,9 +195,13 @@ func TestSessionConfigSignatureWithoutProperties(t *testing.T) {
 
 	t.Logf("Message with no properties: %d bytes", stream.Len())
 
-	// Should still have valid signature
+	// Should still have valid Ed25519 signature (2 bytes type + 64 bytes signature)
 	messageBytes := stream.Bytes()
-	signature := messageBytes[len(messageBytes)-40:]
+	if len(messageBytes) < 66 {
+		t.Fatalf("Message too short for signature: %d bytes", len(messageBytes))
+	}
+	
+	signature := messageBytes[len(messageBytes)-64:]
 
 	// Verify signature is not all zeros
 	allZeros := true
@@ -206,11 +245,12 @@ func TestCreateSessionMessageSize(t *testing.T) {
 	// - Destination: 387 bytes (256 pubkey + 128 signing pubkey + 3 cert)
 	// - Properties mapping: variable (typically 50-200 bytes)
 	// - Creation date: 8 bytes
-	// - Signature: 40 bytes
-	// Total: ~485-635 bytes
+	// - Signature type: 2 bytes
+	// - Ed25519 signature: 64 bytes
+	// Total: ~511-661 bytes
 
-	if messageSize < 400 {
-		t.Fatalf("Message too small: %d bytes (expected 400+)", messageSize)
+	if messageSize < 450 {
+		t.Fatalf("Message too small: %d bytes (expected 450+)", messageSize)
 	}
 
 	if messageSize > 1000 {
