@@ -28,7 +28,18 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	nullCert := NewCertificate(CERTIFICATE_NULL)
 	dest.cert = &nullCert
 	dest.sgk, err = crypto.SignatureKeygen(DSA_SHA1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate signature keypair: %w", err)
+	}
 	dest.signPubKey = dest.sgk.pub.Y
+	
+	// Generate encryption public key (ElGamal-2048 for NULL certificate)
+	// For legacy ElGamal encryption, generate random 256-byte public key
+	_, err = crypto.rng.Read(dest.pubKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate encryption public key: %w", err)
+	}
+	
 	dest.generateB32()
 	dest.generateB64()
 	return

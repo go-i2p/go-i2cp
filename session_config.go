@@ -130,8 +130,19 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 
 	// Build data to sign - everything BEFORE the signature
 	dataToSign := NewStream(make([]byte, 0, 512))
-	config.destination.WriteToMessage(dataToSign)
-	config.writeMappingToMessage(dataToSign)
+	Debug("dataToSign initial length: %d", dataToSign.Len())
+	
+	if err := config.destination.WriteToMessage(dataToSign); err != nil {
+		Fatal("Failed to write destination to dataToSign: %v", err)
+		return
+	}
+	Debug("dataToSign after destination: %d bytes (first 32: %x)", dataToSign.Len(), dataToSign.Bytes()[:min(32, dataToSign.Len())])
+	
+	if err := config.writeMappingToMessage(dataToSign); err != nil {
+		Fatal("Failed to write mapping to dataToSign: %v", err)
+		return
+	}
+	Debug("dataToSign after mapping: %d bytes", dataToSign.Len())
 
 	// CRITICAL FIX: Use router-synchronized time for session config
 	// Per I2CP spec: timestamp must be within ±30 seconds of router time
