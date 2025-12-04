@@ -194,7 +194,7 @@ func TestNewSessionConfigFromDestinationFile(t *testing.T) {
 		filename := filepath.Join(tempDir, "corrupted.dat")
 
 		// Write invalid data
-		err := os.WriteFile(filename, []byte("invalid destination data"), 0644)
+		err := os.WriteFile(filename, []byte("invalid destination data"), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
@@ -250,7 +250,7 @@ func TestNewDestinationFromFile(t *testing.T) {
 		filename := filepath.Join(tempDir, "invalid.dat")
 
 		// Write invalid data
-		err := os.WriteFile(filename, []byte("not a valid destination"), 0644)
+		err := os.WriteFile(filename, []byte("not a valid destination"), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
@@ -272,7 +272,7 @@ func TestNewDestinationFromFile(t *testing.T) {
 		filename := filepath.Join(tempDir, "empty.dat")
 
 		// Create empty file
-		err := os.WriteFile(filename, []byte{}, 0644)
+		err := os.WriteFile(filename, []byte{}, 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write test file: %v", err)
 		}

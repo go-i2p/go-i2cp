@@ -22,7 +22,7 @@ const (
 	I2CP_MAX_SESSIONS_PER_CLIENT        = 32
 	// Session ID 0xFFFF is reserved per I2CP spec for "no session" operations
 	// Used for hostname lookups and other operations that don't require a session
-	I2CP_SESSION_ID_NONE          uint16 = 0xFFFF
+	I2CP_SESSION_ID_NONE uint16 = 0xFFFF
 )
 
 // I2CP Message Type Constants
