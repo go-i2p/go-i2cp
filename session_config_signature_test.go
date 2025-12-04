@@ -109,7 +109,7 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	if dest.sgk.ed25519KeyPair == nil {
 		t.Fatal("Ed25519 keypair not available")
 	}
-	
+
 	verified := dest.sgk.ed25519KeyPair.Verify(dataToVerify.Bytes(), signature)
 	if !verified {
 		t.Fatal("Signature verification failed")
@@ -149,11 +149,11 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 	// Last 66 bytes: type (2) + signature (64)
 	signatureSection := messageBytes[len(messageBytes)-66:]
 	signatureType := uint16(signatureSection[0])<<8 | uint16(signatureSection[1])
-	
+
 	if signatureType != uint16(ED25519_SHA256) {
 		t.Fatalf("Expected Ed25519 signature type (%d), got %d", ED25519_SHA256, signatureType)
 	}
-	
+
 	signature := signatureSection[2:]
 
 	// Signature should not be all zeros
@@ -200,7 +200,7 @@ func TestSessionConfigSignatureWithoutProperties(t *testing.T) {
 	if len(messageBytes) < 66 {
 		t.Fatalf("Message too short for signature: %d bytes", len(messageBytes))
 	}
-	
+
 	signature := messageBytes[len(messageBytes)-64:]
 
 	// Verify signature is not all zeros

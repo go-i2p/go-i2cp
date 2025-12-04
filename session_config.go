@@ -178,7 +178,7 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	// Write the complete message: data + signature type + signature
 	// Per Java I2P Signature.java: signatures are prefixed with type (uint16)
 	stream.Write(dataToSign.Bytes())
-	
+
 	// Write Ed25519 signature type (7) and signature bytes
 	signatureType := uint16(ED25519_SHA256)
 	stream.WriteUint16(signatureType)
@@ -200,7 +200,7 @@ func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]b
 	if config.destination.sgk.ed25519KeyPair == nil {
 		return nil, fmt.Errorf("Ed25519 keypair not available (legacy DSA not supported)")
 	}
-	
+
 	Debug("Signing with Ed25519 keypair")
 	return config.destination.sgk.ed25519KeyPair.Sign(data)
 }
