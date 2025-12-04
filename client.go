@@ -843,19 +843,21 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 	var err error
 	Debug("Received SessionStatus message.")
 
-	// CRITICAL FIX: I2CP SessionStatus message format is [status: uint8][sessionID: uint16]
-	// NOT [sessionID: uint16][status: uint8]
-	// Evidence: 3-byte messages (1+2=3), router sends correct session IDs but we were
-	// reading status byte as first byte of session ID, causing session ID to always be 0.
-	// See: GO-I2CP PROTOCOL FIX - SESSION STATUS MESSAGE BYTE ORDER
-	sessionStatus, err = stream.ReadByte()
-	if err != nil {
-		Error("Failed to read session status from SessionStatus: %v", err)
-		return
-	}
+	// DEBUG: Dump raw message bytes
+	rawBytes := stream.Bytes()
+	Debug("SessionStatus raw bytes (length=%d): %v", len(rawBytes), rawBytes)
+
+	// CRITICAL FIX: I2CP SessionStatus message format is [sessionID: uint16][status: uint8]
+	// This is the CORRECT Java I2P router format (confirmed by testing)
+	// Previous comment claiming [status][sessionID] order was WRONG
 	sessionID, err = stream.ReadUint16()
 	if err != nil {
-		Error("Failed to read session ID from SessionStatus after status %d: %v", sessionStatus, err)
+		Error("Failed to read session ID from SessionStatus: %v", err)
+		return
+	}
+	sessionStatus, err = stream.ReadByte()
+	if err != nil {
+		Error("Failed to read session status from SessionStatus after sessionID %d: %v", sessionID, err)
 		return
 	}
 	Debug("SessionStatus for session %d: status %d", sessionID, sessionStatus)
@@ -912,9 +914,23 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		// For non-CREATED status updates, session should already exist
 		c.lock.Lock()
 		sess = c.sessions[sessionID]
-		c.lock.Unlock()
 		if sess == nil {
-			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
+			// CRITICAL FIX: Handle router rejecting session creation
+			// When router rejects CreateSession, it sends SessionStatus(DESTROYED) as the first message
+			// In this case, the session was never registered (no CREATED status was received)
+			// The session exists in c.currentSession but not in c.sessions map
+			if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
+				Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
+				sess = c.currentSession
+				// Assign the router-assigned ID before dispatching callback
+				sess.id = sessionID
+				c.currentSession = nil // Clear currentSession
+				c.lock.Unlock()        // Release lock before callback
+				sess.dispatchStatus(SessionStatus(sessionStatus))
+			} else {
+				c.lock.Unlock() // Release lock before Fatal
+				Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
+			}
 		} else {
 			// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
 			if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
@@ -923,6 +939,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 					sess.destroyConfirmed = nil // Prevent double-close
 				}
 			}
+			c.lock.Unlock() // Release lock before callback
 			sess.dispatchStatus(SessionStatus(sessionStatus))
 		}
 	}
