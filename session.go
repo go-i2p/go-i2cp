@@ -34,14 +34,13 @@ func NewSessionWithContext(ctx context.Context, client *Client, callbacks Sessio
 
 func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	sess = &Session{
-		mu:            sync.RWMutex{},
-		created:       time.Now(),
-		isPrimary:     true, // Default to primary session, will be updated for subsessions
-		syncCallbacks: true, // Default to synchronous for compatibility with tests
+		mu:               sync.RWMutex{},
+		created:          time.Now(),
+		isPrimary:        true,                // Default to primary session, will be updated for subsessions
+		syncCallbacks:    true,                // Default to synchronous for compatibility with tests
+		destroyConfirmed: make(chan struct{}), // Channel for DestroySession response
 	}
-	sess.client = client
-
-	// Create destination with proper error handling
+	sess.client = client // Create destination with proper error handling
 	// Check if client.crypto is valid before calling NewDestination
 	var dest *Destination
 	var err error

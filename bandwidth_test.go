@@ -24,7 +24,7 @@ func TestBandwidthLimitsString(t *testing.T) {
 				RouterOutboundBurst: 3072000,
 				BurstTime:           10,
 			},
-			expected: "BandwidthLimits{Client: 1024000/512000, Router: 2048000(4096000)/1536000(3072000), Burst: 10s}",
+			expected: "BandwidthLimits{Client: 1024000/512000 KBps, Router: 2048000(4096000)/1536000(3072000) KBps, Burst: 10s}",
 		},
 		{
 			name: "zero values",
@@ -37,7 +37,7 @@ func TestBandwidthLimitsString(t *testing.T) {
 				RouterOutboundBurst: 0,
 				BurstTime:           0,
 			},
-			expected: "BandwidthLimits{Client: 0/0, Router: 0(0)/0(0), Burst: 0s}",
+			expected: "BandwidthLimits{Client: 0/0 KBps, Router: 0(0)/0(0) KBps, Burst: 0s}",
 		},
 		{
 			name: "maximum uint32 values",
@@ -50,7 +50,7 @@ func TestBandwidthLimitsString(t *testing.T) {
 				RouterOutboundBurst: 4294967295,
 				BurstTime:           4294967295,
 			},
-			expected: "BandwidthLimits{Client: 4294967295/4294967295, Router: 4294967295(4294967295)/4294967295(4294967295), Burst: 4294967295s}",
+			expected: "BandwidthLimits{Client: 4294967295/4294967295 KBps, Router: 4294967295(4294967295)/4294967295(4294967295) KBps, Burst: 4294967295s}",
 		},
 	}
 

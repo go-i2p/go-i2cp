@@ -89,6 +89,11 @@ type Client struct {
 	routerTimeDelta int64        // milliseconds offset: router_time - local_time
 	routerTimeMu    sync.RWMutex // Protects router time delta access
 
+	// Router version tracking (I2CP spec § Version Notes, since 0.8.7)
+	// Stores I2CP protocol version string from SetDateMessage for feature detection
+	routerVersion   string       // e.g. "0.9.67" - empty if router < 0.8.7
+	routerVersionMu sync.RWMutex // Protects router version access
+
 	// Multi-session support (MAJOR FIX: I2CP spec § Multi-Session as of 0.9.21)
 	// Tracks primary session (first created) vs subsessions for proper lifecycle management
 	primarySessionID *uint16 // ID of the first created session (nil if no sessions yet)
@@ -869,6 +874,13 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		if sess == nil {
 			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
 		} else {
+			// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
+			if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
+				if sess.destroyConfirmed != nil {
+					close(sess.destroyConfirmed)
+					sess.destroyConfirmed = nil // Prevent double-close
+				}
+			}
 			sess.dispatchStatus(SessionStatus(sessionStatus))
 		}
 	}
@@ -1469,14 +1481,32 @@ func (c *Client) msgGetBandwidthLimits(queue bool) {
 	}
 }
 
-func (c *Client) msgDestroySession(sess *Session, queue bool) {
-	// CRITICAL FIX: Handle I2CP spec documented router behavior variance
-	// Per I2CP 0.9.67 § DestroySessionMessage Notes:
-	// "Through API 0.9.66, the Java I2P router and client libraries deviate
-	// substantially from this specification. The router never sends a
-	// SessionStatus(Destroyed) response. If no sessions are left, it sends
-	// a DisconnectMessage. If there are subsessions or the primary session
-	// is remaining, it does not reply."
+func (c *Client) msgDestroySession(sess *Session, queue bool) error {
+	// I2CP SPEC COMPLIANCE: Handle both spec-compliant and Java I2P router behaviors
+	// Per I2CP spec § DestroySessionMessage: "The router should respond with a SessionStatusMessage (Destroyed)"
+	// Per I2CP 0.9.67 § DestroySessionMessage Notes (Java I2P deviation):
+	// "Through API 0.9.66, the Java I2P router and client libraries deviate substantially.
+	// The router never sends SessionStatus(Destroyed). If no sessions are left, it sends
+	// DisconnectMessage. If there are subsessions or primary remains, it does not reply."
+
+	// COMPLIANCE FIX: Cascade destroy subsessions when primary is destroyed (I2CP § Multisession Notes)
+	c.lock.Lock()
+	if sess.isPrimary {
+		Debug("Destroying primary session %d - cascading to all subsessions per I2CP spec", sess.id)
+		// Destroy all subsessions first
+		for id, s := range c.sessions {
+			if id != sess.id && !s.isPrimary {
+				Debug("Auto-destroying subsession %d (primary %d being destroyed)", id, sess.id)
+				// Recursive call for subsessions
+				c.lock.Unlock()
+				c.msgDestroySession(s, false)
+				c.lock.Lock()
+				delete(c.sessions, id)
+			}
+		}
+		c.primarySessionID = nil
+	}
+	c.lock.Unlock()
 
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sess.id, sess.isPrimary)
 	c.messageStream.Reset()
@@ -1484,20 +1514,28 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) {
 
 	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending DestroySessionMessage: %v", err)
-		return
+		return err
 	}
 
-	// Router behavior (per spec notes):
-	// - Primary session + last session: Expect DisconnectMessage (handled in onMsgDisconnect)
-	// - Subsession: Router likely won't respond at all
-	// - Primary session + subsessions remain: Router won't respond
-	// Therefore: DO NOT wait for SessionStatus(Destroyed) - it won't come
-
-	if sess.isPrimary {
-		Debug("Destroyed primary session %d - router will send DisconnectMessage if last session", sess.id)
-	} else {
-		Debug("Destroyed subsession %d - router will not respond per spec variance", sess.id)
+	// SPEC COMPLIANCE: Wait for SessionStatus(Destroyed) OR timeout for non-compliant routers
+	// Dual-path handling supports both spec-compliant routers and Java I2P's deviant behavior
+	if sess.destroyConfirmed != nil {
+		select {
+		case <-sess.destroyConfirmed:
+			Debug("Session %d destruction confirmed via SessionStatus(Destroyed)", sess.id)
+			return nil
+		case <-time.After(2 * time.Second):
+			// Timeout - router did not send SessionStatus(Destroyed)
+			if sess.isPrimary {
+				Debug("DestroySession timeout for primary session %d - router may send DisconnectMessage (Java I2P behavior)", sess.id)
+			} else {
+				Debug("DestroySession timeout for subsession %d - router did not respond (expected for Java I2P)", sess.id)
+			}
+			return nil
+		}
 	}
+
+	return nil
 }
 
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
@@ -2034,7 +2072,9 @@ func (c *Client) Close() error {
 		c.lock.Lock()
 		for sessionId, sess := range c.sessions {
 			Debug("Destroying session %d during shutdown", sessionId)
-			c.msgDestroySession(sess, false)
+			if err := c.msgDestroySession(sess, false); err != nil {
+				Warning("Failed to destroy session %d during shutdown: %v", sessionId, err)
+			}
 		}
 		c.lock.Unlock()
 	}

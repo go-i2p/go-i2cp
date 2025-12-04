@@ -46,6 +46,10 @@ type Session struct {
 
 	// Callback behavior control (for testing)
 	syncCallbacks bool
+
+	// DestroySession response tracking (I2CP spec compliance)
+	// Closed when SessionStatus(Destroyed) received from router
+	destroyConfirmed chan struct{}
 }
 
 // PendingMessage represents a message awaiting delivery status
