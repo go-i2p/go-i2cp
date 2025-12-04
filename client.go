@@ -86,7 +86,7 @@ type Client struct {
 
 	// Router time synchronization (CRITICAL FIX: I2CP spec requires ±30 sec accuracy)
 	// Stores offset between router time and local time from SetDateMessage
-	routerTimeDelta int64      // milliseconds offset: router_time - local_time
+	routerTimeDelta int64        // milliseconds offset: router_time - local_time
 	routerTimeMu    sync.RWMutex // Protects router time delta access
 
 	// Multi-session support (MAJOR FIX: I2CP spec § Multi-Session as of 0.9.21)
@@ -831,7 +831,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 		// tries to lookup the session before registration completes.
 		// See: GO-I2CP RACE CONDITION FIX - SESSION REGISTRATION TIMING ISSUE
 		c.lock.Lock()
-		
+
 		// MAJOR FIX: Multi-session tracking per I2CP spec § Multi-Session (as of 0.9.21)
 		// Track first session as primary, subsequent sessions as subsessions
 		if c.primarySessionID == nil {
@@ -851,7 +851,7 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 				Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
 			}
 		}
-		
+
 		// Register the session
 		c.sessions[sessionID] = c.currentSession
 		sess := c.currentSession
@@ -1410,7 +1410,7 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 	var sessionId uint16
 	Debug("Sending HostLookupMessage.")
 	c.messageStream.Reset()
-	
+
 	// CRITICAL FIX: Handle session ID 0xFFFF special case per I2CP spec
 	// Per I2CP § Session ID: "Session ID 0xffff is used to indicate 'no session',
 	// for example for hostname lookups."
@@ -1477,22 +1477,22 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) {
 	// SessionStatus(Destroyed) response. If no sessions are left, it sends
 	// a DisconnectMessage. If there are subsessions or the primary session
 	// is remaining, it does not reply."
-	
+
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sess.id, sess.isPrimary)
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
-	
+
 	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending DestroySessionMessage: %v", err)
 		return
 	}
-	
+
 	// Router behavior (per spec notes):
 	// - Primary session + last session: Expect DisconnectMessage (handled in onMsgDisconnect)
 	// - Subsession: Router likely won't respond at all
 	// - Primary session + subsessions remain: Router won't respond
 	// Therefore: DO NOT wait for SessionStatus(Destroyed) - it won't come
-	
+
 	if sess.isPrimary {
 		Debug("Destroyed primary session %d - router will send DisconnectMessage if last session", sess.id)
 	} else {
@@ -1541,19 +1541,19 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 // per I2CP specification 0.7.1+ - implements expiring message delivery with flags and timeout
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
 	Debug("Sending SendMessageExpiresMessage")
-	
+
 	// MAJOR FIX: Validate flags per I2CP spec § SendMessageExpiresMessage
 	// Bits 15-11 must be zero (reserved)
 	const SEND_MSG_FLAGS_RESERVED_MASK uint16 = 0xF800
-	if flags & SEND_MSG_FLAGS_RESERVED_MASK != 0 {
+	if flags&SEND_MSG_FLAGS_RESERVED_MASK != 0 {
 		return fmt.Errorf("invalid SendMessageExpires flags: reserved bits set (0x%04x)", flags)
 	}
 	// Bits 10-9 are deprecated reliability override (warn if set)
 	const SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600
-	if flags & SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
+	if flags&SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
 		Warning("SendMessageExpires flags contain deprecated reliability override (bits 10-9)")
 	}
-	
+
 	out := &bytes.Buffer{}
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
@@ -1966,7 +1966,7 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	}
 
 	lup = LookupEntry{address: address, session: session}
-	
+
 	// MAJOR FIX: Thread-safe access to lookupReq map (I2CP HostLookup race condition)
 	c.lock.Lock()
 	c.lookupRequestId += 1
