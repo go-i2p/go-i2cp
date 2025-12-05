@@ -103,6 +103,16 @@ var (
 	// This typically indicates data corruption or a security issue.
 	ErrInvalidSignature = errors.New("i2cp: invalid signature")
 
+	// ErrOfflineSignatureExpired indicates an offline signature has expired.
+	// Offline signatures have an expiration timestamp and must be rejected after expiry.
+	// I2CP spec: LeaseSet2 § Offline Signatures
+	ErrOfflineSignatureExpired = errors.New("i2cp: offline signature expired")
+
+	// ErrOfflineSignatureInvalid indicates offline signature cryptographic verification failed.
+	// The signature over [signingKey||expires||transientKey] did not match.
+	// I2CP spec: LeaseSet2 § Offline Signatures
+	ErrOfflineSignatureInvalid = errors.New("i2cp: offline signature verification failed")
+
 	// ErrMaxSessionsReached indicates the maximum number of sessions per client has been reached.
 	// I2CP spec: Maximum sessions per client is defined by I2CP_MAX_SESSIONS_PER_CLIENT
 	ErrMaxSessionsReached = errors.New("i2cp: maximum sessions per client reached")

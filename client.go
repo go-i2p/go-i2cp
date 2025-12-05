@@ -650,7 +650,8 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 	delete(c.lookup, b32)
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
-	if lup == (LookupEntry{}) {
+// MINOR FIX: Cannot use struct comparison since LookupEntry now contains map (service records support)
+	if lup.address == "" {
 		Warning("No sesssion for destination lookup of address '%s'", b32)
 	} else {
 		lup.session.dispatchDestination(requestId, b32, destination)
@@ -1018,12 +1019,34 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 
 	// Parse destination if lookup succeeded (result == 0)
 	var errorDetail string
+	var options map[string]string
 	if result == HOST_REPLY_SUCCESS {
 		dest, err = NewDestinationFromMessage(stream, c.crypto)
 		if err != nil {
 			Error("Failed to parse destination from HostReply: %v", err)
 			return
 		}
+
+		// MINOR FIX: Parse optional Mapping for service record lookups (I2CP 0.9.66+ Proposal 167)
+		// Lookup types 2-4 include LeaseSet options after the Destination
+		// Get and remove lookup entry to check type (must do before checking remaining bytes)
+		c.lock.Lock()
+		lup = c.lookupReq[requestId]
+		c.lock.Unlock()
+
+		// Check if this is a service record lookup type (2-4) AND there are remaining bytes
+		if (lup.lookupType >= HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS && lup.lookupType <= HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS) && stream.Len() > 0 {
+			Debug("Parsing optional Mapping for service record lookup type %d (request %d)", lup.lookupType, requestId)
+			options, err = stream.ReadMapping()
+			if err != nil {
+				Warning("Failed to parse service record Mapping for request %d: %v", requestId, err)
+				// Continue with lookup - Mapping is optional even for types 2-4
+				options = nil
+			} else {
+				Debug("Parsed %d service record options for request %d", len(options), requestId)
+			}
+		}
+
 		Debug("HostReply lookup succeeded for request %d", requestId)
 	} else {
 		// MAJOR FIX: Enhanced error handling for all HostReply codes (I2CP 0.9.43+)
@@ -1058,9 +1081,16 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	}
 
 	// Get and remove lookup entry
-	c.lock.Lock() // MAJOR FIX: Thread-safe access to lookupReq map
-	lup = c.lookupReq[requestId]
+	c.lock.Lock()          // MAJOR FIX: Thread-safe access to lookupReq map
+	if lup.address == "" { // Entry not already retrieved above for options parsing
+		lup = c.lookupReq[requestId]
+	}
 	delete(c.lookupReq, requestId)
+
+	// Store parsed service record options in lookup entry
+	if options != nil {
+		lup.options = options
+	}
 	c.lock.Unlock()
 
 	if lup.address == "" {
@@ -1659,13 +1689,16 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 
 	// SPEC COMPLIANCE: Wait for SessionStatus(Destroyed) OR timeout for non-compliant routers
 	// Dual-path handling supports both spec-compliant routers and Java I2P's deviant behavior
+	// Per I2CP § DestroySessionMessage: Spec-compliant routers send SessionStatus(Destroyed)
+	// Per Java I2P (API ≤0.9.66): Router never sends SessionStatus(Destroyed), may send DisconnectMessage
+	// Timeout set to 5 seconds to accommodate network latency and Java I2P's DisconnectMessage timing
 	wasPrimary := sess.isPrimary
 	if sess.destroyConfirmed != nil {
 		select {
 		case <-sess.destroyConfirmed:
 			Debug("Session %d destruction confirmed via SessionStatus(Destroyed)", sess.id)
-		case <-time.After(2 * time.Second):
-			// Timeout - router did not send SessionStatus(Destroyed)
+		case <-time.After(5 * time.Second):
+			// Timeout - router did not send SessionStatus(Destroyed) (expected for Java I2P ≤0.9.66)
 			if wasPrimary {
 				Debug("DestroySession timeout for primary session %d - router may send DisconnectMessage (Java I2P behavior)", sess.id)
 			} else {

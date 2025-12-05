@@ -29,37 +29,30 @@ type LeaseSet2 struct {
 // OfflineSignature represents offline signing data for LeaseSet2.
 // Offline signatures allow separation of online and offline keys for enhanced security.
 //
-// MINOR FIX: Offline Signature Limitations Documentation
+// The offline signature proves that the long-term signing key authorized a transient
+// key for a limited time period. This allows the long-term key to remain offline while
+// the transient key signs LeaseSets.
 //
-// Current Status:
-//   - ✅ OfflineSignature parsed from CreateLeaseSet2Message
-//   - ✅ Offline signature data stored in LeaseSet2
-//   - ✅ Getter methods available for all fields
-//   - ❌ Signature verification NOT implemented
-//   - ❌ Transient key validation NOT implemented
-//   - ❌ Expiration checking NOT implemented
+// Signature Format (signed data):
 //
-// Impact:
-//   - Offline signatures are accepted without cryptographic verification
-//   - Applications cannot validate that a transient key was actually authorized
-//   - Expired offline signatures will not be rejected
-//   - No protection against forged offline signatures
+//	signingKeyType (2 bytes) || signingKeyLen (2 bytes) || signingKey (variable) ||
+//	expires (4 bytes) || transientKeyType (2 bytes) || transientKeyLen (2 bytes) || transientKey (variable)
 //
-// For proper offline signature support, applications must implement:
-//  1. Verify offline signature: crypto.VerifyOfflineSignature(signingKey, expires, transientKey, signature)
-//  2. Check expiration: if time.Now().Unix() > int64(expires) { return ErrExpired }
-//  3. Use transient key for LeaseSet signature verification (not signing key)
+// The signature field contains the signature over the above data, signed by the long-term key.
 //
-// See I2CP § LeaseSet2 Offline Signature and § Signature Types for specifications.
+// Validation:
+//   - ✅ Expiration checking via IsExpired()
+//   - ✅ Cryptographic verification via Verify()
+//   - ✅ Transient key validation via signature verification
 //
-// I2CP Specification: LeaseSet2 offline signature format
+// I2CP Specification: LeaseSet2 § Offline Signatures
 type OfflineSignature struct {
 	signingKeyType uint16 // Signing key type (e.g., ED25519_SHA256)
-	signingKey     []byte // Public signing key (long-term key, NOT CRYPTOGRAPHICALLY VERIFIED)
-	expires        uint32 // Expiration timestamp in seconds since epoch (NOT CHECKED)
+	signingKey     []byte // Public signing key (long-term key that signed this authorization)
+	expires        uint32 // Expiration timestamp in seconds since epoch
 	transientType  uint16 // Transient signing key type
-	transientKey   []byte // Transient public signing key (NOT VERIFIED against signature)
-	signature      []byte // Signature of the offline data (NOT VERIFIED)
+	transientKey   []byte // Transient public signing key (authorized by signature)
+	signature      []byte // Signature over [signingKeyType||signingKeyLen||signingKey||expires||transientKeyType||transientKeyLen||transientKey]
 }
 
 // NewLeaseSet2FromStream parses a LeaseSet2 structure from an I2CP Stream.
@@ -275,6 +268,124 @@ func readOfflineSignature(stream *Stream) (*OfflineSignature, error) {
 	}
 
 	return sig, nil
+}
+
+// IsExpired checks if the offline signature has expired.
+// Returns true if the current time is past the expiration timestamp.
+//
+// I2CP Spec: Offline signatures must be rejected if expired to prevent
+// unauthorized use of transient keys beyond their authorized period.
+func (sig *OfflineSignature) IsExpired() bool {
+	if sig == nil {
+		return true
+	}
+	now := uint32(time.Now().Unix())
+	return now > sig.expires
+}
+
+// Verify cryptographically verifies the offline signature.
+// This validates that the long-term signing key actually authorized the transient key.
+//
+// Verification process:
+//  1. Reconstruct signed data: signingKeyType || signingKeyLen || signingKey ||
+//     expires || transientKeyType || transientKeyLen || transientKey
+//  2. Verify signature over this data using the signing key
+//
+// Returns:
+//   - nil if signature is valid
+//   - ErrOfflineSignatureInvalid if verification fails
+//   - ErrUnsupportedCrypto if signature type is not supported
+//
+// I2CP Spec: LeaseSet2 § Offline Signatures
+func (sig *OfflineSignature) Verify() error {
+	if sig == nil {
+		return ErrInvalidArgument
+	}
+
+	// Only Ed25519 signatures are supported (modern I2CP)
+	// Note: ED25519_SHA256 is defined as uint32, but signingKeyType field is uint16
+	if sig.signingKeyType != uint16(ED25519_SHA256) {
+		return fmt.Errorf("%w: offline signature type %d (only Ed25519 supported)",
+			ErrUnsupportedCrypto, sig.signingKeyType)
+	}
+
+	// Reconstruct the signed data
+	// Format: signingKeyType || signingKeyLen || signingKey || expires ||
+	//         transientKeyType || transientKeyLen || transientKey
+	stream := NewStream(make([]byte, 0, 256))
+
+	// Write signing key type (2 bytes)
+	if err := stream.WriteUint16(sig.signingKeyType); err != nil {
+		return fmt.Errorf("failed to write signing key type: %w", err)
+	}
+
+	// Write signing key length (2 bytes)
+	if err := stream.WriteUint16(uint16(len(sig.signingKey))); err != nil {
+		return fmt.Errorf("failed to write signing key length: %w", err)
+	}
+
+	// Write signing key (variable)
+	if _, err := stream.Write(sig.signingKey); err != nil {
+		return fmt.Errorf("failed to write signing key: %w", err)
+	}
+
+	// Write expires timestamp (4 bytes)
+	if err := stream.WriteUint32(sig.expires); err != nil {
+		return fmt.Errorf("failed to write expires: %w", err)
+	}
+
+	// Write transient key type (2 bytes)
+	if err := stream.WriteUint16(sig.transientType); err != nil {
+		return fmt.Errorf("failed to write transient key type: %w", err)
+	}
+
+	// Write transient key length (2 bytes)
+	if err := stream.WriteUint16(uint16(len(sig.transientKey))); err != nil {
+		return fmt.Errorf("failed to write transient key length: %w", err)
+	}
+
+	// Write transient key (variable)
+	if _, err := stream.Write(sig.transientKey); err != nil {
+		return fmt.Errorf("failed to write transient key: %w", err)
+	}
+
+	signedData := stream.Bytes()
+
+	// Create Ed25519 public key from signing key bytes for verification
+	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(sig.signingKey)
+	if err != nil {
+		return fmt.Errorf("failed to create Ed25519 public key: %w", err)
+	}
+
+	// Create temporary key pair with just the public key for verification
+	tempKeyPair := &Ed25519KeyPair{
+		algorithmType: ED25519_SHA256,
+		publicKey:     ed25519PubKey,
+	}
+
+	// Verify the signature over the signed data
+	if !tempKeyPair.Verify(signedData, sig.signature) {
+		return ErrOfflineSignatureInvalid
+	}
+
+	return nil
+}
+
+// GetTransientKey returns the transient public key bytes.
+// This key should be used to verify the LeaseSet2 signature, not the signing key.
+func (sig *OfflineSignature) GetTransientKey() []byte {
+	if sig == nil {
+		return nil
+	}
+	return sig.transientKey
+}
+
+// GetExpires returns the expiration timestamp (seconds since epoch)
+func (sig *OfflineSignature) GetExpires() uint32 {
+	if sig == nil {
+		return 0
+	}
+	return sig.expires
 }
 
 // getSignatureLength returns the expected signature length based on the destination's certificate.
@@ -648,12 +759,6 @@ func (os *OfflineSignature) TransientKey() []byte {
 // Signature returns the signature bytes
 func (os *OfflineSignature) Signature() []byte {
 	return os.signature
-}
-
-// IsExpired checks if the offline signature has expired
-func (os *OfflineSignature) IsExpired() bool {
-	now := uint32(time.Now().Unix())
-	return now >= os.expires
 }
 
 // String returns a debug-friendly string representation
