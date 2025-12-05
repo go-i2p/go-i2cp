@@ -29,7 +29,7 @@ func parseVersion(str string) Version {
 	v := Version{version: str}
 	segments := strings.Split(str, ".")
 	n := len(segments)
-	
+
 	// Parse major version
 	if n > 0 {
 		i, err := strconv.Atoi(segments[0])
@@ -40,7 +40,7 @@ func parseVersion(str string) Version {
 			v.major = uint16(i)
 		}
 	}
-	
+
 	// Parse minor version
 	if n > 1 {
 		i, err := strconv.Atoi(segments[1])
@@ -51,7 +51,7 @@ func parseVersion(str string) Version {
 			v.minor = uint16(i)
 		}
 	}
-	
+
 	// Parse micro version
 	if n > 2 {
 		i, err := strconv.Atoi(segments[2])
@@ -62,7 +62,7 @@ func parseVersion(str string) Version {
 			v.micro = uint16(i)
 		}
 	}
-	
+
 	// Parse qualifier (optional)
 	if n > 3 {
 		i, err := strconv.Atoi(segments[3])
@@ -73,7 +73,7 @@ func parseVersion(str string) Version {
 			v.qualifier = uint16(i)
 		}
 	}
-	
+
 	return v
 }
 
