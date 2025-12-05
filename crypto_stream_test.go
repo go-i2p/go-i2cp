@@ -170,67 +170,7 @@ func TestX25519_StreamOperations(t *testing.T) {
 	})
 }
 
-// TestDSA_StreamOperations tests stream-based DSA operations
-func TestDSA_StreamOperations(t *testing.T) {
-	t.Run("WriteToStream", func(t *testing.T) {
-		crypto := NewCrypto()
-		dsaKp, err := crypto.DSASignatureKeygen()
-		if err != nil {
-			t.Fatalf("Failed to generate DSA keypair: %v", err)
-		}
-
-		stream := NewStream(make([]byte, 0, 1024))
-		err = dsaKp.WriteToStream(stream)
-		if err != nil {
-			t.Fatalf("WriteToStream failed: %v", err)
-		}
-
-		// DSA public keys should produce non-empty streams
-		if len(stream.Bytes()) == 0 {
-			t.Error("WriteToStream produced empty stream")
-		}
-
-		// DSA keys are substantial in size (should be > 100 bytes typically)
-		if len(stream.Bytes()) < 100 {
-			t.Errorf("DSA key stream unexpectedly small: %d bytes", len(stream.Bytes()))
-		}
-	})
-
-	t.Run("DSAKeyPairFromStream", func(t *testing.T) {
-		crypto := NewCrypto()
-		dsaKp, err := crypto.DSASignatureKeygen()
-		if err != nil {
-			t.Fatalf("Failed to generate DSA keypair: %v", err)
-		}
-
-		writeStream := NewStream(make([]byte, 0, 1024))
-		err = dsaKp.WriteToStream(writeStream)
-		if err != nil {
-			t.Fatalf("WriteToStream failed: %v", err)
-		}
-
-		// Skip the algorithm type (4 bytes uint32) that WriteToStream adds
-		streamBytes := writeStream.Bytes()
-		if len(streamBytes) < 4 {
-			t.Fatalf("Stream too short: %d bytes", len(streamBytes))
-		}
-
-		// Read it back, skipping the algorithm type prefix
-		readStream := NewStream(streamBytes[4:])
-		readKp, err := DSAKeyPairFromStream(readStream)
-		if err != nil {
-			t.Fatalf("DSAKeyPairFromStream failed: %v", err)
-		}
-
-		// Verify the read keypair has valid public key
-		pubKey := readKp.PublicKey()
-		if len(pubKey) == 0 {
-			t.Error("DSAKeyPairFromStream did not restore public key")
-		}
-
-		// Verify the public key matches
-		if !bytes.Equal(pubKey, dsaKp.PublicKey()) {
-			t.Error("DSAKeyPairFromStream produced different public key")
-		}
-	})
-}
+// TestDSA_StreamOperations - DEPRECATED AND REMOVED
+// DSA support has been removed from go-i2cp in favor of Ed25519.
+// This test is retained only as a deprecation marker.
+// Use TestEd25519_StreamOperations for modern cryptography testing.

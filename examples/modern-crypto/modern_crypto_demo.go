@@ -138,24 +138,12 @@ func main() {
 		fmt.Println("   ❌ Ed25519 serialization/deserialization failed")
 	}
 
-	// === Legacy DSA Support ===
-	fmt.Println("\n🔄 Legacy DSA Support (preserved):")
-
-	dsaKp, err := crypto.SignatureKeygen(go_i2cp.DSA_SHA1)
-	if err != nil {
-		log.Fatalf("Failed to generate DSA key pair: %v", err)
-	}
-	fmt.Printf("   ✅ Generated DSA key pair (algorithm type: %d)\n", go_i2cp.DSA_SHA1)
-	fmt.Printf("   ✅ Legacy DSA functionality preserved (key generated successfully)\n")
-	_ = dsaKp // Prevent unused variable warning
-
 	// === Integration Summary ===
 	fmt.Println("\n📋 Integration Summary:")
 	fmt.Println("   ✅ Ed25519 signatures (modern, fast, secure)")
 	fmt.Println("   ✅ X25519 key exchange (ECDH for perfect forward secrecy)")
 	fmt.Println("   ✅ ChaCha20-Poly1305 encryption (authenticated encryption)")
 	fmt.Println("   ✅ Stream-based serialization (I2CP protocol compatible)")
-	fmt.Println("   ✅ Legacy DSA/SHA1/SHA256 support (backward compatibility)")
 	fmt.Println("   ✅ Integrated with existing Crypto struct")
 
 	fmt.Println("\n🎉 I2CP cryptography modernization complete!")

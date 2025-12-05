@@ -4,22 +4,18 @@ import (
 	"testing"
 )
 
-// TestDSAKeyPair_AlgorithmType tests the DSA AlgorithmType getter
-func TestDSAKeyPair_AlgorithmType(t *testing.T) {
 	crypto := NewCrypto()
-	sgk, err := crypto.SignatureKeygen(DSA_SHA1)
+	sgk, err := crypto.SignatureKeygen(ED25519_SHA256)
 	if err != nil {
 		t.Fatalf("Failed to generate DSA keypair: %v", err)
 	}
 
-	// The SignatureKeygen returns a SignatureKeyPair struct, not *DSAKeyPair
 	// We need to access the actual DSA implementation through the crypto package
 	// Let's test by creating a new DSA keypair directly
-	dsaKp := &DSAKeyPair{}
 
 	algType := dsaKp.AlgorithmType()
-	if algType != DSA_SHA1 {
-		t.Errorf("AlgorithmType() = %d, want %d (DSA_SHA1)", algType, DSA_SHA1)
+	if algType != ED25519_SHA256 {
+		t.Errorf("AlgorithmType() = %d, want %d (ED25519_SHA256)", algType, ED25519_SHA256)
 	}
 
 	// Verify consistency
@@ -28,7 +24,6 @@ func TestDSAKeyPair_AlgorithmType(t *testing.T) {
 	}
 
 	// Verify the SignatureKeygen actually created a valid keypair
-	if sgk.pub.Y == nil {
 		t.Error("SignatureKeygen did not initialize public key")
 	}
 }
@@ -158,13 +153,12 @@ func TestX25519KeyPair_AlgorithmType(t *testing.T) {
 func TestKeyPairTypes_Consistency(t *testing.T) {
 	t.Run("DSA keypair type consistency", func(t *testing.T) {
 		crypto := NewCrypto()
-		sgk, err := crypto.SignatureKeygen(DSA_SHA1)
+		sgk, err := crypto.SignatureKeygen(ED25519_SHA256)
 		if err != nil {
 			t.Fatalf("Failed to generate DSA keypair: %v", err)
 		}
 
 		// Verify the signature keypair was created
-		if sgk.pub.Y == nil {
 			t.Error("DSA public key not initialized")
 		}
 	})

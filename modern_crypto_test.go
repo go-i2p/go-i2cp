@@ -256,16 +256,5 @@ func TestCryptoIntegration(t *testing.T) {
 		t.Error("ChaCha20-Poly1305 cipher has wrong algorithm type")
 	}
 
-	// Test that existing DSA functionality compiles and generates key pairs
-	dsaKp, err := crypto.SignatureKeygen(DSA_SHA1)
-	if err != nil {
-		t.Fatalf("Failed to generate DSA key pair: %v", err)
-	}
-
-	// Verify DSA key pair was created with correct algorithm type
-	if dsaKp.algorithmType != DSA_SHA1 {
-		t.Error("DSA key pair has wrong algorithm type")
-	}
-
 	t.Log("All modern crypto algorithms successfully integrated with Crypto struct")
 }

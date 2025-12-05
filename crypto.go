@@ -6,20 +6,14 @@
 //
 // Architecture:
 //   - The Crypto type serves as an I2CP protocol adapter, NOT a cryptographic implementation
-//   - Stream-based signing/verification for I2CP message format compatibility
-//   - DSA signature serialization to I2CP Stream format (40-byte digest)
-//   - Backwards compatibility for existing I2CP message handlers
-//
-// Cryptographic Operations:
-//   - DSA (Legacy): Wraps crypto/dsa and github.com/go-i2p/crypto/dsa
 //   - Ed25519: Delegates to github.com/go-i2p/crypto/ed25519
 //   - X25519: Delegates to github.com/go-i2p/crypto/curve25519
 //   - ChaCha20-Poly1305: Delegates to github.com/go-i2p/crypto/chacha20poly1305
 //
-// Migration Status (Phase 2.1 - Complete):
+// Migration Status (Phase 3.0 - Legacy Crypto Removal Complete):
 //   All modern crypto primitives migrated to github.com/go-i2p/crypto
 //   Base32/Base64 encoding migrated to github.com/go-i2p/common
-//   Wrapper pattern maintains API compatibility
+//   DSA and ElGamal legacy crypto removed
 //
 // Design Rationale:
 // The I2CP protocol requires cryptographic operations to be serialized in
@@ -38,157 +32,15 @@
 package go_i2cp
 
 import (
-	"crypto/dsa"
 	"crypto/rand"
-	"crypto/sha1"
-	"errors"
 	"fmt"
-	"math/big"
 )
 
 // NewCrypto creates a new Crypto instance
 func NewCrypto() *Crypto {
-	c := &Crypto{
-		sh1: sha1.New(),
+	return &Crypto{
 		rng: rand.Reader,
 	}
-	// Initialize DSA parameters on first use for performance
-	dsa.GenerateParameters(&c.params, c.rng, dsa.L1024N160)
-	return c
-}
-
-// Sign a stream using the specified algorithm
-func (c *Crypto) SignStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
-	// Use new DSA wrapper if available
-	if sgk.dsaKeyPair != nil {
-		signature, err := sgk.dsaKeyPair.Sign(stream.Bytes())
-		if err != nil {
-			return fmt.Errorf("failed to sign stream with DSA: %w", err)
-		}
-		stream.Write(signature)
-		return nil
-	}
-
-	// Fallback to legacy implementation for backward compatibility
-	var r, s *big.Int
-	out := NewStream(make([]byte, 40))
-	c.sh1.Reset()
-	// Hash the data (Write returns the data, Sum computes the hash)
-	c.sh1.Write(stream.Bytes())
-	sum := c.sh1.Sum(nil) // Sum(nil) returns the hash without appending to anything
-	r, s, err = dsa.Sign(c.rng, &sgk.priv, sum)
-	err = writeDsaSigToStream(r, s, out)
-	stream.Write(out.Bytes())
-	return
-}
-
-// Writes a 40-byte signature digest to the stream
-// I2CP DSA signature format: [r:20][s:20] in big-endian byte order
-func writeDsaSigToStream(r, s *big.Int, stream *Stream) (err error) {
-	// Create 40-byte buffer for DSA signature (20 bytes r + 20 bytes s)
-	var signature [40]byte
-
-	// Convert r to bytes and pad/truncate to exactly 20 bytes
-	rs := r.Bytes()
-	if len(rs) > 20 {
-		// Truncate to rightmost 20 bytes if too long
-		copy(signature[:20], rs[len(rs)-20:])
-	} else {
-		// Pad with leading zeros if too short (big-endian)
-		copy(signature[20-len(rs):20], rs)
-	}
-
-	// Convert s to bytes and pad/truncate to exactly 20 bytes
-	ss := s.Bytes()
-	if len(ss) > 20 {
-		// Truncate to rightmost 20 bytes if too long
-		copy(signature[20:40], ss[len(ss)-20:])
-	} else {
-		// Pad with leading zeros if too short (big-endian)
-		copy(signature[40-len(ss):40], ss)
-	}
-
-	// Write the complete 40-byte signature to the stream
-	_, err = stream.Write(signature[:])
-	return
-}
-
-// Verify Stream
-func (c *Crypto) VerifyStream(sgk *SignatureKeyPair, stream *Stream) (verified bool, err error) {
-	if stream.Len() < 40 {
-		Fatal("Stream length < 40 bytes (signature length)")
-		return false, fmt.Errorf("stream too short for signature verification")
-	}
-
-	message := stream.Bytes()[:stream.Len()-40]
-	signature := stream.Bytes()[stream.Len()-40:]
-
-	// Use new DSA wrapper if available
-	if sgk.dsaKeyPair != nil {
-		verified = sgk.dsaKeyPair.Verify(message, signature)
-		return verified, nil
-	}
-
-	// Fallback to legacy implementation for backward compatibility
-	var r, s big.Int
-	// I2CP DSA signature format: [r:20][s:20] in big-endian byte order
-	// SetBytes interprets byte slice as big-endian unsigned integer (correct for I2CP spec)
-	r.SetBytes(signature[:20])
-	s.SetBytes(signature[20:])
-	verified = dsa.Verify(&sgk.pub, message, &r, &s)
-	return
-}
-
-// Write public signature key to stream
-func (c *Crypto) WritePublicSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
-	if sgk.algorithmType != DSA_SHA1 {
-		Fatal("Failed to write unsupported signature keypair to stream.")
-	}
-	var n int
-	n, err = stream.Write(sgk.pub.Y.Bytes())
-	if n != 128 {
-		Fatal("Failed to export signature because privatekey != 20 bytes")
-	}
-	return
-}
-
-// Write Signature keypair to stream
-func (c *Crypto) WriteSignatureToStream(sgk *SignatureKeyPair, stream *Stream) (err error) {
-	if sgk == nil {
-		Fatal("Error signature cannot be nil")
-		return fmt.Errorf("Error, signature cannot be nil")
-	}
-	if stream == nil {
-		Fatal("Error, stream cannot be nil")
-		return fmt.Errorf("Error, stream cannot be nil")
-	}
-	if sgk.algorithmType != DSA_SHA1 {
-		Fatal("Failed to write unsupported signature keypair to stream.")
-		return fmt.Errorf("Failed to write unsupported signature keypair to stream.")
-	}
-	err = stream.WriteUint32(sgk.algorithmType)
-	if err != nil {
-		return err
-	}
-	// Pad private key X to exactly 20 bytes (DSA_SHA1_PRIV_KEY_SIZE)
-	// big.Int.Bytes() returns minimal representation without leading zeros
-	privKeyBytes := sgk.priv.X.Bytes()
-	paddedPrivKey := make([]byte, 20)
-	copy(paddedPrivKey[20-len(privKeyBytes):], privKeyBytes)
-	_, err = stream.Write(paddedPrivKey)
-	if err != nil {
-		return err
-	}
-	// Pad public key Y to exactly 128 bytes (DSA_SHA1_PUB_KEY_SIZE)
-	// big.Int.Bytes() returns minimal representation without leading zeros
-	pubKeyBytes := sgk.pub.Y.Bytes()
-	paddedPubKey := make([]byte, 128)
-	copy(paddedPubKey[128-len(pubKeyBytes):], pubKeyBytes)
-	_, err = stream.Write(paddedPubKey)
-	if err != nil {
-		return err
-	}
-	return
 }
 
 // WriteEd25519SignatureToStream writes an Ed25519 signature keypair to stream
@@ -199,50 +51,9 @@ func (c *Crypto) WriteEd25519SignatureToStream(kp *Ed25519KeyPair, stream *Strea
 	return kp.WriteToStream(stream)
 }
 
-// Read and initialize signature keypair from stream
-func (c *Crypto) SignatureKeyPairFromStream(stream *Stream) (sgk SignatureKeyPair, err error) {
-	var typ uint32
-	typ, err = stream.ReadUint32()
-	if err != nil {
-		return sgk, fmt.Errorf("failed to read signature type: %w", err)
-	}
-	if typ == DSA_SHA1 {
-		keys := make([]byte, 20+128)
-		_, err = stream.Read(keys)
-		if err != nil {
-			return sgk, fmt.Errorf("failed to read signature keys: %w", err)
-		}
-		sgk.algorithmType = typ
-		// Initialize big.Int pointers before calling SetBytes
-		sgk.priv.X = new(big.Int)
-		sgk.priv.Y = new(big.Int)
-		sgk.pub.Y = new(big.Int)
-		sgk.priv.X.SetBytes(keys[:20])
-		sgk.priv.Y.SetBytes(keys[20:])
-		sgk.pub.Y.SetBytes(keys[20:])
-	} else {
-		Fatal("Failed to read unsupported signature keypair from stream.")
-	}
-	return
-}
-
-func (c *Crypto) PublicKeyFromStream(keyType uint32, stream *Stream) (key *big.Int, err error) {
-	if keyType == DSA_SHA1 {
-		key = &big.Int{}
-		keyBytes := make([]byte, 128)
-		_, err = stream.Read(keyBytes)
-		key.SetBytes(keyBytes)
-		return key, err
-	} else {
-		Fatal("Unknown signature algorithm")
-		return nil, errors.New("Unknown signature algorithm")
-	}
-}
-
 // Generate a signature keypair
 func (c *Crypto) SignatureKeygen(algorithmTyp uint32) (sgk SignatureKeyPair, err error) {
-	// Modern I2CP uses Ed25519 exclusively (DSA_SHA1 constant maps to Ed25519)
-	// Generate Ed25519 for fast, modern signatures
+	// Modern I2CP uses Ed25519 exclusively
 	ed25519Kp, err := c.Ed25519SignatureKeygen()
 	if err != nil {
 		return sgk, fmt.Errorf("failed to generate Ed25519 key pair: %w", err)
@@ -252,13 +63,10 @@ func (c *Crypto) SignatureKeygen(algorithmTyp uint32) (sgk SignatureKeyPair, err
 	sgk.algorithmType = ED25519_SHA256
 	sgk.ed25519KeyPair = ed25519Kp
 
-	// For compatibility, also set pub.Y with public key bytes as big.Int
-	pubKeyBytes := ed25519Kp.PublicKey()
-	sgk.pub.Y = new(big.Int)
-	sgk.pub.Y.SetBytes(pubKeyBytes[:])
-
 	return sgk, nil
-} // Ed25519SignatureKeygen generates a new Ed25519 signature key pair
+}
+
+// Ed25519SignatureKeygen generates a new Ed25519 signature key pair
 func (c *Crypto) Ed25519SignatureKeygen() (*Ed25519KeyPair, error) {
 	return NewEd25519KeyPair()
 }
@@ -271,11 +79,6 @@ func (c *Crypto) X25519KeyExchangeKeygen() (*X25519KeyPair, error) {
 // ChaCha20Poly1305CipherKeygen generates a new ChaCha20-Poly1305 cipher
 func (c *Crypto) ChaCha20Poly1305CipherKeygen() (*ChaCha20Poly1305Cipher, error) {
 	return NewChaCha20Poly1305Cipher()
-}
-
-// DSASignatureKeygen generates a new DSA signature key pair
-func (c *Crypto) DSASignatureKeygen() (*DSAKeyPair, error) {
-	return NewDSAKeyPair()
 }
 
 // Random32 generates a cryptographically secure random uint32.

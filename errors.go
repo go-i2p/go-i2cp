@@ -96,7 +96,7 @@ var (
 	ErrBlindingRequired = errors.New("i2cp: blinding info required for encrypted leaseset")
 
 	// ErrUnsupportedCrypto indicates an unsupported cryptographic algorithm was encountered.
-	// The library supports DSA, ECDSA, EdDSA, ElGamal, and ECIES-X25519.
+	// The library supports Ed25519 signatures, X25519 key exchange, and ChaCha20-Poly1305 AEAD.
 	ErrUnsupportedCrypto = errors.New("i2cp: unsupported cryptographic algorithm")
 
 	// ErrInvalidSignature indicates a cryptographic signature verification failed.

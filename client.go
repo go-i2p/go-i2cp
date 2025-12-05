@@ -1270,12 +1270,29 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 	// Build leaseset stream and sign it
 	dest.WriteToMessage(leaseSet)
 	leaseSet.Write(nullbytes[:256])
-	c.crypto.WritePublicSignatureToStream(sgk, leaseSet)
+
+	// Write Ed25519 public key (padded to 128 bytes for I2CP compatibility)
+	if sgk.ed25519KeyPair == nil {
+		Error("Ed25519 keypair is nil for CreateLeaseSet")
+		return
+	}
+	paddedPubKey := make([]byte, 128)
+	ed25519PubKey := sgk.ed25519KeyPair.PublicKey()
+	copy(paddedPubKey[96:], ed25519PubKey[:]) // Right-align Ed25519 32-byte key in 128-byte field
+	leaseSet.Write(paddedPubKey)
+
 	leaseSet.WriteByte(tunnels)
 	for i := uint8(0); i < tunnels; i++ {
 		leases[i].WriteToMessage(leaseSet)
 	}
-	c.crypto.SignStream(sgk, leaseSet)
+
+	// Sign with Ed25519
+	err = sgk.ed25519KeyPair.SignStream(leaseSet)
+	if err != nil {
+		Error("Failed to sign CreateLeaseSet: %v", err)
+		return
+	}
+
 	c.messageStream.Write(leaseSet.Bytes())
 	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateLeaseSet")
@@ -1378,8 +1395,12 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	}
 
 	// Signature - sign the entire LeaseSet2 with destination's signing key
-	c.crypto.SignStream(sgk, leaseSet)
+	err = sgk.ed25519KeyPair.SignStream(leaseSet)
 
+	if err != nil {
+		Error("Failed to sign CreateLeaseSet2: %v", err)
+		return err
+	}
 	// Write LeaseSet2 to message stream
 	c.messageStream.Write(leaseSet.Bytes())
 

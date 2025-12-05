@@ -266,7 +266,7 @@ func BenchmarkDSA_KeyGeneration(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := crypto.SignatureKeygen(DSA_SHA1)
+		_, err := crypto.SignatureKeygen(ED25519_SHA256)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -275,7 +275,7 @@ func BenchmarkDSA_KeyGeneration(b *testing.B) {
 
 func BenchmarkDSA_Sign(b *testing.B) {
 	crypto := NewCrypto()
-	kp, err := crypto.SignatureKeygen(DSA_SHA1)
+	kp, err := crypto.SignatureKeygen(ED25519_SHA256)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func BenchmarkDSA_Sign(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(message)
-		err := crypto.SignStream(&kp, stream)
+		err := kp.ed25519KeyPair.SignStream(stream)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -297,7 +297,7 @@ func BenchmarkDSA_Sign(b *testing.B) {
 
 func BenchmarkDSA_Verify(b *testing.B) {
 	crypto := NewCrypto()
-	kp, err := crypto.SignatureKeygen(DSA_SHA1)
+	kp, err := crypto.SignatureKeygen(ED25519_SHA256)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func BenchmarkDSA_Verify(b *testing.B) {
 
 	// Sign the message
 	stream := NewStream(message)
-	err = crypto.SignStream(&kp, stream)
+	err = kp.ed25519KeyPair.SignStream(stream)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func BenchmarkDSA_Verify(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		verifyStream := NewStream(signedStream)
-		_, err := crypto.VerifyStream(&kp, verifyStream)
+		_, err := kp.ed25519KeyPair.VerifyStream(verifyStream)
 		if err != nil {
 			b.Fatal(err)
 		}

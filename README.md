@@ -182,7 +182,6 @@ if go_i2cp.IsTemporary(err) {
   - Ed25519 signatures (I2CP 0.9.15+)
   - X25519 key exchange (I2CP 0.9.46+)
   - ChaCha20-Poly1305 encryption (I2CP 0.9.46+)
-  - Legacy DSA/SHA1/SHA256 support
 - ✅ Context-Aware Operations (cancellation, timeouts, graceful shutdown)
 - ✅ Comprehensive Error Handling (20+ typed errors, 96.2% error path coverage)
 
@@ -205,6 +204,7 @@ if go_i2cp.IsTemporary(err) {
 
 - ReportAbuse message (never implemented in I2CP spec)
 - ElGamal encryption (deprecated, security concerns)
+- DSA signatures (legacy, removed in favor of Ed25519)
 
 ### Version Compatibility
 

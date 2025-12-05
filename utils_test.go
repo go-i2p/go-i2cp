@@ -37,7 +37,6 @@ func TestNewCryptoInstance(t *testing.T) {
 				t.Error("crypto instance has nil RNG")
 			}
 
-			if crypto.sh1 == nil {
 				t.Error("crypto instance has nil SHA1 hash")
 			}
 

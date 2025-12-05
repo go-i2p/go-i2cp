@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-i2p/common/lease"
+	cryptoed25519 "github.com/go-i2p/crypto/ed25519"
 )
 
 // LeaseSet2 represents a modern I2CP LeaseSet2 structure (I2CP 0.9.38+).
@@ -295,16 +296,12 @@ func getSignatureLength(dest *Destination) int {
 		return 64 // Ed25519 signature
 	}
 
-	if dest.sgk.algorithmType == DSA_SHA1 || dest.sgk.algorithmType == 0 {
-		return 40 // DSA signature
-	}
-
-	// Default to DSA for backward compatibility with unknown types
-	return 40
+	// Default to Ed25519 (all new destinations use Ed25519)
+	return 64
 }
 
 // getSigningPublicKeyFromDestination extracts the signing public key bytes from a destination.
-// Returns the public key and the algorithm type (DSA_SHA1 or ED25519_SHA256).
+// Returns the public key and the algorithm type (ED25519_SHA256 only).
 func getSigningPublicKeyFromDestination(dest *Destination) ([]byte, uint32, error) {
 	if dest == nil {
 		return nil, 0, fmt.Errorf("destination is nil")
@@ -313,25 +310,18 @@ func getSigningPublicKeyFromDestination(dest *Destination) ([]byte, uint32, erro
 	// Check algorithm type from signature key pair
 	algorithmType := dest.sgk.algorithmType
 
-	// For DSA keys, extract from signPubKey
-	if algorithmType == DSA_SHA1 || algorithmType == 0 {
-		if dest.signPubKey == nil {
-			return nil, 0, fmt.Errorf("DSA signing public key is nil")
-		}
-		pubKeyBytes := dest.signPubKey.Bytes()
-		return pubKeyBytes, DSA_SHA1, nil
+	// Only Ed25519 is supported
+	if algorithmType != ED25519_SHA256 {
+		return nil, 0, fmt.Errorf("unsupported signature algorithm: %d (only Ed25519 supported)", algorithmType)
 	}
 
-	// For Ed25519 keys (or other modern algorithms), we would extract from sgk
-	// Currently, the Destination structure stores DSA keys in signPubKey
-	// For Ed25519, we'd need to enhance the Destination structure
-	// For now, default to DSA
-	if dest.signPubKey != nil {
-		pubKeyBytes := dest.signPubKey.Bytes()
-		return pubKeyBytes, DSA_SHA1, nil
+	// Extract Ed25519 public key
+	if dest.sgk.ed25519KeyPair == nil {
+		return nil, 0, fmt.Errorf("Ed25519 keypair is nil")
 	}
 
-	return nil, 0, fmt.Errorf("no signing public key found in destination")
+	pubKey := dest.sgk.ed25519KeyPair.PublicKey()
+	return pubKey[:], ED25519_SHA256, nil
 }
 
 // Type returns the LeaseSet2 type (3=standard, 5=encrypted, 7=meta)
@@ -439,16 +429,26 @@ func (ls *LeaseSet2) VerifySignature() bool {
 	}
 
 	// Verify signature based on algorithm type
-	// Modern I2CP uses Ed25519 exclusively (DSA_SHA1 maps to ED25519_SHA256)
-	switch algorithmType {
-	case ED25519_SHA256: // Handles both Ed25519 and legacy DSA (which now maps to Ed25519)
-		// Use Ed25519 verification via crypto package
-		return verifyEd25519Signature(pubKeyBytes, signedData, ls.signature)
-
-	default:
-		Error("Unsupported signature algorithm type: %d", algorithmType)
+	// Modern I2CP uses Ed25519 exclusively
+	if algorithmType != ED25519_SHA256 {
+		Error("Unsupported signature algorithm type: %d (only Ed25519 supported)", algorithmType)
 		return false
 	}
+
+	// Verify Ed25519 signature
+	// Create a temporary Ed25519KeyPair with just the public key for verification
+	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(pubKeyBytes)
+	if err != nil {
+		Error("Failed to create Ed25519 public key: %v", err)
+		return false
+	}
+
+	tempKeyPair := &Ed25519KeyPair{
+		algorithmType: ED25519_SHA256,
+		publicKey:     ed25519PubKey,
+	}
+
+	return tempKeyPair.Verify(signedData, ls.signature)
 }
 
 // reconstructSignedData reconstructs the byte sequence that was signed.

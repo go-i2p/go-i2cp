@@ -21,9 +21,7 @@ func TestDestination_Copy(t *testing.T) {
 		if copied.cert != original.cert {
 			t.Error("Certificate not copied correctly")
 		}
-		if copied.signPubKey.Cmp(original.signPubKey) != 0 {
 			t.Error("Signing public key not copied correctly")
-		}
 		if copied.pubKey != original.pubKey {
 			t.Error("Public key not copied correctly")
 		}

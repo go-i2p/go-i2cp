@@ -144,10 +144,9 @@ const (
 // Destination Size Constants
 // Moved from: destination.go
 const (
-	PUB_KEY_SIZE          = 256
-	DSA_SHA1_PUB_KEY_SIZE = 128
-	DIGEST_SIZE           = 40
-	DEST_SIZE             = 4096
+	PUB_KEY_SIZE = 256
+	DIGEST_SIZE  = 32 // SHA-256 digest size for Ed25519
+	DEST_SIZE    = 4096
 )
 
 // Hash Algorithm Constants
@@ -160,10 +159,8 @@ const (
 // Signature Algorithm Constants
 // Moved from: crypto.go
 // Modern I2CP uses Ed25519 (type 7) exclusively
-// Legacy DSA constants retained for API compatibility but map to Ed25519
 const (
 	ED25519_SHA256 uint32 = 7
-	DSA_SHA1       uint32 = ED25519_SHA256 // Legacy constant, maps to Ed25519
 )
 
 // Codec Algorithm Constants

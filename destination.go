@@ -5,22 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 
 	"github.com/go-i2p/common/base32"
 	"github.com/go-i2p/common/base64"
+	cryptoed25519 "github.com/go-i2p/crypto/ed25519"
 )
 
 type Destination struct {
-	cert       *Certificate
-	sgk        SignatureKeyPair
-	signPubKey *big.Int
-	pubKey     [PUB_KEY_SIZE]byte
-	digest     [DIGEST_SIZE]byte
-	b32        string
-	b64        string
-	crypto     *Crypto
+	cert   *Certificate
+	sgk    SignatureKeyPair
+	pubKey [PUB_KEY_SIZE]byte
+	digest [DIGEST_SIZE]byte
+	b32    string
+	b64    string
+	crypto *Crypto
 }
 
 func NewDestination(crypto *Crypto) (dest *Destination, err error) {
@@ -36,7 +35,6 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate Ed25519 signature keypair: %w", err)
 	}
-	dest.signPubKey = dest.sgk.pub.Y
 
 	// Generate X25519 encryption keypair (ECIES)
 	x25519Kp, err := crypto.X25519KeyExchangeKeygen()
@@ -54,44 +52,123 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	return
 }
 
+// NewDestinationFromMessage reads a destination from an I2CP message stream.
+// NOTE: This function supports Ed25519 destinations with KEY certificates only.
+// Legacy DSA destinations are no longer supported.
 func NewDestinationFromMessage(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
+
+	// Read encryption public key (256 bytes, first 32 are X25519)
 	_, err = stream.Read(dest.pubKey[:])
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to read public key: %w", err)
 	}
-	dest.signPubKey, err = crypto.PublicKeyFromStream(DSA_SHA1, stream)
+
+	// Read signing public key (128 bytes for I2CP compatibility, but Ed25519 is only 32)
+	// The Ed25519 public key is right-aligned in the 128-byte field
+	signingKeyPadded := make([]byte, 128)
+	_, err = stream.Read(signingKeyPadded)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to read signing key: %w", err)
 	}
-	dest.sgk = SignatureKeyPair{}
-	dest.sgk.priv.Y = dest.signPubKey
-	dest.sgk.pub.Y = dest.signPubKey
+
+	// Read certificate
 	var cert Certificate
 	cert, err = NewCertificateFromMessage(stream)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
 	dest.cert = &cert
+
+	// For Ed25519 (in KEY certificates), extract the 32-byte public key from right side
+	// Create a Ed25519KeyPair with just the public key for verification
+	if cert.certType == CERTIFICATE_KEY {
+		// Extract Ed25519 public key (last 32 bytes of the 128-byte field)
+		ed25519PubKeyBytes := signingKeyPadded[96:128]
+
+		// Create public key using crypto package
+		ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(ed25519PubKeyBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Ed25519 public key: %w", err)
+		}
+
+		dest.sgk = SignatureKeyPair{
+			algorithmType: ED25519_SHA256,
+			ed25519KeyPair: &Ed25519KeyPair{
+				algorithmType: ED25519_SHA256,
+				publicKey:     ed25519PubKey,
+			},
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported certificate type: %d (only KEY certificates with Ed25519 supported)", cert.certType)
+	}
+
 	dest.generateB32()
 	dest.generateB64()
-	return dest, err
+	return dest, nil
 }
 
+// NewDestinationFromStream reads a destination from a configuration stream.
+// This format includes the full keypair, not just public keys.
+// NOTE: Only Ed25519 destinations with KEY certificates are supported.
 func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
 	var cert Certificate
 	var pubKeyLen uint16
 	dest = &Destination{crypto: crypto}
+
+	// Read certificate
 	cert, err = NewCertificateFromStream(stream)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
 	dest.cert = &cert
-	dest.sgk, err = crypto.SignatureKeyPairFromStream(stream)
+
+	// Read algorithm type
+	var algType uint32
+	algType, err = stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read signature keypair: %w", err)
+		return nil, fmt.Errorf("failed to read algorithm type: %w", err)
 	}
-	dest.signPubKey = dest.sgk.pub.Y
+
+	if algType != ED25519_SHA256 {
+		return nil, fmt.Errorf("unsupported signature algorithm: %d (only Ed25519 supported)", algType)
+	}
+
+	// Read Ed25519 keypair (64 bytes private + 32 bytes public for stdlib format)
+	// The crypto package uses 64-byte private keys (includes 32-byte seed + 32-byte public key)
+	privateKeyBytes := make([]byte, 64)
+	_, err = stream.Read(privateKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Ed25519 private key: %w", err)
+	}
+
+	publicKeyBytes := make([]byte, 32)
+	_, err = stream.Read(publicKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Ed25519 public key: %w", err)
+	}
+
+	// Create Ed25519 keypair using crypto package
+	privKey, err := cryptoed25519.CreateEd25519PrivateKeyFromBytes(privateKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Ed25519 private key: %w", err)
+	}
+
+	pubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(publicKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Ed25519 public key: %w", err)
+	}
+
+	dest.sgk = SignatureKeyPair{
+		algorithmType: ED25519_SHA256,
+		ed25519KeyPair: &Ed25519KeyPair{
+			algorithmType: ED25519_SHA256,
+			privateKey:    privKey,
+			publicKey:     pubKey,
+		},
+	}
+
+	// Read encryption public key length
 	pubKeyLen, err = stream.ReadUint16()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read public key length: %w", err)
@@ -99,13 +176,16 @@ func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination
 	if pubKeyLen != PUB_KEY_SIZE {
 		return nil, fmt.Errorf("invalid public key length: got %d, expected %d", pubKeyLen, PUB_KEY_SIZE)
 	}
+
+	// Read encryption public key
 	_, err = stream.Read(dest.pubKey[:])
 	if err != nil {
 		return nil, fmt.Errorf("failed to read public key: %w", err)
 	}
+
 	dest.generateB32()
 	dest.generateB64()
-	return
+	return dest, nil
 }
 
 func NewDestinationFromBase64(base64Str string, crypto *Crypto) (dest *Destination, err error) {
@@ -143,7 +223,6 @@ func NewDestinationFromFile(file *os.File, crypto *Crypto) (*Destination, error)
 
 func (dest *Destination) Copy() (newDest Destination) {
 	newDest.cert = dest.cert
-	newDest.signPubKey = dest.signPubKey
 	newDest.pubKey = dest.pubKey
 	newDest.sgk = dest.sgk
 	newDest.b32 = dest.b32
@@ -176,18 +255,28 @@ func (dest *Destination) WriteToFile(filename string) (err error) {
 }
 
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
+	// Write encryption public key (256 bytes)
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
+
 	// I2CP Destination format ALWAYS uses 128-byte signing key field
 	// Per Java I2P Destination.java: pubKey(256) + signingPubKey(128) + certificate
 	// Even for Ed25519 (32 bytes), we must pad to 128 bytes for I2CP compatibility
-	signKeyBytes := dest.signPubKey.Bytes()
-	paddedSignKey := make([]byte, DSA_SHA1_PUB_KEY_SIZE)
-	copy(paddedSignKey[DSA_SHA1_PUB_KEY_SIZE-len(signKeyBytes):], signKeyBytes)
+	// Ed25519 public key is right-aligned in the 128-byte field
+	paddedSignKey := make([]byte, 128)
+	if dest.sgk.ed25519KeyPair != nil {
+		ed25519PubKey := dest.sgk.ed25519KeyPair.PublicKey()
+		copy(paddedSignKey[96:], ed25519PubKey[:]) // Right-align 32-byte key in 128-byte field
+	} else {
+		return fmt.Errorf("no Ed25519 keypair available")
+	}
+
 	if _, err = stream.Write(paddedSignKey); err != nil {
 		return fmt.Errorf("failed to write signing public key: %w", err)
 	}
+
+	// Write certificate
 	if err = dest.cert.WriteToMessage(stream); err != nil {
 		return fmt.Errorf("failed to write certificate: %w", err)
 	}
@@ -195,32 +284,46 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 }
 
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
+	// Write certificate
 	if err = dest.cert.WriteToStream(stream); err != nil {
 		return fmt.Errorf("failed to write certificate to stream: %w", err)
 	}
-	if err = dest.crypto.WriteSignatureToStream(&dest.sgk, stream); err != nil {
-		return fmt.Errorf("failed to write signature to stream: %w", err)
+
+	// Write algorithm type
+	if err = stream.WriteUint32(ED25519_SHA256); err != nil {
+		return fmt.Errorf("failed to write algorithm type: %w", err)
 	}
+
+	// Write Ed25519 keypair (32 bytes private + 32 bytes public)
+	if dest.sgk.ed25519KeyPair != nil {
+		privKey := dest.sgk.ed25519KeyPair.PrivateKey()
+		pubKey := dest.sgk.ed25519KeyPair.PublicKey()
+		if _, err = stream.Write(privKey[:]); err != nil {
+			return fmt.Errorf("failed to write Ed25519 private key: %w", err)
+		}
+		if _, err = stream.Write(pubKey[:]); err != nil {
+			return fmt.Errorf("failed to write Ed25519 public key: %w", err)
+		}
+	} else {
+		return fmt.Errorf("no Ed25519 keypair available")
+	}
+
+	// Write encryption public key length
 	if err = stream.WriteUint16(PUB_KEY_SIZE); err != nil {
 		return fmt.Errorf("failed to write public key size: %w", err)
 	}
+
+	// Write encryption public key
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
 	return nil
 }
 
-// Doesn't seem to be used anywhere??
-func (dest *Destination) Verify() (verified bool, err error) {
-	stream := NewStream(make([]byte, 0, DEST_SIZE))
-	if err = dest.WriteToMessage(stream); err != nil {
-		return false, fmt.Errorf("failed to write destination to message: %w", err)
-	}
-	if _, err = stream.Write(dest.digest[:]); err != nil {
-		return false, fmt.Errorf("failed to write digest: %w", err)
-	}
-	return dest.crypto.VerifyStream(&dest.sgk, stream)
-}
+// Verify - DEPRECATED AND REMOVED
+// This method relied on legacy DSA VerifyStream functionality.
+// Ed25519 signature verification should be done directly using the Ed25519KeyPair.Verify() method.
+// This method was never used in the codebase and has been removed.
 
 func (dest *Destination) generateB32() {
 	stream := NewStream(make([]byte, 0, DEST_SIZE))
