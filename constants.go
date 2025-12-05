@@ -172,7 +172,7 @@ const (
 
 // Key Exchange Algorithm Constants
 const (
-	X25519 uint32 = 3
+	X25519 uint32 = 4
 )
 
 // Encryption Algorithm Constants
