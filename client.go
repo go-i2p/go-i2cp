@@ -650,7 +650,7 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 	delete(c.lookup, b32)
 	lup = c.lookupReq[requestId]
 	delete(c.lookupReq, requestId)
-// MINOR FIX: Cannot use struct comparison since LookupEntry now contains map (service records support)
+	// MINOR FIX: Cannot use struct comparison since LookupEntry now contains map (service records support)
 	if lup.address == "" {
 		Warning("No sesssion for destination lookup of address '%s'", b32)
 	} else {
