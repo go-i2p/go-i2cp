@@ -4,30 +4,6 @@ import (
 	"testing"
 )
 
-	crypto := NewCrypto()
-	sgk, err := crypto.SignatureKeygen(ED25519_SHA256)
-	if err != nil {
-		t.Fatalf("Failed to generate DSA keypair: %v", err)
-	}
-
-	// We need to access the actual DSA implementation through the crypto package
-	// Let's test by creating a new DSA keypair directly
-
-	algType := dsaKp.AlgorithmType()
-	if algType != ED25519_SHA256 {
-		t.Errorf("AlgorithmType() = %d, want %d (ED25519_SHA256)", algType, ED25519_SHA256)
-	}
-
-	// Verify consistency
-	if dsaKp.AlgorithmType() != algType {
-		t.Error("AlgorithmType() returned different values on subsequent calls")
-	}
-
-	// Verify the SignatureKeygen actually created a valid keypair
-		t.Error("SignatureKeygen did not initialize public key")
-	}
-}
-
 // TestEd25519KeyPair_PrivateKey tests the Ed25519 PrivateKey getter
 func TestEd25519KeyPair_PrivateKey(t *testing.T) {
 	kp, err := NewEd25519KeyPair()
@@ -151,17 +127,21 @@ func TestX25519KeyPair_AlgorithmType(t *testing.T) {
 
 // TestKeyPairTypes_Consistency tests that all key pair types return correct algorithm types
 func TestKeyPairTypes_Consistency(t *testing.T) {
-	t.Run("DSA keypair type consistency", func(t *testing.T) {
-		crypto := NewCrypto()
-		sgk, err := crypto.SignatureKeygen(ED25519_SHA256)
-		if err != nil {
-			t.Fatalf("Failed to generate DSA keypair: %v", err)
-		}
+	// DEPRECATED: DSA keypair tests removed - modern I2CP uses Ed25519 only
+	/*
+		t.Run("DSA keypair type consistency", func(t *testing.T) {
+			crypto := NewCrypto()
+			sgk, err := crypto.SignatureKeygen(ED25519_SHA256)
+			if err != nil {
+				t.Fatalf("Failed to generate DSA keypair: %v", err)
+			}
 
-		// Verify the signature keypair was created
-			t.Error("DSA public key not initialized")
-		}
-	})
+			// Verify the signature keypair was created
+			if sgk.ed25519KeyPair == nil {
+				t.Error("DSA public key not initialized")
+			}
+		})
+	*/
 
 	t.Run("Ed25519 keypair type consistency", func(t *testing.T) {
 		kp, err := NewEd25519KeyPair()

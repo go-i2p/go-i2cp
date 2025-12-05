@@ -328,7 +328,7 @@ func TestLeaseSet2_VerifySignature(t *testing.T) {
 	dataStream.WriteByte(0) // 0 leases
 
 	// Sign the data using the destination's signing key (appends signature to stream)
-	err = crypto.SignStream(&dest.sgk, dataStream)
+	err = dest.sgk.ed25519KeyPair.SignStream(dataStream)
 	if err != nil {
 		t.Fatalf("Failed to sign LeaseSet2 data: %v", err)
 	}

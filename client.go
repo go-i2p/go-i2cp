@@ -1396,7 +1396,6 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 
 	// Signature - sign the entire LeaseSet2 with destination's signing key
 	err = sgk.ed25519KeyPair.SignStream(leaseSet)
-
 	if err != nil {
 		Error("Failed to sign CreateLeaseSet2: %v", err)
 		return err

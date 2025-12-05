@@ -37,8 +37,7 @@ func TestNewCryptoInstance(t *testing.T) {
 				t.Error("crypto instance has nil RNG")
 			}
 
-				t.Error("crypto instance has nil SHA1 hash")
-			}
+			// NOTE: SHA-1 hash removed - modern I2CP uses SHA-256 only
 
 			// Test that we can generate random bytes (validates RNG works)
 			randomBytes := make([]byte, 32)
