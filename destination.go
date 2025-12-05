@@ -31,7 +31,7 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	// KEY certificate payload: signingKeyType (2 bytes) + encryptionKeyType (2 bytes)
 	keyCertPayload := []byte{
 		0, 7, // Signing key type: Ed25519 (7)
-		0, 3, // Encryption key type: X25519 (3)
+		0, 4, // Encryption key type: ECIES-X25519 (4)
 	}
 	commonCert, err := certificate.NewCertificateWithType(CERTIFICATE_KEY, keyCertPayload)
 	if err != nil {
