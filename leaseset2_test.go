@@ -57,8 +57,8 @@ func TestLeaseSet2Parsing_Standard(t *testing.T) {
 		stream.WriteUint32(endDate)
 	}
 
-	// Write signature (40 bytes for DSA)
-	signature := make([]byte, 40)
+	// Write signature (64 bytes for Ed25519)
+	signature := make([]byte, 64)
 	for i := range signature {
 		signature[i] = 0xff
 	}
@@ -136,7 +136,7 @@ func TestLeaseSet2Parsing_Encrypted(t *testing.T) {
 	stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
 
 	// Signature
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	// Parse
@@ -201,7 +201,7 @@ func TestLeaseSet2Parsing_WithOfflineSignature(t *testing.T) {
 	stream.Write(offlineSig)
 
 	// Main signature
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	// Parse
@@ -295,7 +295,7 @@ func TestLeaseSet2_IsExpired(t *testing.T) {
 	stream.WriteMapping(map[string]string{})
 	stream.WriteByte(0) // 0 leases
 
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	parseStream := NewStream(stream.Bytes())
@@ -382,7 +382,7 @@ func TestLeaseSet2_String(t *testing.T) {
 	stream.WriteUint32(3000)
 	stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
 
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	parseStream := NewStream(stream.Bytes())
@@ -422,7 +422,7 @@ func TestLeaseSet2_EmptyProperties(t *testing.T) {
 	stream.WriteMapping(map[string]string{}) // Empty properties
 	stream.WriteByte(0)
 
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	parseStream := NewStream(stream.Bytes())
@@ -457,7 +457,7 @@ func TestLeaseSet2_MetaType(t *testing.T) {
 	stream.WriteMapping(map[string]string{"meta": "true"})
 	stream.WriteByte(0)
 
-	signature := make([]byte, 40)
+	signature := make([]byte, 64)
 	stream.Write(signature)
 
 	parseStream := NewStream(stream.Bytes())
@@ -523,7 +523,7 @@ func TestLeaseSet2_GetterMethods(t *testing.T) {
 		flags:        0x0001,
 		properties:   map[string]string{"key": "value"},
 		leases:       make([]*lease.Lease2, 3),
-		signature:    make([]byte, 40),
+		signature:    make([]byte, 64),
 		offlineSig:   &OfflineSignature{},
 	}
 
@@ -551,8 +551,8 @@ func TestLeaseSet2_GetterMethods(t *testing.T) {
 		t.Errorf("LeaseCount() failed: expected 3, got %d", ls.LeaseCount())
 	}
 
-	if len(ls.Signature()) != 40 {
-		t.Errorf("Signature() failed: expected 40 bytes, got %d", len(ls.Signature()))
+	if len(ls.Signature()) != 64 {
+		t.Errorf("Signature() failed: expected 64 bytes (Ed25519), got %d", len(ls.Signature()))
 	}
 
 	if ls.OfflineSignature() == nil {

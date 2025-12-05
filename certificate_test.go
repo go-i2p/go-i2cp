@@ -233,8 +233,8 @@ func TestCertificateBackwardCompatibility(t *testing.T) {
 		if destRead.cert == nil {
 			t.Fatal("Expected read destination to have a certificate")
 		}
-		if destRead.cert.certType != CERTIFICATE_NULL {
-			t.Errorf("Expected certificate type %d, got %d", CERTIFICATE_NULL, destRead.cert.certType)
+		if destRead.cert.certType != CERTIFICATE_KEY {
+			t.Errorf("Expected certificate type %d (KEY), got %d", CERTIFICATE_KEY, destRead.cert.certType)
 		}
 	})
 }

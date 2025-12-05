@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-i2p/common/base32"
 	"github.com/go-i2p/common/base64"
+	"github.com/go-i2p/common/certificate"
 	cryptoed25519 "github.com/go-i2p/crypto/ed25519"
 )
 
@@ -26,8 +27,17 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
 
 	// Modern I2CP uses KEY certificates with Ed25519 (signing) + X25519 (encryption)
-	// Certificate format: [type=5][length][sigType=7][cryptoType=3]
-	keyCert := NewCertificate(CERTIFICATE_KEY)
+	// Certificate format: [type=5][length=4][sigType=7 (2 bytes)][cryptoType=3 (2 bytes)]
+	// KEY certificate payload: signingKeyType (2 bytes) + encryptionKeyType (2 bytes)
+	keyCertPayload := []byte{
+		0, 7, // Signing key type: Ed25519 (7)
+		0, 3, // Encryption key type: X25519 (3)
+	}
+	commonCert, err := certificate.NewCertificateWithType(CERTIFICATE_KEY, keyCertPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create KEY certificate: %w", err)
+	}
+	keyCert := Certificate{cert: commonCert, certType: CERTIFICATE_KEY, length: 4, data: keyCertPayload}
 	dest.cert = &keyCert
 
 	// Generate Ed25519 signing keypair (fast, modern)

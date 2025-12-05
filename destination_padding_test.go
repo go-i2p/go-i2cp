@@ -32,14 +32,14 @@ func TestDestinationWriteToMessagePadding(t *testing.T) {
 	// - 256 bytes: X25519 public key
 	// - 128 bytes: Ed25519 public key (32 bytes actual, 96 bytes padding)
 	// - 3 bytes: NULL certificate
-	// Total: 387 bytes
+	// Total: 391 bytes (256 pubKey + 128 signKey + 7 cert with 4-byte payload)
 
-	expectedSize := 387 // 256 + 128 + 3
+	expectedSize := 391 // 256 + 128 + 3 (cert header) + 4 (KEY cert payload)
 	actualSize := stream.Len()
 
 	if actualSize != expectedSize {
 		t.Errorf("Incorrect destination size: got %d bytes, want %d bytes", actualSize, expectedSize)
-		t.Errorf("Expected format: 256 (pubKey) + 128 (signKey padded) + 3 (cert) = 387")
+		t.Errorf("Expected format: 256 (pubKey) + 128 (signKey padded) + 7 (KEY cert) = 391")
 	}
 
 	// Verify the structure by reading it back
@@ -77,8 +77,8 @@ func TestDestinationWriteToMessagePadding(t *testing.T) {
 		t.Error("Signing public key appears to be all zeros (should contain actual Ed25519 key)")
 	}
 
-	// Remaining bytes: certificate
-	if len(data) < 387 {
+	// Remaining bytes: certificate (7 bytes for KEY certificate)
+	if len(data) < 391 {
 		t.Fatalf("Insufficient data for certificate: got %d bytes", len(data))
 	}
 

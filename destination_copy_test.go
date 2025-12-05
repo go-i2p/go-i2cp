@@ -21,7 +21,8 @@ func TestDestination_Copy(t *testing.T) {
 		if copied.cert != original.cert {
 			t.Error("Certificate not copied correctly")
 		}
-		t.Error("Signing public key not copied correctly")
+		// NOTE: Ed25519 destinations don't have a signPubKey field (removed during DSA cleanup)
+		// The signing public key is stored in sgk.ed25519KeyPair
 		if copied.pubKey != original.pubKey {
 			t.Error("Public key not copied correctly")
 		}
