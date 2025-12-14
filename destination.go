@@ -122,80 +122,115 @@ func NewDestinationFromMessage(stream *Stream, crypto *Crypto) (dest *Destinatio
 // This format includes the full keypair, not just public keys.
 // NOTE: Only Ed25519 destinations with KEY certificates are supported.
 func NewDestinationFromStream(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
-	var cert Certificate
-	var pubKeyLen uint16
 	dest = &Destination{crypto: crypto}
 
-	// Read certificate
-	cert, err = NewCertificateFromStream(stream)
+	cert, err := readDestinationCertificate(stream)
+	if err != nil {
+		return nil, err
+	}
+	dest.cert = cert
+
+	if err := validateDestinationAlgorithm(stream); err != nil {
+		return nil, err
+	}
+
+	sgk, err := readDestinationEd25519KeyPair(stream)
+	if err != nil {
+		return nil, err
+	}
+	dest.sgk = sgk
+
+	if err := readDestinationEncryptionKey(stream, dest); err != nil {
+		return nil, err
+	}
+
+	dest.generateB32()
+	dest.generateB64()
+	return dest, nil
+}
+
+// readDestinationCertificate reads and validates the certificate from the stream.
+// Returns the certificate or an error if reading fails.
+func readDestinationCertificate(stream *Stream) (*Certificate, error) {
+	cert, err := NewCertificateFromStream(stream)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
-	dest.cert = &cert
+	return &cert, nil
+}
 
-	// Read algorithm type
-	var algType uint32
-	algType, err = stream.ReadUint32()
+// validateDestinationAlgorithm reads and validates the signature algorithm type.
+// Returns an error if the algorithm is not Ed25519.
+func validateDestinationAlgorithm(stream *Stream) error {
+	algType, err := stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read algorithm type: %w", err)
+		return fmt.Errorf("failed to read algorithm type: %w", err)
 	}
 
 	if algType != ED25519_SHA256 {
-		return nil, fmt.Errorf("unsupported signature algorithm: %d (only Ed25519 supported)", algType)
+		return fmt.Errorf("unsupported signature algorithm: %d (only Ed25519 supported)", algType)
 	}
 
+	return nil
+}
+
+// readDestinationEd25519KeyPair reads the Ed25519 keypair from the stream.
+// Returns the SignatureKeyPair or an error if reading or key creation fails.
+func readDestinationEd25519KeyPair(stream *Stream) (SignatureKeyPair, error) {
 	// Read Ed25519 keypair (64 bytes private + 32 bytes public for stdlib format)
 	// The crypto package uses 64-byte private keys (includes 32-byte seed + 32-byte public key)
 	privateKeyBytes := make([]byte, 64)
-	_, err = stream.Read(privateKeyBytes)
+	_, err := stream.Read(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Ed25519 private key: %w", err)
+		return SignatureKeyPair{}, fmt.Errorf("failed to read Ed25519 private key: %w", err)
 	}
 
 	publicKeyBytes := make([]byte, 32)
 	_, err = stream.Read(publicKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Ed25519 public key: %w", err)
+		return SignatureKeyPair{}, fmt.Errorf("failed to read Ed25519 public key: %w", err)
 	}
 
 	// Create Ed25519 keypair using crypto package
 	privKey, err := cryptoed25519.CreateEd25519PrivateKeyFromBytes(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Ed25519 private key: %w", err)
+		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 private key: %w", err)
 	}
 
 	pubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(publicKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Ed25519 public key: %w", err)
+		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 public key: %w", err)
 	}
 
-	dest.sgk = SignatureKeyPair{
+	return SignatureKeyPair{
 		algorithmType: ED25519_SHA256,
 		ed25519KeyPair: &Ed25519KeyPair{
 			algorithmType: ED25519_SHA256,
 			privateKey:    privKey,
 			publicKey:     pubKey,
 		},
-	}
+	}, nil
+}
 
+// readDestinationEncryptionKey reads and validates the encryption public key.
+// Updates the destination with the encryption key or returns an error.
+func readDestinationEncryptionKey(stream *Stream, dest *Destination) error {
 	// Read encryption public key length
-	pubKeyLen, err = stream.ReadUint16()
+	pubKeyLen, err := stream.ReadUint16()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read public key length: %w", err)
+		return fmt.Errorf("failed to read public key length: %w", err)
 	}
 	if pubKeyLen != PUB_KEY_SIZE {
-		return nil, fmt.Errorf("invalid public key length: got %d, expected %d", pubKeyLen, PUB_KEY_SIZE)
+		return fmt.Errorf("invalid public key length: got %d, expected %d", pubKeyLen, PUB_KEY_SIZE)
 	}
 
 	// Read encryption public key
 	_, err = stream.Read(dest.pubKey[:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to read public key: %w", err)
+		return fmt.Errorf("failed to read public key: %w", err)
 	}
 
-	dest.generateB32()
-	dest.generateB64()
-	return dest, nil
+	return nil
 }
 
 func NewDestinationFromBase64(base64Str string, crypto *Crypto) (dest *Destination, err error) {
