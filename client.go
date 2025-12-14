@@ -238,36 +238,65 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 }
 
 func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err error) {
-	length := uint32(0)
-	msgType := uint8(0)
-	var i int
+	// Read and parse message header
+	length, msgType, err := c.readMessageHeader()
+	if err != nil {
+		return err
+	}
+
+	// Validate message length and type
+	if err := c.validateMessageHeader(msgType, length, typ); err != nil {
+		return err
+	}
+
+	// Receive message body
+	if err := c.receiveMessageBody(length, stream); err != nil {
+		return err
+	}
+
+	Debug("Received message type %d with %d bytes", msgType, length)
+
+	// Track metrics and dispatch message
+	c.processReceivedMessage(msgType, length, stream, dispatch)
+	return nil
+}
+
+// readMessageHeader reads the 5-byte message header from the TCP connection.
+// Returns the message length, type, and any error encountered during reading.
+func (c *Client) readMessageHeader() (uint32, uint8, error) {
 	firstFive := NewStream(make([]byte, 5))
-	i, err = c.tcp.Receive(firstFive)
+	i, err := c.tcp.Receive(firstFive)
 	if i == 0 {
 		c.trackError("network")
 		if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
 			c.callbacks.OnDisconnect(c, "Didn't receive anything", nil)
 		}
-		return fmt.Errorf("no data received from router")
+		return 0, 0, fmt.Errorf("no data received from router")
 	}
 	if err != nil {
 		c.trackError("network")
 		Error("Failed to receive message header: %s", err.Error())
-		return err
+		return 0, 0, err
 	}
 
-	length, err = firstFive.ReadUint32()
+	length, err := firstFive.ReadUint32()
 	if err != nil {
 		Error("Failed to read message length: %s", err.Error())
-		return err
+		return 0, 0, err
 	}
 
-	msgType, err = firstFive.ReadByte()
+	msgType, err := firstFive.ReadByte()
 	if err != nil {
 		Error("Failed to read message type: %s", err.Error())
-		return err
+		return 0, 0, err
 	}
 
+	return length, msgType, nil
+}
+
+// validateMessageHeader validates the message length against protocol limits and checks message type.
+// It enforces the I2CP protocol maximum message size of 64KB and validates expected message types.
+func (c *Client) validateMessageHeader(msgType uint8, length uint32, expectedType uint8) error {
 	// Enhanced message length validation with type-specific handling
 	if msgType == I2CP_MSG_SET_DATE && length > 0xffff {
 		c.trackError("protocol")
@@ -287,54 +316,63 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	}
 
 	// Validate expected message type if specified
-	if (typ != I2CP_MSG_ANY) && (msgType != typ) {
+	if (expectedType != I2CP_MSG_ANY) && (msgType != expectedType) {
 		c.trackError("protocol")
-		Error("Expected message type %d, received %d", typ, msgType)
-		return fmt.Errorf("unexpected message type: expected %d, got %d", typ, msgType)
+		Error("Expected message type %d, received %d", expectedType, msgType)
+		return fmt.Errorf("unexpected message type: expected %d, got %d", expectedType, msgType)
 	}
 
-	// Allocate appropriately sized buffer for message body
-	if length > 0 {
-		messageBody := NewStream(make([]byte, 0, length)) // Create empty buffer with capacity
-		totalReceived := 0
+	return nil
+}
 
-		// Handle partial reads for large messages
-		for totalReceived < int(length) {
-			remaining := int(length) - totalReceived
-			tempBuffer := NewStream(make([]byte, remaining))
+// receiveMessageBody receives the message body from the TCP connection, handling partial reads.
+// It reads the specified length of bytes and writes them to the provided stream.
+func (c *Client) receiveMessageBody(length uint32, stream *Stream) error {
+	if length == 0 {
+		stream.Reset()
+		return nil
+	}
 
-			i, err = c.tcp.Receive(tempBuffer)
-			if err != nil {
-				Error("Failed to receive message body: %s", err.Error())
-				return err
-			}
-			if i == 0 {
-				Error("Connection closed while reading message body")
-				return fmt.Errorf("connection closed during message receive")
-			}
+	messageBody := NewStream(make([]byte, 0, length)) // Create empty buffer with capacity
+	totalReceived := 0
 
-			// Copy received data to main message buffer
-			tempBuffer.Seek(0, 0) // Reset to beginning
-			receivedData := make([]byte, i)
-			tempBuffer.Read(receivedData)
-			messageBody.Write(receivedData)
-			totalReceived += i
+	// Handle partial reads for large messages
+	for totalReceived < int(length) {
+		remaining := int(length) - totalReceived
+		tempBuffer := NewStream(make([]byte, remaining))
 
-			Debug("Received %d/%d bytes of message body", totalReceived, length)
+		i, err := c.tcp.Receive(tempBuffer)
+		if err != nil {
+			Error("Failed to receive message body: %s", err.Error())
+			return err
+		}
+		if i == 0 {
+			Error("Connection closed while reading message body")
+			return fmt.Errorf("connection closed during message receive")
 		}
 
-		// Reset stream position for message processing
-		messageBody.Seek(0, 0)
-		stream.Reset()
-		stream.Write(messageBody.Bytes())
-		stream.Seek(0, 0)
-	} else {
-		// Empty message body
-		stream.Reset()
+		// Copy received data to main message buffer
+		tempBuffer.Seek(0, 0) // Reset to beginning
+		receivedData := make([]byte, i)
+		tempBuffer.Read(receivedData)
+		messageBody.Write(receivedData)
+		totalReceived += i
+
+		Debug("Received %d/%d bytes of message body", totalReceived, length)
 	}
 
-	Debug("Received message type %d with %d bytes", msgType, length)
+	// Reset stream position for message processing
+	messageBody.Seek(0, 0)
+	stream.Reset()
+	stream.Write(messageBody.Bytes())
+	stream.Seek(0, 0)
 
+	return nil
+}
+
+// processReceivedMessage tracks metrics and dispatches the received message to handlers.
+// It updates bandwidth and message counters, then optionally dispatches to message handlers.
+func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *Stream, dispatch bool) {
 	// Track bandwidth and message received
 	if c.metrics != nil {
 		c.metrics.AddBytesReceived(uint64(length + 5)) // +5 for header
@@ -344,7 +382,6 @@ func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err erro
 	if dispatch {
 		c.onMessage(msgType, stream)
 	}
-	return nil
 }
 
 func (c *Client) onMessage(msgType uint8, stream *Stream) {
