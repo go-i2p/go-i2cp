@@ -56,7 +56,28 @@ func (c *Client) CreateSessionSync(ctx context.Context, sess *Session) error {
 	// Create channel to signal session creation
 	sessionCreated := make(chan error, 1)
 
-	// Wrap the session callbacks to intercept status changes
+	// Wrap callbacks to intercept status changes
+	wrapSessionCallbacks(sess, sessionCreated)
+
+	// Start ProcessIO in background
+	processIOCtx, cancelProcessIO := context.WithCancel(ctx)
+	defer cancelProcessIO()
+
+	go c.runProcessIOLoop(processIOCtx)
+
+	// Send CreateSession message
+	Debug("CreateSessionSync: Sending CreateSession message")
+	if err := c.CreateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to send CreateSession: %w", err)
+	}
+
+	// Wait for confirmation or timeout
+	return c.awaitSessionCreation(ctx, sess, sessionCreated, cancelProcessIO)
+}
+
+// wrapSessionCallbacks wraps the session's OnStatus callback to intercept session creation events.
+// It signals completion through the provided channel when the session is created, rejected, or destroyed.
+func wrapSessionCallbacks(sess *Session, sessionCreated chan<- error) {
 	originalOnStatus := sess.callbacks.OnStatus
 	sess.callbacks.OnStatus = func(s *Session, status SessionStatus) {
 		// Call original callback if present
@@ -77,49 +98,41 @@ func (c *Client) CreateSessionSync(ctx context.Context, sess *Session) error {
 			sessionCreated <- fmt.Errorf("session destroyed: %w", ErrSessionInvalid)
 		}
 	}
+}
 
-	// Start ProcessIO in background goroutine
-	processIOCtx, cancelProcessIO := context.WithCancel(ctx)
-	defer cancelProcessIO()
+// runProcessIOLoop runs the ProcessIO loop in a background goroutine until the context is cancelled.
+// It handles I/O processing with error logging and prevents busy loops with periodic sleeps.
+func (c *Client) runProcessIOLoop(ctx context.Context) {
+	Debug("CreateSessionSync: Starting ProcessIO loop")
 
-	processIODone := make(chan struct{})
-	go func() {
-		defer close(processIODone)
-		Debug("CreateSessionSync: Starting ProcessIO loop")
-
-		for {
-			select {
-			case <-processIOCtx.Done():
-				Debug("CreateSessionSync: ProcessIO context cancelled")
-				return
-			default:
-			}
-
-			err := c.ProcessIO(processIOCtx)
-			if err != nil {
-				// Only log errors that aren't expected during shutdown
-				if err != ErrClientClosed && processIOCtx.Err() == nil {
-					Warning("CreateSessionSync: ProcessIO error: %v", err)
-				}
-				return
-			}
-
-			// Small sleep to prevent busy loop
-			time.Sleep(100 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+			Debug("CreateSessionSync: ProcessIO context cancelled")
+			return
+		default:
 		}
-	}()
 
-	// Send CreateSession message (async, waits for ProcessIO to handle response)
-	Debug("CreateSessionSync: Sending CreateSession message")
-	if err := c.CreateSession(ctx, sess); err != nil {
-		cancelProcessIO()
-		return fmt.Errorf("failed to send CreateSession: %w", err)
+		err := c.ProcessIO(ctx)
+		if err != nil {
+			// Only log errors that aren't expected during shutdown
+			if err != ErrClientClosed && ctx.Err() == nil {
+				Warning("CreateSessionSync: ProcessIO error: %v", err)
+			}
+			return
+		}
+
+		// Small sleep to prevent busy loop
+		time.Sleep(100 * time.Millisecond)
 	}
+}
 
-	// Wait for session creation confirmation or timeout
+// awaitSessionCreation waits for session creation confirmation or timeout.
+// It returns nil on successful creation, or an error if the session was rejected or the context expired.
+func (c *Client) awaitSessionCreation(ctx context.Context, sess *Session, sessionCreated <-chan error, cancel context.CancelFunc) error {
 	select {
 	case err := <-sessionCreated:
-		cancelProcessIO()
+		cancel()
 		if err != nil {
 			return fmt.Errorf("session creation failed: %w", err)
 		}
@@ -127,7 +140,7 @@ func (c *Client) CreateSessionSync(ctx context.Context, sess *Session) error {
 		return nil
 
 	case <-ctx.Done():
-		cancelProcessIO()
+		cancel()
 		return fmt.Errorf("session creation timeout: %w", ctx.Err())
 	}
 }
