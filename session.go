@@ -205,6 +205,46 @@ func (session *Session) Destination() *Destination {
 	return session.config.destination
 }
 
+// SigningKeyPair returns the Ed25519 key pair used for this session.
+// Returns the key pair that corresponds to the session's destination.
+// This key pair is used to sign I2P Streaming Protocol packets and other
+// cryptographic operations requiring the session's signing key.
+//
+// Returns:
+//   - *Ed25519KeyPair: The signing key pair if available
+//   - error: ErrSessionNotInitialized if session not properly initialized,
+//     or an error describing why the key pair is unavailable
+//
+// Example usage for packet signing:
+//
+//	keyPair, err := session.SigningKeyPair()
+//	if err != nil {
+//	    return err
+//	}
+//	signature, err := keyPair.Sign(packetData)
+func (session *Session) SigningKeyPair() (*Ed25519KeyPair, error) {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	// Check session initialization
+	if session.config == nil {
+		return nil, ErrSessionNotInitialized
+	}
+
+	// Check destination exists
+	dest := session.config.destination
+	if dest == nil {
+		return nil, fmt.Errorf("session has no destination")
+	}
+
+	// Check SignatureKeyPair exists
+	if dest.sgk.ed25519KeyPair == nil {
+		return nil, fmt.Errorf("destination has no Ed25519 key pair")
+	}
+
+	return dest.sgk.ed25519KeyPair, nil
+}
+
 // ID returns the session ID assigned by the router
 // per I2CP specification - unique identifier for session within I2CP connection
 func (session *Session) ID() uint16 {

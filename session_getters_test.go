@@ -232,3 +232,189 @@ func TestSessionPrimaryReferenceThreadSafety(t *testing.T) {
 	// Verify we can still read without panic
 	_ = subsession.PrimarySession()
 }
+
+// TestSessionSigningKeyPair verifies SigningKeyPair() returns the correct key pair
+func TestSessionSigningKeyPair(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	// Get signing key pair
+	keyPair, err := session.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("unexpected error getting signing key pair: %v", err)
+	}
+
+	if keyPair == nil {
+		t.Fatal("expected non-nil key pair")
+	}
+
+	// Verify it's the same key pair as in the destination
+	dest := session.Destination()
+	if dest == nil {
+		t.Fatal("expected non-nil destination")
+	}
+
+	if dest.sgk.ed25519KeyPair != keyPair {
+		t.Error("SigningKeyPair() should return the same key pair as destination's sgk.ed25519KeyPair")
+	}
+
+	// Verify key pair has valid public and private keys
+	pubKey := keyPair.PublicKey()
+	if len(pubKey) != 32 {
+		t.Errorf("expected public key length 32, got %d", len(pubKey))
+	}
+
+	privKey := keyPair.PrivateKey()
+	if len(privKey) != 64 {
+		t.Errorf("expected private key length 64, got %d", len(privKey))
+	}
+}
+
+// TestSessionSigningKeyPairForSigning verifies SigningKeyPair() can be used for signing
+func TestSessionSigningKeyPairForSigning(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	// Get signing key pair
+	keyPair, err := session.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("unexpected error getting signing key pair: %v", err)
+	}
+
+	// Test data to sign (simulating a packet)
+	testData := []byte("test packet data for I2P streaming protocol")
+
+	// Sign the data
+	signature, err := keyPair.Sign(testData)
+	if err != nil {
+		t.Fatalf("failed to sign data: %v", err)
+	}
+
+	if len(signature) == 0 {
+		t.Fatal("expected non-empty signature")
+	}
+
+	// Verify the signature
+	valid := keyPair.Verify(testData, signature)
+	if !valid {
+		t.Error("signature verification failed for data signed with same key pair")
+	}
+
+	// Verify with wrong data fails
+	wrongData := []byte("wrong data")
+	valid = keyPair.Verify(wrongData, signature)
+	if valid {
+		t.Error("signature verification should fail for wrong data")
+	}
+}
+
+// TestSessionSigningKeyPairNilConfig verifies error handling when config is nil
+func TestSessionSigningKeyPairNilConfig(t *testing.T) {
+	// Create session with nil config (simulating uninitialized state)
+	session := &Session{}
+
+	keyPair, err := session.SigningKeyPair()
+	if err == nil {
+		t.Error("expected error when session config is nil")
+	}
+
+	if keyPair != nil {
+		t.Error("expected nil key pair when session config is nil")
+	}
+
+	if err != ErrSessionNotInitialized {
+		t.Errorf("expected ErrSessionNotInitialized, got: %v", err)
+	}
+}
+
+// TestSessionSigningKeyPairNilDestination verifies error handling when destination is nil
+func TestSessionSigningKeyPairNilDestination(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	// Manually set destination to nil to test error handling
+	session.mu.Lock()
+	session.config.destination = nil
+	session.mu.Unlock()
+
+	keyPair, err := session.SigningKeyPair()
+	if err == nil {
+		t.Error("expected error when destination is nil")
+	}
+
+	if keyPair != nil {
+		t.Error("expected nil key pair when destination is nil")
+	}
+
+	expectedError := "session has no destination"
+	if err.Error() != expectedError {
+		t.Errorf("expected error '%s', got: %v", expectedError, err)
+	}
+}
+
+// TestSessionSigningKeyPairThreadSafety verifies concurrent access to SigningKeyPair()
+func TestSessionSigningKeyPairThreadSafety(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	done := make(chan bool, 100)
+
+	// Multiple readers
+	for i := 0; i < 100; i++ {
+		go func() {
+			keyPair, err := session.SigningKeyPair()
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if keyPair == nil {
+				t.Error("expected non-nil key pair")
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 100; i++ {
+		<-done
+	}
+
+	// Verify we can still read without panic
+	_, _ = session.SigningKeyPair()
+}
+
+// TestSessionSigningKeyPairConsistency verifies key pair remains consistent across calls
+func TestSessionSigningKeyPairConsistency(t *testing.T) {
+	client := NewClient(nil)
+	session := NewSession(client, SessionCallbacks{})
+
+	// Get key pair multiple times
+	keyPair1, err := session.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	keyPair2, err := session.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify it's the same instance
+	if keyPair1 != keyPair2 {
+		t.Error("SigningKeyPair() should return the same instance across multiple calls")
+	}
+
+	// Verify public keys are identical
+	pubKey1 := keyPair1.PublicKey()
+	pubKey2 := keyPair2.PublicKey()
+
+	if len(pubKey1) != len(pubKey2) {
+		t.Error("public key lengths should match")
+	}
+
+	for i := range pubKey1 {
+		if pubKey1[i] != pubKey2[i] {
+			t.Error("public keys should be identical")
+			break
+		}
+	}
+}
