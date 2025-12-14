@@ -931,112 +931,123 @@ func (c *Client) onMsgBandwithLimit(stream *Stream) {
 	}
 }
 
-func (c *Client) onMsgSessionStatus(stream *Stream) {
-	var sess *Session
-	var sessionID uint16
-	var sessionStatus uint8
-	var err error
-	Debug("Received SessionStatus message.")
-
+// readSessionStatusMessage reads and validates session ID and status from the I2CP SessionStatus message.
+// Returns sessionID, sessionStatus, and any error encountered during reading.
+func readSessionStatusMessage(stream *Stream) (sessionID uint16, sessionStatus uint8, err error) {
 	// DEBUG: Dump raw message bytes
 	rawBytes := stream.Bytes()
 	Debug("SessionStatus raw bytes (length=%d): %v", len(rawBytes), rawBytes)
 
 	// CRITICAL FIX: I2CP SessionStatus message format is [sessionID: uint16][status: uint8]
-	// This is the CORRECT Java I2P router format (confirmed by testing)
-	// Previous comment claiming [status][sessionID] order was WRONG
 	sessionID, err = stream.ReadUint16()
 	if err != nil {
-		Error("Failed to read session ID from SessionStatus: %v", err)
-		return
+		return 0, 0, fmt.Errorf("failed to read session ID: %w", err)
 	}
+
 	sessionStatus, err = stream.ReadByte()
 	if err != nil {
-		Error("Failed to read session status from SessionStatus after sessionID %d: %v", sessionID, err)
+		return 0, 0, fmt.Errorf("failed to read session status: %w", err)
+	}
+
+	Debug("SessionStatus for session %d: status %d", sessionID, sessionStatus)
+	return sessionID, sessionStatus, nil
+}
+
+// handleSessionCreated processes the SESSION_STATUS_CREATED message and registers the session.
+// This includes primary/subsession tracking and session map registration.
+func (c *Client) handleSessionCreated(sessionID uint16, sessionStatus uint8) {
+	if c.currentSession == nil {
+		Error("Received session status created without waiting for it %p", c)
 		return
 	}
-	Debug("SessionStatus for session %d: status %d", sessionID, sessionStatus)
-	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_CREATED {
-		if c.currentSession == nil {
-			Error("Received session status created without waiting for it %p", c)
-			return
-		}
-		// CRITICAL FIX: I2CP spec § Session ID - Validate session ID is not 0xFFFF (reserved "no session" marker)
-		if sessionID == I2CP_SESSION_ID_NONE {
-			Error("Router assigned reserved session ID 0xFFFF - spec violation")
-			return
-		}
-		c.currentSession.id = sessionID
-		Debug("Assigned session ID %d to session %p", sessionID, c.currentSession)
 
-		// CRITICAL FIX: Register session in map BEFORE dispatching callback
-		// This prevents race condition where router sends RequestVariableLeaseSet
-		// immediately after SessionStatus(CREATED), and onMsgReqVariableLease()
-		// tries to lookup the session before registration completes.
-		// See: GO-I2CP RACE CONDITION FIX - SESSION REGISTRATION TIMING ISSUE
-		c.lock.Lock()
+	// CRITICAL FIX: I2CP spec § Session ID - Validate session ID is not 0xFFFF
+	if sessionID == I2CP_SESSION_ID_NONE {
+		Error("Router assigned reserved session ID 0xFFFF - spec violation")
+		return
+	}
 
-		// MAJOR FIX: Multi-session tracking per I2CP spec § Multi-Session (as of 0.9.21)
-		// Track first session as primary, subsequent sessions as subsessions
-		if c.primarySessionID == nil {
-			// This is the first session - mark as primary
-			id := sessionID
-			c.primarySessionID = &id
-			c.currentSession.isPrimary = true
-			c.currentSession.primarySession = nil // Primary has no parent
-			Debug("Session %d is primary session", sessionID)
-		} else {
-			// This is a subsession - link to primary
-			c.currentSession.isPrimary = false
-			if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
-				c.currentSession.primarySession = primarySess
-				Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
-			} else {
-				Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
-			}
-		}
+	c.currentSession.id = sessionID
+	Debug("Assigned session ID %d to session %p", sessionID, c.currentSession)
 
-		// Register the session
-		c.sessions[sessionID] = c.currentSession
-		sess := c.currentSession
-		c.currentSession = nil
-		c.lock.Unlock()
+	// CRITICAL FIX: Register session in map BEFORE dispatching callback
+	c.lock.Lock()
 
-		// Now dispatch status callback - session is already registered and can
-		// handle incoming RequestVariableLeaseSet and other messages
-		sess.dispatchStatus(SessionStatus(sessionStatus))
+	// MAJOR FIX: Multi-session tracking per I2CP spec § Multi-Session (as of 0.9.21)
+	if c.primarySessionID == nil {
+		// This is the first session - mark as primary
+		id := sessionID
+		c.primarySessionID = &id
+		c.currentSession.isPrimary = true
+		c.currentSession.primarySession = nil
+		Debug("Session %d is primary session", sessionID)
 	} else {
-		// For non-CREATED status updates, session should already exist
-		c.lock.Lock()
-		sess = c.sessions[sessionID]
-		if sess == nil {
-			// CRITICAL FIX: Handle router rejecting session creation
-			// When router rejects CreateSession, it sends SessionStatus(DESTROYED) as the first message
-			// In this case, the session was never registered (no CREATED status was received)
-			// The session exists in c.currentSession but not in c.sessions map
-			if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
-				Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
-				sess = c.currentSession
-				// Assign the router-assigned ID before dispatching callback
-				sess.id = sessionID
-				c.currentSession = nil // Clear currentSession
-				c.lock.Unlock()        // Release lock before callback
-				sess.dispatchStatus(SessionStatus(sessionStatus))
-			} else {
-				c.lock.Unlock() // Release lock before Fatal
-				Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
-			}
+		// This is a subsession - link to primary
+		c.currentSession.isPrimary = false
+		if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
+			c.currentSession.primarySession = primarySess
+			Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
 		} else {
-			// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
-			if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
-				if sess.destroyConfirmed != nil {
-					close(sess.destroyConfirmed)
-					sess.destroyConfirmed = nil // Prevent double-close
-				}
-			}
-			c.lock.Unlock() // Release lock before callback
-			sess.dispatchStatus(SessionStatus(sessionStatus))
+			Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
 		}
+	}
+
+	// Register the session
+	c.sessions[sessionID] = c.currentSession
+	sess := c.currentSession
+	c.currentSession = nil
+	c.lock.Unlock()
+
+	// Now dispatch status callback - session is already registered
+	sess.dispatchStatus(SessionStatus(sessionStatus))
+}
+
+// handleNonCreatedStatus processes status updates for existing sessions or rejected session creation.
+// Handles DESTROYED status and other session state changes.
+func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
+	c.lock.Lock()
+	sess := c.sessions[sessionID]
+
+	if sess == nil {
+		// CRITICAL FIX: Handle router rejecting session creation
+		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
+			Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
+			sess = c.currentSession
+			sess.id = sessionID
+			c.currentSession = nil
+			c.lock.Unlock()
+			sess.dispatchStatus(SessionStatus(sessionStatus))
+		} else {
+			c.lock.Unlock()
+			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
+		}
+	} else {
+		// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
+		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
+			if sess.destroyConfirmed != nil {
+				close(sess.destroyConfirmed)
+				sess.destroyConfirmed = nil
+			}
+		}
+		c.lock.Unlock()
+		sess.dispatchStatus(SessionStatus(sessionStatus))
+	}
+}
+
+func (c *Client) onMsgSessionStatus(stream *Stream) {
+	Debug("Received SessionStatus message.")
+
+	// Read session ID and status from message
+	sessionID, sessionStatus, err := readSessionStatusMessage(stream)
+	if err != nil {
+		Error("Failed to read SessionStatus message: %v", err)
+		return
+	}
+
+	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_CREATED {
+		c.handleSessionCreated(sessionID, sessionStatus)
+	} else {
+		c.handleNonCreatedStatus(sessionID, sessionStatus)
 	}
 }
 
