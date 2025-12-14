@@ -345,6 +345,21 @@ func (sig *OfflineSignature) IsExpired() bool {
 //
 // I2CP Spec: LeaseSet2 § Offline Signatures
 func (sig *OfflineSignature) Verify() error {
+	if err := validateOfflineSignature(sig); err != nil {
+		return err
+	}
+
+	signedData, err := reconstructOfflineSignedData(sig)
+	if err != nil {
+		return err
+	}
+
+	return verifyOfflineSignatureData(sig.signingKey, signedData, sig.signature)
+}
+
+// validateOfflineSignature checks if the offline signature is valid and supported.
+// Returns an error if the signature is nil or uses an unsupported signing key type.
+func validateOfflineSignature(sig *OfflineSignature) error {
 	if sig == nil {
 		return ErrInvalidArgument
 	}
@@ -356,11 +371,30 @@ func (sig *OfflineSignature) Verify() error {
 			ErrUnsupportedCrypto, sig.signingKeyType)
 	}
 
-	// Reconstruct the signed data
-	// Format: signingKeyType || signingKeyLen || signingKey || expires ||
-	//         transientKeyType || transientKeyLen || transientKey
+	return nil
+}
+
+// reconstructOfflineSignedData rebuilds the original data that was signed.
+// Format: signingKeyType || signingKeyLen || signingKey || expires ||
+//
+//	transientKeyType || transientKeyLen || transientKey
+func reconstructOfflineSignedData(sig *OfflineSignature) ([]byte, error) {
 	stream := NewStream(make([]byte, 0, 256))
 
+	if err := writeOfflineSigningKeyData(stream, sig); err != nil {
+		return nil, err
+	}
+
+	if err := writeOfflineTransientKeyData(stream, sig); err != nil {
+		return nil, err
+	}
+
+	return stream.Bytes(), nil
+}
+
+// writeOfflineSigningKeyData writes the signing key fields to the stream.
+// Writes: signingKeyType || signingKeyLen || signingKey || expires
+func writeOfflineSigningKeyData(stream *Stream, sig *OfflineSignature) error {
 	// Write signing key type (2 bytes)
 	if err := stream.WriteUint16(sig.signingKeyType); err != nil {
 		return fmt.Errorf("failed to write signing key type: %w", err)
@@ -381,6 +415,12 @@ func (sig *OfflineSignature) Verify() error {
 		return fmt.Errorf("failed to write expires: %w", err)
 	}
 
+	return nil
+}
+
+// writeOfflineTransientKeyData writes the transient key fields to the stream.
+// Writes: transientKeyType || transientKeyLen || transientKey
+func writeOfflineTransientKeyData(stream *Stream, sig *OfflineSignature) error {
 	// Write transient key type (2 bytes)
 	if err := stream.WriteUint16(sig.transientType); err != nil {
 		return fmt.Errorf("failed to write transient key type: %w", err)
@@ -396,10 +436,14 @@ func (sig *OfflineSignature) Verify() error {
 		return fmt.Errorf("failed to write transient key: %w", err)
 	}
 
-	signedData := stream.Bytes()
+	return nil
+}
 
+// verifyOfflineSignatureData creates an Ed25519 key pair and verifies the signature.
+// Returns an error if key creation fails or signature verification fails.
+func verifyOfflineSignatureData(signingKey, signedData, signature []byte) error {
 	// Create Ed25519 public key from signing key bytes for verification
-	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(sig.signingKey)
+	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(signingKey)
 	if err != nil {
 		return fmt.Errorf("failed to create Ed25519 public key: %w", err)
 	}
@@ -411,7 +455,7 @@ func (sig *OfflineSignature) Verify() error {
 	}
 
 	// Verify the signature over the signed data
-	if !tempKeyPair.Verify(signedData, sig.signature) {
+	if !tempKeyPair.Verify(signedData, signature) {
 		return ErrOfflineSignatureInvalid
 	}
 
