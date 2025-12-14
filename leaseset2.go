@@ -249,6 +249,7 @@ func readLeaseSet2Signature(stream *Stream, ls *LeaseSet2) error {
 //   - Transient key (variable)
 //   - Signature length (2 bytes)
 //   - Signature (variable)
+//
 // readLengthPrefixedData reads a uint16 length prefix followed by that many bytes of data.
 // Returns the data buffer or an error with contextual information.
 func readLengthPrefixedData(stream *Stream, fieldName string) ([]byte, error) {
