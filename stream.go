@@ -151,17 +151,30 @@ func (stream *Stream) WriteMapping(m map[string]string) error {
 // Returns a map of key-value pairs. If the mapping is empty (size=0), returns an empty map.
 // Returns an error if the mapping data is malformed or incomplete.
 func (stream *Stream) ReadMapping() (map[string]string, error) {
-	// Read the length of the mapping data
+	mappingData, err := readMappingData(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(mappingData) == 0 {
+		return make(map[string]string), nil
+	}
+
+	return parseMappingData(mappingData)
+}
+
+// readMappingData reads the length-prefixed mapping data from the stream.
+// Returns the raw mapping bytes or an error if reading fails.
+func readMappingData(stream *Stream) ([]byte, error) {
 	mappingLength, err := stream.ReadUint16()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read mapping length: %w", err)
 	}
 
 	if mappingLength == 0 {
-		return make(map[string]string), nil
+		return []byte{}, nil
 	}
 
-	// Read the mapping data
 	mappingData := make([]byte, mappingLength)
 	n, err := stream.Read(mappingData)
 	if err != nil {
@@ -171,53 +184,88 @@ func (stream *Stream) ReadMapping() (map[string]string, error) {
 		return nil, fmt.Errorf("incomplete mapping data: expected %d bytes, got %d", mappingLength, n)
 	}
 
-	// Parse the mapping data
+	return mappingData, nil
+}
+
+// parseMappingData parses raw mapping bytes into a map of key-value pairs.
+// The data format is: [key_len:1][key][=][value_len:1][value][;]...
+func parseMappingData(mappingData []byte) (map[string]string, error) {
 	result := make(map[string]string)
 	dataStream := NewStream(mappingData)
 
 	for dataStream.Len() > 0 {
-		// Read key length and key
-		keyLen, err := dataStream.ReadByte()
+		key, err := readMappingKey(dataStream)
 		if err != nil {
-			break // End of data
+			if dataStream.Len() == 0 {
+				break // Normal end of data
+			}
+			return nil, err
 		}
 
-		keyBytes := make([]byte, keyLen)
-		n, err := dataStream.Read(keyBytes)
-		if err != nil || n != int(keyLen) {
-			return nil, fmt.Errorf("failed to read key data")
-		}
-		key := string(keyBytes)
-
-		// Read '=' separator
-		sep, err := dataStream.ReadByte()
-		if err != nil || sep != '=' {
-			return nil, fmt.Errorf("expected '=' separator, got %c", sep)
-		}
-
-		// Read value length and value
-		valueLen, err := dataStream.ReadByte()
+		value, err := readMappingValue(dataStream)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read value length")
+			return nil, err
 		}
 
-		valueBytes := make([]byte, valueLen)
-		n, err = dataStream.Read(valueBytes)
-		if err != nil || n != int(valueLen) {
-			return nil, fmt.Errorf("failed to read value data")
-		}
-		value := string(valueBytes)
-
-		// Read ';' separator
-		sep, err = dataStream.ReadByte()
-		if err != nil || sep != ';' {
-			return nil, fmt.Errorf("expected ';' separator, got %c", sep)
+		if err := readMappingSeparator(dataStream, ';'); err != nil {
+			return nil, err
 		}
 
 		result[key] = value
 	}
 
 	return result, nil
+}
+
+// readMappingKey reads a length-prefixed key and its '=' separator from the stream.
+// Returns the key string or an error if the format is invalid.
+func readMappingKey(dataStream *Stream) (string, error) {
+	keyLen, err := dataStream.ReadByte()
+	if err != nil {
+		return "", err
+	}
+
+	keyBytes := make([]byte, keyLen)
+	n, err := dataStream.Read(keyBytes)
+	if err != nil || n != int(keyLen) {
+		return "", fmt.Errorf("failed to read key data")
+	}
+
+	if err := readMappingSeparator(dataStream, '='); err != nil {
+		return "", err
+	}
+
+	return string(keyBytes), nil
+}
+
+// readMappingValue reads a length-prefixed value from the stream.
+// Returns the value string or an error if the format is invalid.
+func readMappingValue(dataStream *Stream) (string, error) {
+	valueLen, err := dataStream.ReadByte()
+	if err != nil {
+		return "", fmt.Errorf("failed to read value length")
+	}
+
+	valueBytes := make([]byte, valueLen)
+	n, err := dataStream.Read(valueBytes)
+	if err != nil || n != int(valueLen) {
+		return "", fmt.Errorf("failed to read value data")
+	}
+
+	return string(valueBytes), nil
+}
+
+// readMappingSeparator reads and validates a separator byte from the stream.
+// Returns an error if the expected separator is not found.
+func readMappingSeparator(dataStream *Stream, expected byte) error {
+	sep, err := dataStream.ReadByte()
+	if err != nil {
+		return fmt.Errorf("failed to read separator")
+	}
+	if sep != expected {
+		return fmt.Errorf("expected '%c' separator, got '%c'", expected, sep)
+	}
+	return nil
 }
 
 // Seek provides limited support for repositioning within the stream.
