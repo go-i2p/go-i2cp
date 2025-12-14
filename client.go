@@ -537,80 +537,129 @@ func (c *Client) onMsgDisconnect(stream *Stream) {
 	}
 }
 
-func (c *Client) onMsgPayload(stream *Stream) {
+// validateGzipHeader checks if the payload starts with valid gzip header bytes.
+// Returns error if header validation fails.
+func validateGzipHeader(stream *Stream) error {
 	gzipHeader := [3]byte{0x1f, 0x8b, 0x08}
 	var testHeader [3]byte
-	var protocol uint8
-	var sessionId, srcPort, destPort uint16
-	var messageId, payloadSize uint32
+
+	_, err := stream.Read(testHeader[:])
+	if err != nil {
+		return fmt.Errorf("failed to read header: %w", err)
+	}
+
+	if testHeader != gzipHeader {
+		return fmt.Errorf("invalid gzip header")
+	}
+
+	return nil
+}
+
+// decompressPayload decompresses a gzip-compressed payload from the stream.
+// Returns the decompressed payload buffer or an error.
+func decompressPayload(msgStream *bytes.Buffer) (*bytes.Buffer, error) {
+	payload := bytes.NewBuffer(make([]byte, 0xffff))
+
+	decompress, err := gzip.NewReader(msgStream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+
+	_, err = io.Copy(payload, decompress)
+	if err != nil {
+		decompress.Close()
+		return nil, fmt.Errorf("failed to decompress payload: %w", err)
+	}
+
+	if err = decompress.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close decompressor: %w", err)
+	}
+
+	return payload, nil
+}
+
+// parsePayloadHeader reads protocol, port, and other header information from the payload stream.
+// Returns protocol, source port, destination port, or an error.
+func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort uint16, destPort uint16, err error) {
+	// Skip gzip flags
+	if _, err = stream.ReadByte(); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read gzip flags: %w", err)
+	}
+
+	if srcPort, err = stream.ReadUint16(); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read source port: %w", err)
+	}
+
+	if destPort, err = stream.ReadUint16(); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read dest port: %w", err)
+	}
+
+	// Skip protocol byte
+	if _, err = stream.ReadByte(); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read protocol byte: %w", err)
+	}
+
+	if protocol, err = stream.ReadByte(); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read protocol: %w", err)
+	}
+
+	return protocol, srcPort, destPort, nil
+}
+
+func (c *Client) onMsgPayload(stream *Stream) {
+	var sessionId uint16
+	var messageId uint32
 	var srcDest *Destination
 	var err error
+
 	Debug("Received PayloadMessage message")
+
 	sessionId, err = stream.ReadUint16()
 	messageId, err = stream.ReadUint32()
 	_ = messageId // currently unused
+
 	c.lock.Lock()
 	session, ok := c.sessions[sessionId]
 	c.lock.Unlock()
+
 	if !ok {
 		Fatal("Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
 	}
-	payloadSize, err = stream.ReadUint32()
+
+	payloadSize, err := stream.ReadUint32()
 	_ = payloadSize // currently unused
+
 	// Parse source destination (I2CP spec: destination follows payload size)
 	srcDest, err = NewDestinationFromMessage(stream, c.crypto)
 	if err != nil {
 		Error("Failed to parse source destination from MessagePayload: %v", err)
 		return
 	}
+
 	Debug("Message from source: %s", srcDest.Base32())
-	// validate gzip header
-	msgStream := bytes.NewBuffer(stream.Bytes())
-	_, err = stream.Read(testHeader[:])
-	if testHeader != gzipHeader {
+
+	// Validate gzip header
+	if err = validateGzipHeader(stream); err != nil {
 		Warning("Payload validation failed, skipping payload")
 		return
 	}
-	payload := bytes.NewBuffer(make([]byte, 0xffff))
-	var decompress io.ReadCloser
-	decompress, err = gzip.NewReader(msgStream)
-	if err != nil {
-		Error("Failed to create gzip reader for message payload: %v", err)
-		return
-	}
-	_, err = io.Copy(payload, decompress)
+
+	// Decompress payload
+	msgStream := bytes.NewBuffer(stream.Bytes())
+	payload, err := decompressPayload(msgStream)
 	if err != nil {
 		Error("Failed to decompress message payload: %v", err)
-		decompress.Close()
 		return
 	}
-	if err = decompress.Close(); err != nil {
-		Error("Failed to close decompressor: %v", err)
-		return
-	}
+
 	if payload.Len() > 0 {
-		// finish reading header
-		// skip gzip flags
-		if _, err = stream.ReadByte(); err != nil {
-			Error("Failed to read gzip flags from payload header: %v", err)
+		// Parse payload header
+		protocol, srcPort, destPort, err := parsePayloadHeader(stream)
+		if err != nil {
+			Error("Failed to parse payload header: %v", err)
 			return
 		}
-		if srcPort, err = stream.ReadUint16(); err != nil {
-			Error("Failed to read source port from payload header: %v", err)
-			return
-		}
-		if destPort, err = stream.ReadUint16(); err != nil {
-			Error("Failed to read dest port from payload header: %v", err)
-			return
-		}
-		if _, err = stream.ReadByte(); err != nil {
-			Error("Failed to read protocol byte from payload header: %v", err)
-			return
-		}
-		if protocol, err = stream.ReadByte(); err != nil {
-			Error("Failed to read protocol from payload header: %v", err)
-			return
-		}
+
 		Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
 		session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
 	} else {
