@@ -112,8 +112,8 @@ func TestX25519KeyPair_AlgorithmType(t *testing.T) {
 	algType := kp.AlgorithmType()
 
 	// X25519 algorithm type constant
-	// Based on actual implementation, X25519 is type 3
-	expectedType := uint32(3) // KEYCERT_CRYPTO_X25519
+	// Based on actual implementation, X25519 is type 4 (ECIES-X25519)
+	expectedType := uint32(4) // KEYCERT_CRYPTO_X25519
 
 	if algType != expectedType {
 		t.Errorf("AlgorithmType() = %d, want %d", algType, expectedType)

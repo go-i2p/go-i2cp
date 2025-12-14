@@ -27,7 +27,7 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
 
 	// Modern I2CP uses KEY certificates with Ed25519 (signing) + X25519 (encryption)
-	// Certificate format: [type=5][length=4][sigType=7 (2 bytes)][cryptoType=3 (2 bytes)]
+	// Certificate format: [type=5][length=4][sigType=7 (2 bytes)][cryptoType=4 (2 bytes)]
 	// KEY certificate payload: signingKeyType (2 bytes) + encryptionKeyType (2 bytes)
 	keyCertPayload := []byte{
 		0, 7, // Signing key type: Ed25519 (7)
