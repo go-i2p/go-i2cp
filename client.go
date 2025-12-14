@@ -1240,38 +1240,39 @@ func validateReconfigureProperties(properties map[string]string) error {
 	for key, value := range properties {
 		// Validate tunnel quantities (must be 0-16 per I2CP spec)
 		if strings.HasSuffix(key, ".quantity") {
-			quantity, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid tunnel quantity value '%s' for %s: %w", value, key, err)
-			}
-			if quantity < 0 || quantity > 16 {
-				return fmt.Errorf("tunnel quantity %d out of range [0, 16] for %s", quantity, key)
+			if err := validateIntegerProperty(key, value, 0, 16, "tunnel quantity"); err != nil {
+				return err
 			}
 		}
 
 		// Validate tunnel lengths (must be 0-7 per I2CP spec)
 		if strings.HasSuffix(key, ".length") {
-			length, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid tunnel length value '%s' for %s: %w", value, key, err)
-			}
-			if length < 0 || length > 7 {
-				return fmt.Errorf("tunnel length %d out of range [0, 7] for %s", length, key)
+			if err := validateIntegerProperty(key, value, 0, 7, "tunnel length"); err != nil {
+				return err
 			}
 		}
 
 		// Validate length variance (must be 0-3 per I2CP spec)
 		if strings.HasSuffix(key, ".lengthVariance") {
-			variance, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid length variance value '%s' for %s: %w", value, key, err)
-			}
-			if variance < 0 || variance > 3 {
-				return fmt.Errorf("length variance %d out of range [0, 3] for %s", variance, key)
+			if err := validateIntegerProperty(key, value, 0, 3, "length variance"); err != nil {
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+// validateIntegerProperty validates that a property value is an integer within the specified range.
+// Returns an error if the value is not a valid integer or is outside the allowed range.
+func validateIntegerProperty(key, value string, min, max int, propertyType string) error {
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s value '%s' for %s: %w", propertyType, value, key, err)
+	}
+	if intValue < min || intValue > max {
+		return fmt.Errorf("%s %d out of range [%d, %d] for %s", propertyType, intValue, min, max, key)
+	}
 	return nil
 }
 
