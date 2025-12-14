@@ -1885,22 +1885,9 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	Info("Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
 
-	// Setup TLS if enabled (I2CP 0.8.3+ authentication method 2)
-	if c.properties["i2cp.SSL"] == "true" {
-		certFile := c.properties["i2cp.SSL.certFile"]
-		keyFile := c.properties["i2cp.SSL.keyFile"]
-		caFile := c.properties["i2cp.SSL.caFile"]
-		insecure := c.properties["i2cp.SSL.insecure"] == "true"
-
-		Debug("Configuring TLS: certFile=%s, keyFile=%s, caFile=%s, insecure=%v",
-			certFile, keyFile, caFile, insecure)
-
-		err := c.tcp.SetupTLS(certFile, keyFile, caFile, insecure)
-		if err != nil {
-			return fmt.Errorf("failed to setup TLS: %w", err)
-		}
-
-		Info("TLS configured successfully")
+	// Setup TLS and establish connection
+	if err := c.setupTLSIfEnabled(); err != nil {
+		return err
 	}
 
 	// Establish TCP/TLS connection
@@ -1911,7 +1898,6 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	// Set up cleanup on error - ensures TCP disconnects if any subsequent step fails
-	// This implements the defer cleanup pattern from PLAN.md section 1.3 task 2
 	success := false
 	defer func() {
 		if !success {
@@ -1921,16 +1907,75 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	}()
 
+	// Complete I2CP protocol handshake
+	if err := c.performProtocolHandshake(ctx); err != nil {
+		return err
+	}
+
+	c.connected = true
+	success = true
+
+	// Update metrics connection state
+	if c.metrics != nil {
+		c.metrics.SetConnectionState("connected")
+	}
+
+	return nil
+}
+
+// setupTLSIfEnabled configures TLS for the TCP connection if enabled in client properties.
+// It reads TLS configuration from client properties and applies them to the TCP layer.
+func (c *Client) setupTLSIfEnabled() error {
+	if c.properties["i2cp.SSL"] != "true" {
+		return nil
+	}
+
+	certFile := c.properties["i2cp.SSL.certFile"]
+	keyFile := c.properties["i2cp.SSL.keyFile"]
+	caFile := c.properties["i2cp.SSL.caFile"]
+	insecure := c.properties["i2cp.SSL.insecure"] == "true"
+
+	Debug("Configuring TLS: certFile=%s, keyFile=%s, caFile=%s, insecure=%v",
+		certFile, keyFile, caFile, insecure)
+
+	err := c.tcp.SetupTLS(certFile, keyFile, caFile, insecure)
+	if err != nil {
+		return fmt.Errorf("failed to setup TLS: %w", err)
+	}
+
+	Info("TLS configured successfully")
+	return nil
+}
+
+// performProtocolHandshake executes the I2CP protocol initialization sequence.
+// It sends the protocol init byte, GetDate message, and waits for SetDate response.
+func (c *Client) performProtocolHandshake(ctx context.Context) error {
 	// Check context after TCP connect
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled after TCP connect: %w", err)
 	}
 
 	// Send protocol initialization byte
+	if err := c.sendProtocolInit(); err != nil {
+		return err
+	}
+
+	Debug("Sending protocol byte message")
+
+	// Send GetDate message
+	c.msgGetDate(false)
+
+	// Receive SetDate response with context checking
+	return c.receiveSetDateWithContext(ctx)
+}
+
+// sendProtocolInit sends the I2CP protocol initialization byte to the router.
+// It uses circuit breaker if available to protect against connection issues.
+func (c *Client) sendProtocolInit() error {
 	c.outputStream.Reset()
 	c.outputStream.WriteByte(I2CP_PROTOCOL_INIT)
 
-	// Use circuit breaker if available
+	var err error
 	if c.circuitBreaker != nil {
 		err = c.circuitBreaker.Execute(func() error {
 			_, sendErr := c.tcp.Send(c.outputStream)
@@ -1944,12 +1989,12 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to send protocol init: %w", err)
 	}
 
-	Debug("Sending protocol byte message")
+	return nil
+}
 
-	// Send GetDate message
-	c.msgGetDate(false)
-
-	// Receive SetDate response with context checking
+// receiveSetDateWithContext receives the SetDate response message with context cancellation support.
+// It runs the receive operation in a goroutine to allow context cancellation.
+func (c *Client) receiveSetDateWithContext(ctx context.Context) error {
 	type result struct {
 		err error
 	}
@@ -1967,14 +2012,6 @@ func (c *Client) Connect(ctx context.Context) error {
 		if res.err != nil {
 			return fmt.Errorf("failed to receive SetDate: %w", res.err)
 		}
-	}
-
-	c.connected = true
-	success = true
-
-	// Update metrics connection state
-	if c.metrics != nil {
-		c.metrics.SetConnectionState("connected")
 	}
 
 	return nil
