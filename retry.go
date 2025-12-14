@@ -32,6 +32,57 @@ import (
 //	if err != nil {
 //	    log.Printf("Failed after retries: %v", err)
 //	}
+//
+// shouldRetryAfterError determines if a retry should occur based on the error type and attempt count.
+// Returns an error if retry should not occur (either fatal error or max retries exceeded), nil otherwise.
+func shouldRetryAfterError(err error, attempt int, maxRetries int) error {
+	// Check if error is temporary
+	if !isTemporary(err) {
+		Debug("Encountered fatal error (not retrying): %v", err)
+		return fmt.Errorf("fatal error: %w", err)
+	}
+
+	// Check if we've exhausted retries
+	if maxRetries >= 0 && attempt > maxRetries {
+		return fmt.Errorf("max retries (%d) exceeded: %w", maxRetries, err)
+	}
+
+	return nil
+}
+
+// checkContextCancellation checks if the context has been cancelled and returns an appropriate error.
+// Returns nil if context is still active.
+func checkContextCancellation(ctx context.Context, attempt int, phase string) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("retry cancelled %s after %d attempts: %w", phase, attempt, ctx.Err())
+	default:
+		return nil
+	}
+}
+
+// waitWithBackoff sleeps for the specified backoff duration while respecting context cancellation.
+// Returns an error if context is cancelled during the wait.
+func waitWithBackoff(ctx context.Context, backoff time.Duration, attempt int, err error) error {
+	Debug("Retry attempt %d failed: %v (waiting %v before retry)", attempt, err, backoff)
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("retry cancelled during backoff after %d attempts: %w", attempt, ctx.Err())
+	case <-time.After(backoff):
+		return nil
+	}
+}
+
+// calculateNextBackoff computes the next backoff duration using exponential backoff with a maximum cap.
+func calculateNextBackoff(current time.Duration, maxBackoff time.Duration) time.Duration {
+	next := current * 2
+	if next > maxBackoff {
+		return maxBackoff
+	}
+	return next
+}
+
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialBackoff time.Duration, fn func() error) error {
 	const maxBackoff = 5 * time.Minute
 
@@ -50,40 +101,26 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialBackoff time.D
 			return nil
 		}
 
-		// Check if error is temporary
-		if !isTemporary(err) {
-			Debug("Encountered fatal error (not retrying): %v", err)
-			return fmt.Errorf("fatal error: %w", err)
-		}
-
-		// Check if we've exhausted retries
+		// Increment attempt counter
 		attempt++
-		if maxRetries >= 0 && attempt > maxRetries {
-			return fmt.Errorf("max retries (%d) exceeded: %w", maxRetries, err)
+
+		// Determine if we should retry
+		if retryErr := shouldRetryAfterError(err, attempt, maxRetries); retryErr != nil {
+			return retryErr
 		}
 
 		// Check context cancellation before sleeping
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("retry cancelled after %d attempts: %w", attempt, ctx.Err())
-		default:
+		if ctxErr := checkContextCancellation(ctx, attempt, "before backoff"); ctxErr != nil {
+			return ctxErr
 		}
 
-		// Log and wait before retrying
-		Debug("Retry attempt %d failed: %v (waiting %v before retry)", attempt, err, backoff)
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("retry cancelled during backoff after %d attempts: %w", attempt, ctx.Err())
-		case <-time.After(backoff):
-			// Continue to next attempt
+		// Wait before retrying
+		if waitErr := waitWithBackoff(ctx, backoff, attempt, err); waitErr != nil {
+			return waitErr
 		}
 
-		// Exponential backoff with cap
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
+		// Calculate next backoff duration
+		backoff = calculateNextBackoff(backoff, maxBackoff)
 	}
 }
 
