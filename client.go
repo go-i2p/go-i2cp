@@ -1238,26 +1238,29 @@ func (c *Client) dispatchHostReplyResult(sessionId uint16, requestId uint32, des
 // to session configuration, matching Java router validation behavior.
 func validateReconfigureProperties(properties map[string]string) error {
 	for key, value := range properties {
-		// Validate tunnel quantities (must be 0-16 per I2CP spec)
-		if strings.HasSuffix(key, ".quantity") {
-			if err := validateIntegerProperty(key, value, 0, 16, "tunnel quantity"); err != nil {
-				return err
-			}
+		if err := validatePropertyBySuffix(key, value); err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		// Validate tunnel lengths (must be 0-7 per I2CP spec)
-		if strings.HasSuffix(key, ".length") {
-			if err := validateIntegerProperty(key, value, 0, 7, "tunnel length"); err != nil {
-				return err
-			}
-		}
+// validatePropertyBySuffix validates a single property based on its key suffix.
+// Returns an error if the property value is invalid for its type.
+func validatePropertyBySuffix(key, value string) error {
+	// Validate tunnel quantities (must be 0-16 per I2CP spec)
+	if strings.HasSuffix(key, ".quantity") {
+		return validateIntegerProperty(key, value, 0, 16, "tunnel quantity")
+	}
 
-		// Validate length variance (must be 0-3 per I2CP spec)
-		if strings.HasSuffix(key, ".lengthVariance") {
-			if err := validateIntegerProperty(key, value, 0, 3, "length variance"); err != nil {
-				return err
-			}
-		}
+	// Validate tunnel lengths (must be 0-7 per I2CP spec)
+	if strings.HasSuffix(key, ".length") {
+		return validateIntegerProperty(key, value, 0, 7, "tunnel length")
+	}
+
+	// Validate length variance (must be 0-3 per I2CP spec)
+	if strings.HasSuffix(key, ".lengthVariance") {
+		return validateIntegerProperty(key, value, 0, 3, "length variance")
 	}
 
 	return nil
