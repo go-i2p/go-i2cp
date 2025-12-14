@@ -848,61 +848,20 @@ func (c *Client) onMsgReportAbuse(stream *Stream) {
 // Note: 9 fields are undefined in the spec and reserved for future use
 func (c *Client) onMsgBandwithLimit(stream *Stream) {
 	Debug("Received BandwidthLimits message.")
-	var err error
 
-	// Read client bandwidth limits (bytes/second)
-	clientInbound, err := stream.ReadUint32()
+	clientInbound, clientOutbound, err := readClientBandwidthLimits(stream)
 	if err != nil {
-		Error("Failed to read client inbound limit: %v", err)
 		return
 	}
 
-	clientOutbound, err := stream.ReadUint32()
+	routerInbound, routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime, err := readRouterBandwidthLimits(stream)
 	if err != nil {
-		Error("Failed to read client outbound limit: %v", err)
 		return
 	}
 
-	// Read router bandwidth limits (bytes/second)
-	routerInbound, err := stream.ReadUint32()
+	undefined, err := readUndefinedBandwidthFields(stream)
 	if err != nil {
-		Error("Failed to read router inbound limit: %v", err)
 		return
-	}
-
-	routerInboundBurst, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router inbound burst: %v", err)
-		return
-	}
-
-	routerOutbound, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router outbound limit: %v", err)
-		return
-	}
-
-	routerOutboundBurst, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router outbound burst: %v", err)
-		return
-	}
-
-	burstTime, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read burst time: %v", err)
-		return
-	}
-
-	// Read 9 undefined/reserved fields (uint32 each)
-	// These are reserved for future protocol extensions
-	undefined := make([]uint32, 9)
-	for i := 0; i < 9; i++ {
-		undefined[i], err = stream.ReadUint32()
-		if err != nil {
-			Error("Failed to read undefined field %d: %v", i, err)
-			return
-		}
 	}
 
 	Debug("BandwidthLimits - Client: in=%d out=%d, Router: in=%d(%d) out=%d(%d) burst=%d",
@@ -911,7 +870,84 @@ func (c *Client) onMsgBandwithLimit(stream *Stream) {
 		routerOutbound, routerOutboundBurst,
 		burstTime)
 
-	// Create BandwidthLimits structure with parsed values
+	dispatchBandwidthLimits(c, clientInbound, clientOutbound, routerInbound, routerInboundBurst,
+		routerOutbound, routerOutboundBurst, burstTime, undefined)
+}
+
+// readClientBandwidthLimits reads client bandwidth limits from the stream.
+// Returns inbound and outbound limits in bytes/second, or an error.
+func readClientBandwidthLimits(stream *Stream) (uint32, uint32, error) {
+	clientInbound, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read client inbound limit: %v", err)
+		return 0, 0, err
+	}
+
+	clientOutbound, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read client outbound limit: %v", err)
+		return 0, 0, err
+	}
+
+	return clientInbound, clientOutbound, nil
+}
+
+// readRouterBandwidthLimits reads router bandwidth limits and burst parameters from the stream.
+// Returns inbound, inbound burst, outbound, outbound burst, burst time, or an error.
+func readRouterBandwidthLimits(stream *Stream) (uint32, uint32, uint32, uint32, uint32, error) {
+	routerInbound, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read router inbound limit: %v", err)
+		return 0, 0, 0, 0, 0, err
+	}
+
+	routerInboundBurst, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read router inbound burst: %v", err)
+		return 0, 0, 0, 0, 0, err
+	}
+
+	routerOutbound, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read router outbound limit: %v", err)
+		return 0, 0, 0, 0, 0, err
+	}
+
+	routerOutboundBurst, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read router outbound burst: %v", err)
+		return 0, 0, 0, 0, 0, err
+	}
+
+	burstTime, err := stream.ReadUint32()
+	if err != nil {
+		Error("Failed to read burst time: %v", err)
+		return 0, 0, 0, 0, 0, err
+	}
+
+	return routerInbound, routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime, nil
+}
+
+// readUndefinedBandwidthFields reads the 9 reserved/undefined uint32 fields from the stream.
+// These fields are reserved for future protocol extensions.
+func readUndefinedBandwidthFields(stream *Stream) ([]uint32, error) {
+	undefined := make([]uint32, 9)
+	for i := 0; i < 9; i++ {
+		val, err := stream.ReadUint32()
+		if err != nil {
+			Error("Failed to read undefined field %d: %v", i, err)
+			return nil, err
+		}
+		undefined[i] = val
+	}
+	return undefined, nil
+}
+
+// dispatchBandwidthLimits creates a BandwidthLimits structure and dispatches it to the callback.
+// This notifies the application of bandwidth limits received from the router.
+func dispatchBandwidthLimits(c *Client, clientInbound, clientOutbound, routerInbound,
+	routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime uint32, undefined []uint32) {
+
 	limits := &BandwidthLimits{
 		ClientInbound:       clientInbound,
 		ClientOutbound:      clientOutbound,
