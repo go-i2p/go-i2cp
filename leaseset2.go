@@ -625,47 +625,76 @@ func (ls *LeaseSet2) VerifySignature() bool {
 func (ls *LeaseSet2) reconstructSignedData() ([]byte, error) {
 	stream := NewStream(make([]byte, 0, 512))
 
+	// Write metadata: type, destination, timestamps, flags, properties
+	err := ls.writeLeaseSetMetadata(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write leases: count and lease array
+	err = ls.writeLeasesData(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write optional offline signature
+	err = ls.writeOptionalOfflineSignature(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream.Bytes(), nil
+}
+
+// writeLeaseSetMetadata writes the LeaseSet2 metadata fields to the stream.
+// This includes type, destination, published/expires timestamps, flags, and properties.
+func (ls *LeaseSet2) writeLeaseSetMetadata(stream *Stream) error {
 	// Write LeaseSet type
 	err := stream.WriteByte(ls.leaseSetType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write lease set type: %w", err)
+		return fmt.Errorf("failed to write lease set type: %w", err)
 	}
 
 	// Write destination
 	err = ls.destination.WriteToStream(stream)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write destination: %w", err)
+		return fmt.Errorf("failed to write destination: %w", err)
 	}
 
 	// Write published timestamp
 	err = stream.WriteUint32(ls.published)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write published timestamp: %w", err)
+		return fmt.Errorf("failed to write published timestamp: %w", err)
 	}
 
 	// Write expires timestamp
 	err = stream.WriteUint32(ls.expires)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write expires timestamp: %w", err)
+		return fmt.Errorf("failed to write expires timestamp: %w", err)
 	}
 
 	// Write flags
 	err = stream.WriteUint16(ls.flags)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write flags: %w", err)
+		return fmt.Errorf("failed to write flags: %w", err)
 	}
 
 	// Write properties mapping
 	err = stream.WriteMapping(ls.properties)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write properties: %w", err)
+		return fmt.Errorf("failed to write properties: %w", err)
 	}
 
+	return nil
+}
+
+// writeLeasesData writes the lease count and all Lease2 structures to the stream.
+func (ls *LeaseSet2) writeLeasesData(stream *Stream) error {
 	// Write lease count
 	leaseCount := uint8(len(ls.leases))
-	err = stream.WriteByte(leaseCount)
+	err := stream.WriteByte(leaseCount)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write lease count: %w", err)
+		return fmt.Errorf("failed to write lease count: %w", err)
 	}
 
 	// Write each Lease2
@@ -673,19 +702,23 @@ func (ls *LeaseSet2) reconstructSignedData() ([]byte, error) {
 		leaseBytes := lease.Bytes()
 		_, err = stream.Write(leaseBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write lease %d: %w", i, err)
+			return fmt.Errorf("failed to write lease %d: %w", i, err)
 		}
 	}
 
-	// Write offline signature if present
+	return nil
+}
+
+// writeOptionalOfflineSignature writes the offline signature to the stream if present.
+// The offline signature is written only when flags bit 0 is set and offlineSig is not nil.
+func (ls *LeaseSet2) writeOptionalOfflineSignature(stream *Stream) error {
 	if ls.flags&0x0001 != 0 && ls.offlineSig != nil {
-		err = writeOfflineSignature(ls.offlineSig, stream)
+		err := writeOfflineSignature(ls.offlineSig, stream)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write offline signature: %w", err)
+			return fmt.Errorf("failed to write offline signature: %w", err)
 		}
 	}
-
-	return stream.Bytes(), nil
+	return nil
 }
 
 // writeOfflineSignature writes an OfflineSignature to the stream for signature verification.

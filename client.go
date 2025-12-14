@@ -2361,6 +2361,79 @@ func (c *Client) processIncomingMessages(ctx context.Context) error {
 //	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 //	defer cancel()
 //	requestId, err := client.DestinationLookup(ctx, session, "example.i2p")
+//
+// validateLookupParameters validates the session, address, and context for a destination lookup.
+// Returns error if any parameter is invalid or context is cancelled.
+func validateLookupParameters(ctx context.Context, session *Session, address string) error {
+	if session == nil {
+		return fmt.Errorf("session cannot be nil: %w", ErrInvalidArgument)
+	}
+	if address == "" {
+		return fmt.Errorf("address cannot be empty: %w", ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before lookup: %w", err)
+	}
+	return nil
+}
+
+// decodeB32Address attempts to decode a b32 address and returns the hash bytes.
+// Returns nil stream if address is not b32 format or decoding fails.
+func decodeB32Address(address string) (*Stream, error) {
+	b32Len := 56 + 8 // base32-encoded 32-byte hash + ".b32.i2p"
+
+	if len(address) != b32Len {
+		return nil, nil // Not a b32 address
+	}
+
+	Debug("Lookup of b32 address detected, decode and use hash for faster lookup.")
+	host := address[:strings.Index(address, ".")]
+
+	decodedBytes, err := base32.DecodeString(host)
+	if err != nil || len(decodedBytes) == 0 {
+		Warning("Failed to decode hash of address '%s'", address)
+		return nil, fmt.Errorf("failed to decode b32 address: %w", err)
+	}
+
+	return NewStream(decodedBytes), nil
+}
+
+// registerLookupRequest registers a new lookup request in a thread-safe manner.
+// Returns the assigned request ID.
+func (c *Client) registerLookupRequest(session *Session, address string) uint32 {
+	lup := LookupEntry{address: address, session: session}
+
+	c.lock.Lock()
+	c.lookupRequestId += 1
+	requestId := c.lookupRequestId
+	c.lookupReq[requestId] = lup
+	c.lock.Unlock()
+
+	return requestId
+}
+
+// executeLookupRequest sends the appropriate lookup message based on router capabilities.
+// Uses HostLookup for modern routers or falls back to deprecated DestLookup for legacy routers.
+func (c *Client) executeLookupRequest(session *Session, requestId uint32, address string, hashStream *Stream) error {
+	defaultTimeout := uint32(30000)
+	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+
+	if routerCanHostLookup {
+		if hashStream == nil || hashStream.Len() == 0 {
+			return c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOSTNAME, []byte(address), true)
+		}
+		return c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, hashStream.Bytes(), true)
+	}
+
+	// Legacy router - use deprecated DestLookup
+	Warning("Router version %v < 0.9.11 detected, using deprecated DestLookup (HostLookup unavailable)", c.router.version)
+	c.lock.Lock()
+	c.lookup[address] = requestId
+	c.lock.Unlock()
+	c.msgDestLookup(hashStream.Bytes(), true)
+	return nil
+}
+
 func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
 	// Ensure client was properly initialized with NewClient()
 	if err := c.ensureInitialized(); err != nil {
@@ -2368,51 +2441,27 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 	}
 
 	// Validate parameters
-	if session == nil {
-		return 0, fmt.Errorf("session cannot be nil: %w", ErrInvalidArgument)
-	}
-	if address == "" {
-		return 0, fmt.Errorf("address cannot be empty: %w", ErrInvalidArgument)
+	if err := validateLookupParameters(ctx, session, address); err != nil {
+		return 0, err
 	}
 
-	// Check context before starting
-	if err := ctx.Err(); err != nil {
-		return 0, fmt.Errorf("context cancelled before lookup: %w", err)
-	}
-
-	var out *Stream
-	var lup LookupEntry
-	b32Len := 56 + 8 // base32-encoded 32-byte hash (56 chars with padding) + ".b32.i2p" (8 chars)
-	defaultTimeout := uint32(30000)
+	// Check if router supports HostLookup and validate address format
 	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+	b32Len := 56 + 8
 
 	if !routerCanHostLookup && len(address) != b32Len {
 		Warning("Address '%s' is not a b32 address %d.", address, len(address))
 		return 0, ErrInvalidDestination
 	}
 
-	if len(address) == b32Len {
-		Debug("Lookup of b32 address detected, decode and use hash for faster lookup.")
-		host := address[:strings.Index(address, ".")]
-		// Use common/base32 to decode I2P base32 address
-		var decodeErr error
-		var decodedBytes []byte
-		decodedBytes, decodeErr = base32.DecodeString(host)
-		if decodeErr != nil || len(decodedBytes) == 0 {
-			Warning("Failed to decode hash of address '%s'", address)
-			return 0, fmt.Errorf("failed to decode b32 address: %w", decodeErr)
-		}
-		out = NewStream(decodedBytes)
+	// Attempt to decode b32 address
+	hashStream, err := decodeB32Address(address)
+	if err != nil {
+		return 0, err
 	}
 
-	lup = LookupEntry{address: address, session: session}
-
-	// MAJOR FIX: Thread-safe access to lookupReq map (I2CP HostLookup race condition)
-	c.lock.Lock()
-	c.lookupRequestId += 1
-	requestId := c.lookupRequestId
-	c.lookupReq[requestId] = lup
-	c.lock.Unlock()
+	// Register lookup request
+	requestId := c.registerLookupRequest(session, address)
 
 	// Check context before sending lookup
 	if err := ctx.Err(); err != nil {
@@ -2422,26 +2471,12 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 		return 0, fmt.Errorf("context cancelled before sending lookup: %w", err)
 	}
 
-	if routerCanHostLookup {
-		var err error
-		if out == nil || out.Len() == 0 {
-			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HOSTNAME, []byte(address), true)
-		} else {
-			err = c.msgHostLookup(session, requestId, defaultTimeout, HOST_LOOKUP_TYPE_HASH, out.Bytes(), true)
-		}
-		if err != nil {
-			c.lock.Lock()
-			delete(c.lookupReq, requestId)
-			c.lock.Unlock()
-			return 0, fmt.Errorf("failed to send host lookup: %w", err)
-		}
-	} else {
-		// MINOR FIX: Warn when falling back to deprecated DestLookup for old routers
-		Warning("Router version %v < 0.9.11 detected, using deprecated DestLookup (HostLookup unavailable)", c.router.version)
+	// Execute lookup request
+	if err := c.executeLookupRequest(session, requestId, address, hashStream); err != nil {
 		c.lock.Lock()
-		c.lookup[address] = requestId
+		delete(c.lookupReq, requestId)
 		c.lock.Unlock()
-		c.msgDestLookup(out.Bytes(), true)
+		return 0, fmt.Errorf("failed to send host lookup: %w", err)
 	}
 
 	return requestId, nil
