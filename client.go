@@ -2071,68 +2071,88 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 //	defer cancel()
 //	err := client.ProcessIO(ctx)
 func (c *Client) ProcessIO(ctx context.Context) error {
-	// Ensure client was properly initialized with NewClient()
+	if err := c.validateProcessIOContext(ctx); err != nil {
+		return err
+	}
+
+	if err := c.processOutputQueue(ctx); err != nil {
+		return err
+	}
+
+	return c.processIncomingMessages(ctx)
+}
+
+// validateProcessIOContext validates the client state and context before processing IO.
+func (c *Client) validateProcessIOContext(ctx context.Context) error {
 	if err := c.ensureInitialized(); err != nil {
 		return err
 	}
 
-	// Check context before processing
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before ProcessIO: %w", err)
 	}
 
-	// Check shutdown signal
 	select {
 	case <-c.shutdown:
 		return ErrClientClosed
 	default:
+		return nil
 	}
+}
 
-	// Process output queue
+// processOutputQueue sends all queued messages to the router.
+func (c *Client) processOutputQueue(ctx context.Context) error {
 	c.lock.Lock()
+	defer func() {
+		c.outputQueue = make([]*Stream, 0)
+		c.lock.Unlock()
+	}()
+
 	for _, stream := range c.outputQueue {
-		// Check context during queue processing
 		if err := ctx.Err(); err != nil {
-			c.lock.Unlock()
 			return fmt.Errorf("context cancelled during output queue processing: %w", err)
 		}
 
 		Debug("Sending %d bytes message", stream.Len())
 
-		var ret int
-		var sendErr error
-		// Use circuit breaker if available
-		if c.circuitBreaker != nil {
-			sendErr = c.circuitBreaker.Execute(func() error {
-				var err error
-				ret, err = c.tcp.Send(stream)
-				return err
-			})
-		} else {
-			ret, sendErr = c.tcp.Send(stream)
-		}
-
+		ret, sendErr := c.sendQueuedMessage(stream)
 		if ret < 0 {
-			c.lock.Unlock()
 			return fmt.Errorf("failed to send queued message: %w", sendErr)
 		}
 		if ret == 0 {
 			break
 		}
 	}
-	// Clear processed messages from queue
-	c.outputQueue = make([]*Stream, 0)
-	c.lock.Unlock()
 
-	// Process incoming messages
+	return nil
+}
+
+// sendQueuedMessage sends a single message using the circuit breaker if available.
+func (c *Client) sendQueuedMessage(stream *Stream) (int, error) {
+	var ret int
+	var sendErr error
+
+	if c.circuitBreaker != nil {
+		sendErr = c.circuitBreaker.Execute(func() error {
+			var err error
+			ret, err = c.tcp.Send(stream)
+			return err
+		})
+	} else {
+		ret, sendErr = c.tcp.Send(stream)
+	}
+
+	return ret, sendErr
+}
+
+// processIncomingMessages receives and processes all available messages from the router.
+func (c *Client) processIncomingMessages(ctx context.Context) error {
 	var err error
 	for c.tcp.CanRead() {
-		// Check context during message receive loop
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context cancelled during message receive: %w", err)
 		}
 
-		// Check shutdown signal
 		select {
 		case <-c.shutdown:
 			return ErrClientClosed
