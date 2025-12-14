@@ -83,107 +83,159 @@ type OfflineSignature struct {
 func NewLeaseSet2FromStream(stream *Stream, crypto *Crypto) (*LeaseSet2, error) {
 	ls := &LeaseSet2{}
 
-	// Read LeaseSet type (1 byte)
+	if err := readLeaseSet2Type(stream, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2Destination(stream, crypto, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2Timestamps(stream, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2FlagsAndProperties(stream, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2Leases(stream, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2OfflineSignature(stream, ls); err != nil {
+		return nil, err
+	}
+
+	if err := readLeaseSet2Signature(stream, ls); err != nil {
+		return nil, err
+	}
+
+	return ls, nil
+}
+
+// readLeaseSet2Type reads and validates the LeaseSet2 type byte from the stream.
+func readLeaseSet2Type(stream *Stream, ls *LeaseSet2) error {
 	var err error
 	ls.leaseSetType, err = stream.ReadByte()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 type: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 type: %w", err)
 	}
 
-	// Validate LeaseSet type
 	switch ls.leaseSetType {
 	case LEASESET_TYPE_STANDARD, LEASESET_TYPE_ENCRYPTED, LEASESET_TYPE_META:
-		// Valid types
+		return nil
 	default:
-		return nil, fmt.Errorf("invalid LeaseSet2 type: %d (expected 3, 5, or 7)", ls.leaseSetType)
+		return fmt.Errorf("invalid LeaseSet2 type: %d (expected 3, 5, or 7)", ls.leaseSetType)
 	}
+}
 
-	// Read destination
+// readLeaseSet2Destination reads the destination from the stream.
+func readLeaseSet2Destination(stream *Stream, crypto *Crypto, ls *LeaseSet2) error {
+	var err error
 	ls.destination, err = NewDestinationFromStream(stream, crypto)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 destination: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 destination: %w", err)
 	}
+	return nil
+}
 
-	// Read published timestamp (4 bytes)
+// readLeaseSet2Timestamps reads the published and expires timestamps from the stream.
+func readLeaseSet2Timestamps(stream *Stream, ls *LeaseSet2) error {
+	var err error
 	ls.published, err = stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 published timestamp: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 published timestamp: %w", err)
 	}
 
-	// Read expires timestamp (4 bytes)
 	ls.expires, err = stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 expires timestamp: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 expires timestamp: %w", err)
 	}
 
-	// Read flags (2 bytes)
+	return nil
+}
+
+// readLeaseSet2FlagsAndProperties reads the flags and properties mapping from the stream.
+func readLeaseSet2FlagsAndProperties(stream *Stream, ls *LeaseSet2) error {
+	var err error
 	ls.flags, err = stream.ReadUint16()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 flags: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 flags: %w", err)
 	}
 
-	// Read properties mapping
 	ls.properties, err = stream.ReadMapping()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 properties: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 properties: %w", err)
 	}
 
-	// Read lease count (1 byte)
+	return nil
+}
+
+// readLeaseSet2Leases reads and validates all Lease2 structures from the stream.
+func readLeaseSet2Leases(stream *Stream, ls *LeaseSet2) error {
 	leaseCount, err := stream.ReadByte()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 lease count: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 lease count: %w", err)
 	}
 
-	// Validate lease count (I2CP spec: max 16 leases)
 	if leaseCount > 16 {
-		return nil, fmt.Errorf("invalid LeaseSet2 lease count: %d (max 16)", leaseCount)
+		return fmt.Errorf("invalid LeaseSet2 lease count: %d (max 16)", leaseCount)
 	}
 
-	// Read leases (40 bytes each for Lease2)
 	ls.leases = make([]*lease.Lease2, leaseCount)
 	for i := uint8(0); i < leaseCount; i++ {
-		// Read 40-byte Lease2 structure
 		leaseData := make([]byte, 40)
 		n, err := stream.Read(leaseData)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read LeaseSet2 lease %d: %w", i, err)
+			return fmt.Errorf("failed to read LeaseSet2 lease %d: %w", i, err)
 		}
 		if n != 40 {
-			return nil, fmt.Errorf("incomplete Lease2 read: got %d bytes, expected 40", n)
+			return fmt.Errorf("incomplete Lease2 read: got %d bytes, expected 40", n)
 		}
 
-		// Parse Lease2 using common/lease package
 		l2, _, err := lease.ReadLease2(leaseData)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Lease2 %d: %w", i, err)
+			return fmt.Errorf("failed to parse Lease2 %d: %w", i, err)
 		}
 		ls.leases[i] = &l2
 	}
 
-	// Read offline signature if present (flags bit 0)
-	if ls.flags&0x0001 != 0 {
-		ls.offlineSig, err = readOfflineSignature(stream)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read offline signature: %w", err)
-		}
+	return nil
+}
+
+// readLeaseSet2OfflineSignature reads the offline signature if the flags indicate it is present.
+func readLeaseSet2OfflineSignature(stream *Stream, ls *LeaseSet2) error {
+	if ls.flags&0x0001 == 0 {
+		return nil
 	}
 
-	// Read signature (variable length based on destination's signing key type)
+	var err error
+	ls.offlineSig, err = readOfflineSignature(stream)
+	if err != nil {
+		return fmt.Errorf("failed to read offline signature: %w", err)
+	}
+
+	return nil
+}
+
+// readLeaseSet2Signature reads the cryptographic signature from the stream.
+func readLeaseSet2Signature(stream *Stream, ls *LeaseSet2) error {
 	sigLen := getSignatureLength(ls.destination)
 	if sigLen == 0 {
-		return nil, fmt.Errorf("invalid signature length from destination")
+		return fmt.Errorf("invalid signature length from destination")
 	}
 
 	ls.signature = make([]byte, sigLen)
 	n, err := stream.Read(ls.signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 signature: %w", err)
+		return fmt.Errorf("failed to read LeaseSet2 signature: %w", err)
 	}
 	if n != sigLen {
-		return nil, fmt.Errorf("incomplete signature read: got %d bytes, expected %d", n, sigLen)
+		return fmt.Errorf("incomplete signature read: got %d bytes, expected %d", n, sigLen)
 	}
 
-	return ls, nil
+	return nil
 }
 
 // readOfflineSignature reads an OfflineSignature from the stream.
