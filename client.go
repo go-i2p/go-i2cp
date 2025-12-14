@@ -1028,89 +1028,123 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 }
 
 func (c *Client) onMsgHostReply(stream *Stream) {
-	var result uint8
-	var sessionId uint16
-	var requestId uint32
-	var sess *Session
-	var dest *Destination
-	var lup LookupEntry
-	var err error
 	Debug("Received HostReply message.")
 
-	// Parse message fields
-	sessionId, err = stream.ReadUint16()
+	// Parse message header
+	sessionId, requestId, result, err := c.parseHostReplyHeader(stream)
+	if err != nil {
+		return
+	}
+
+	// Process lookup result
+	dest, options, lup := c.processHostReplyResult(stream, result, requestId)
+
+	// Find session and dispatch result
+	c.dispatchHostReplyResult(sessionId, requestId, dest, options, lup)
+}
+
+// parseHostReplyHeader reads the session ID, request ID, and result code from a HostReply message.
+// Returns the parsed values or an error if any field cannot be read.
+func (c *Client) parseHostReplyHeader(stream *Stream) (uint16, uint32, uint8, error) {
+	sessionId, err := stream.ReadUint16()
 	if err != nil {
 		Error("Failed to read session ID from HostReply: %v", err)
-		return
+		return 0, 0, 0, err
 	}
-	requestId, err = stream.ReadUint32()
+
+	requestId, err := stream.ReadUint32()
 	if err != nil {
 		Error("Failed to read request ID from HostReply: %v", err)
-		return
+		return 0, 0, 0, err
 	}
-	result, err = stream.ReadByte()
+
+	result, err := stream.ReadByte()
 	if err != nil {
 		Error("Failed to read result code from HostReply: %v", err)
-		return
+		return 0, 0, 0, err
 	}
 
-	// Parse destination if lookup succeeded (result == 0)
-	var errorDetail string
+	return sessionId, requestId, result, nil
+}
+
+// processHostReplyResult processes the result of a host lookup, parsing the destination on success
+// or logging error details on failure. Returns destination, options map, and lookup entry.
+func (c *Client) processHostReplyResult(stream *Stream, result uint8, requestId uint32) (*Destination, map[string]string, LookupEntry) {
+	var dest *Destination
 	var options map[string]string
+	var lup LookupEntry
+
 	if result == HOST_REPLY_SUCCESS {
-		dest, err = NewDestinationFromMessage(stream, c.crypto)
-		if err != nil {
-			Error("Failed to parse destination from HostReply: %v", err)
-			return
-		}
-
-		// MINOR FIX: Parse optional Mapping for service record lookups (I2CP 0.9.66+ Proposal 167)
-		// Lookup types 2-4 include LeaseSet options after the Destination
-		// Get and remove lookup entry to check type (must do before checking remaining bytes)
-		c.lock.Lock()
-		lup = c.lookupReq[requestId]
-		c.lock.Unlock()
-
-		// Check if this is a service record lookup type (2-4) AND there are remaining bytes
-		if (lup.lookupType >= HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS && lup.lookupType <= HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS) && stream.Len() > 0 {
-			Debug("Parsing optional Mapping for service record lookup type %d (request %d)", lup.lookupType, requestId)
-			options, err = stream.ReadMapping()
-			if err != nil {
-				Warning("Failed to parse service record Mapping for request %d: %v", requestId, err)
-				// Continue with lookup - Mapping is optional even for types 2-4
-				options = nil
-			} else {
-				Debug("Parsed %d service record options for request %d", len(options), requestId)
-			}
-		}
-
+		dest, options, lup = c.parseSuccessfulLookup(stream, requestId)
 		Debug("HostReply lookup succeeded for request %d", requestId)
 	} else {
-		// MAJOR FIX: Enhanced error handling for all HostReply codes (I2CP 0.9.43+)
-		switch result {
-		case HOST_REPLY_FAILURE:
-			errorDetail = "General lookup failure"
-		case HOST_REPLY_PASSWORD_REQUIRED:
-			errorDetail = "Encrypted LeaseSet requires lookup password"
-		case HOST_REPLY_PRIVATE_KEY_REQUIRED:
-			errorDetail = "Per-client authentication requires private key"
-		case HOST_REPLY_PASSWORD_AND_KEY_REQUIRED:
-			errorDetail = "Both password and private key required"
-		case HOST_REPLY_DECRYPTION_FAILURE:
-			errorDetail = "Failed to decrypt LeaseSet with provided credentials"
-		case HOST_REPLY_LEASESET_LOOKUP_FAILURE:
-			errorDetail = "LeaseSet not found in network database"
-		case HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED:
-			errorDetail = "Lookup type not supported by router"
-		default:
-			errorDetail = fmt.Sprintf("Unknown error code %d", result)
-		}
-		Warning("HostReply lookup failed for request %d: %s (code %d)", requestId, errorDetail, result)
+		c.logLookupFailure(result, requestId)
 	}
 
+	return dest, options, lup
+}
+
+// parseSuccessfulLookup parses the destination and optional service record options from a successful lookup.
+// Returns the destination, options map, and lookup entry retrieved for type checking.
+func (c *Client) parseSuccessfulLookup(stream *Stream, requestId uint32) (*Destination, map[string]string, LookupEntry) {
+	dest, err := NewDestinationFromMessage(stream, c.crypto)
+	if err != nil {
+		Error("Failed to parse destination from HostReply: %v", err)
+		return nil, nil, LookupEntry{}
+	}
+
+	// Get lookup entry to check if service record options are expected
+	c.lock.Lock()
+	lup := c.lookupReq[requestId]
+	c.lock.Unlock()
+
+	// Parse optional Mapping for service record lookups (I2CP 0.9.66+ Proposal 167)
+	var options map[string]string
+	if (lup.lookupType >= HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS && lup.lookupType <= HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS) && stream.Len() > 0 {
+		Debug("Parsing optional Mapping for service record lookup type %d (request %d)", lup.lookupType, requestId)
+		options, err = stream.ReadMapping()
+		if err != nil {
+			Warning("Failed to parse service record Mapping for request %d: %v", requestId, err)
+			options = nil
+		} else {
+			Debug("Parsed %d service record options for request %d", len(options), requestId)
+		}
+	}
+
+	return dest, options, lup
+}
+
+// logLookupFailure logs detailed error information for failed host lookups based on the result code.
+// Provides specific error messages for each I2CP 0.9.43+ HostReply error code.
+func (c *Client) logLookupFailure(result uint8, requestId uint32) {
+	var errorDetail string
+	switch result {
+	case HOST_REPLY_FAILURE:
+		errorDetail = "General lookup failure"
+	case HOST_REPLY_PASSWORD_REQUIRED:
+		errorDetail = "Encrypted LeaseSet requires lookup password"
+	case HOST_REPLY_PRIVATE_KEY_REQUIRED:
+		errorDetail = "Per-client authentication requires private key"
+	case HOST_REPLY_PASSWORD_AND_KEY_REQUIRED:
+		errorDetail = "Both password and private key required"
+	case HOST_REPLY_DECRYPTION_FAILURE:
+		errorDetail = "Failed to decrypt LeaseSet with provided credentials"
+	case HOST_REPLY_LEASESET_LOOKUP_FAILURE:
+		errorDetail = "LeaseSet not found in network database"
+	case HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED:
+		errorDetail = "Lookup type not supported by router"
+	default:
+		errorDetail = fmt.Sprintf("Unknown error code %d", result)
+	}
+	Warning("HostReply lookup failed for request %d: %s (code %d)", requestId, errorDetail, result)
+}
+
+// dispatchHostReplyResult dispatches the lookup result to the appropriate session.
+// It retrieves the session, updates the lookup entry with options, and dispatches the destination.
+func (c *Client) dispatchHostReplyResult(sessionId uint16, requestId uint32, dest *Destination, options map[string]string, lup LookupEntry) {
 	// Find session
 	c.lock.Lock()
-	sess = c.sessions[sessionId]
+	sess := c.sessions[sessionId]
 	c.lock.Unlock()
 	if sess == nil {
 		Error("Session with id %d doesn't exist for HostReply", sessionId)
@@ -1118,8 +1152,8 @@ func (c *Client) onMsgHostReply(stream *Stream) {
 	}
 
 	// Get and remove lookup entry
-	c.lock.Lock()          // MAJOR FIX: Thread-safe access to lookupReq map
-	if lup.address == "" { // Entry not already retrieved above for options parsing
+	c.lock.Lock()
+	if lup.address == "" {
 		lup = c.lookupReq[requestId]
 	}
 	delete(c.lookupReq, requestId)
