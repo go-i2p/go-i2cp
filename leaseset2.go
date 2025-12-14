@@ -249,30 +249,50 @@ func readLeaseSet2Signature(stream *Stream, ls *LeaseSet2) error {
 //   - Transient key (variable)
 //   - Signature length (2 bytes)
 //   - Signature (variable)
+// readLengthPrefixedData reads a uint16 length prefix followed by that many bytes of data.
+// Returns the data buffer or an error with contextual information.
+func readLengthPrefixedData(stream *Stream, fieldName string) ([]byte, error) {
+	dataLen, err := stream.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s length: %w", fieldName, err)
+	}
+
+	data := make([]byte, dataLen)
+	n, err := stream.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", fieldName, err)
+	}
+	if n != int(dataLen) {
+		return nil, fmt.Errorf("incomplete %s read: got %d bytes, expected %d", fieldName, n, dataLen)
+	}
+
+	return data, nil
+}
+
+// readOfflineSignatureKey reads a key type and its associated key data from the stream.
+// Returns keyType, keyData, and any error encountered.
+func readOfflineSignatureKey(stream *Stream, keyDescription string) (keyType uint16, keyData []byte, err error) {
+	keyType, err = stream.ReadUint16()
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to read %s key type: %w", keyDescription, err)
+	}
+
+	keyData, err = readLengthPrefixedData(stream, keyDescription+" key")
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return keyType, keyData, nil
+}
+
 func readOfflineSignature(stream *Stream) (*OfflineSignature, error) {
 	sig := &OfflineSignature{}
-
-	// Read signing key type
 	var err error
-	sig.signingKeyType, err = stream.ReadUint16()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature signing key type: %w", err)
-	}
 
-	// Read signing key length
-	signingKeyLen, err := stream.ReadUint16()
+	// Read signing key type and data
+	sig.signingKeyType, sig.signingKey, err = readOfflineSignatureKey(stream, "signing")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature signing key length: %w", err)
-	}
-
-	// Read signing key
-	sig.signingKey = make([]byte, signingKeyLen)
-	n, err := stream.Read(sig.signingKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signing key: %w", err)
-	}
-	if n != int(signingKeyLen) {
-		return nil, fmt.Errorf("incomplete signing key read: got %d bytes, expected %d", n, signingKeyLen)
+		return nil, err
 	}
 
 	// Read expires timestamp
@@ -281,42 +301,16 @@ func readOfflineSignature(stream *Stream) (*OfflineSignature, error) {
 		return nil, fmt.Errorf("failed to read offline signature expires: %w", err)
 	}
 
-	// Read transient key type
-	sig.transientType, err = stream.ReadUint16()
+	// Read transient key type and data
+	sig.transientType, sig.transientKey, err = readOfflineSignatureKey(stream, "transient")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature transient key type: %w", err)
+		return nil, err
 	}
 
-	// Read transient key length
-	transientKeyLen, err := stream.ReadUint16()
+	// Read signature data
+	sig.signature, err = readLengthPrefixedData(stream, "signature data")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature transient key length: %w", err)
-	}
-
-	// Read transient key
-	sig.transientKey = make([]byte, transientKeyLen)
-	n, err = stream.Read(sig.transientKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read offline transient key: %w", err)
-	}
-	if n != int(transientKeyLen) {
-		return nil, fmt.Errorf("incomplete transient key read: got %d bytes, expected %d", n, transientKeyLen)
-	}
-
-	// Read signature length
-	sigLen, err := stream.ReadUint16()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature length: %w", err)
-	}
-
-	// Read signature
-	sig.signature = make([]byte, sigLen)
-	n, err = stream.Read(sig.signature)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read offline signature data: %w", err)
-	}
-	if n != int(sigLen) {
-		return nil, fmt.Errorf("incomplete signature read: got %d bytes, expected %d", n, sigLen)
+		return nil, err
 	}
 
 	return sig, nil
