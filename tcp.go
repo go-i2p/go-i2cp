@@ -204,39 +204,68 @@ func (tcp *Tcp) CanRead() bool {
 	// Use buffered reader's Peek() for non-destructive data availability check
 	// This fixes the critical bug where CanRead() consumed bytes from the stream
 	if tcp.reader != nil {
-		// Set a short read deadline to prevent blocking indefinitely
-		// This prevents CanRead() from hanging on closed or unresponsive connections
-		deadline := time.Now().Add(1 * time.Millisecond)
-		tcp.conn.SetReadDeadline(deadline)
-
-		// Peek at 1 byte without consuming it from the buffer
-		_, err := tcp.reader.Peek(1)
-
-		// Reset deadline to zero (blocking mode) for actual message reads
-		var zero time.Time
-		tcp.conn.SetReadDeadline(zero)
-
-		if err == nil {
-			// Data is available and buffered
-			return true
-		}
-		// Handle EOF (connection closed)
-		if err == io.EOF {
-			if tcp.address != nil {
-				Debug("%s detected closed connection", tcp.address.String())
-			}
-			defer tcp.Disconnect()
-			return false
-		}
-		// Check for timeout (expected when no data available)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return false
-		}
-		// Other errors also indicate connection issues
-		return false
+		return canReadBuffered(tcp)
 	}
 
 	// Fallback for unbuffered connection (should not occur in normal operation)
+	return canReadUnbuffered(tcp)
+}
+
+// canReadBuffered checks if data is available using buffered reader's Peek.
+// Returns true if data is available, false otherwise.
+func canReadBuffered(tcp *Tcp) bool {
+	err := peekBufferedData(tcp)
+
+	if err == nil {
+		// Data is available and buffered
+		return true
+	}
+
+	return handleReadError(tcp, err)
+}
+
+// peekBufferedData attempts to peek at one byte with a timeout to avoid blocking.
+// Returns nil if data is available, error otherwise.
+func peekBufferedData(tcp *Tcp) error {
+	// Set a short read deadline to prevent blocking indefinitely
+	// This prevents CanRead() from hanging on closed or unresponsive connections
+	deadline := time.Now().Add(1 * time.Millisecond)
+	tcp.conn.SetReadDeadline(deadline)
+
+	// Peek at 1 byte without consuming it from the buffer
+	_, err := tcp.reader.Peek(1)
+
+	// Reset deadline to zero (blocking mode) for actual message reads
+	var zero time.Time
+	tcp.conn.SetReadDeadline(zero)
+
+	return err
+}
+
+// handleReadError processes errors from read operations and determines availability.
+// Returns false for EOF, timeout, or other errors.
+func handleReadError(tcp *Tcp, err error) bool {
+	// Handle EOF (connection closed)
+	if err == io.EOF {
+		if tcp.address != nil {
+			Debug("%s detected closed connection", tcp.address.String())
+		}
+		defer tcp.Disconnect()
+		return false
+	}
+
+	// Check for timeout (expected when no data available)
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return false
+	}
+
+	// Other errors also indicate connection issues
+	return false
+}
+
+// canReadUnbuffered checks data availability without buffered reader.
+// This is a fallback path that consumes one byte from the stream.
+func canReadUnbuffered(tcp *Tcp) bool {
 	// Set a very short read deadline (1ms) to check data availability without blocking
 	deadline := time.Now().Add(1 * time.Millisecond)
 	tcp.conn.SetReadDeadline(deadline)
