@@ -2454,36 +2454,41 @@ func (c *Client) DestinationLookup(ctx context.Context, session *Session, addres
 // Example:
 //
 //	defer client.Close()
-func (c *Client) Close() error {
-	// Ensure client was properly initialized with NewClient()
-	if err := c.ensureInitialized(); err != nil {
-		return err
-	}
-
-	Info("Closing client %p", c)
-
-	// Signal shutdown to all operations
+//
+// signalShutdown closes the shutdown channel if not already closed.
+// Returns error if client is already closed.
+func (c *Client) signalShutdown() error {
 	select {
 	case <-c.shutdown:
 		// Already closed
 		return ErrClientClosed
 	default:
 		close(c.shutdown)
+		return nil
+	}
+}
+
+// destroyAllSessions destroys all active sessions if the client is connected.
+// Logs warnings for any session destruction failures but continues with others.
+func (c *Client) destroyAllSessions() {
+	if !c.tcp.IsConnected() {
+		return
 	}
 
-	// Destroy all sessions (only if connected)
-	if c.tcp.IsConnected() {
-		c.lock.Lock()
-		for sessionId, sess := range c.sessions {
-			Debug("Destroying session %d during shutdown", sessionId)
-			if err := c.msgDestroySession(sess, false); err != nil {
-				Warning("Failed to destroy session %d during shutdown: %v", sessionId, err)
-			}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	for sessionId, sess := range c.sessions {
+		Debug("Destroying session %d during shutdown", sessionId)
+		if err := c.msgDestroySession(sess, false); err != nil {
+			Warning("Failed to destroy session %d during shutdown: %v", sessionId, err)
 		}
-		c.lock.Unlock()
 	}
+}
 
-	// Wait for pending operations with timeout
+// waitForPendingOperations waits for all pending operations to complete with a timeout.
+// Returns after all operations finish or after 5 seconds, whichever comes first.
+func (c *Client) waitForPendingOperations() {
 	done := make(chan struct{})
 	go func() {
 		c.wg.Wait()
@@ -2496,16 +2501,40 @@ func (c *Client) Close() error {
 	case <-time.After(5 * time.Second):
 		Warning("Shutdown timeout - forcing close")
 	}
+}
 
-	// Close TCP connection
+// cleanupConnection performs final cleanup including disconnecting TCP and updating metrics.
+func (c *Client) cleanupConnection() {
 	c.tcp.Disconnect()
 	c.connected = false
 
-	// Update metrics connection state
 	if c.metrics != nil {
 		c.metrics.SetConnectionState("disconnected")
 		c.metrics.SetActiveSessions(0)
 	}
+}
+
+func (c *Client) Close() error {
+	// Ensure client was properly initialized with NewClient()
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
+	Info("Closing client %p", c)
+
+	// Signal shutdown to all operations
+	if err := c.signalShutdown(); err != nil {
+		return err
+	}
+
+	// Destroy all sessions
+	c.destroyAllSessions()
+
+	// Wait for pending operations with timeout
+	c.waitForPendingOperations()
+
+	// Close connection and update metrics
+	c.cleanupConnection()
 
 	Info("Client %p closed successfully", c)
 	return nil
