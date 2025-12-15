@@ -111,8 +111,18 @@ func (stream *Stream) WriteLenPrefixedString(s string) error {
 // This format is used throughout I2CP for session configuration properties.
 func (stream *Stream) WriteMapping(m map[string]string) error {
 	buf := NewStream(make([]byte, 0))
+	keys := prepareMapKeys(m)
 
-	// Sort keys for deterministic output
+	if err := writeKeyValuePairs(buf, keys, m); err != nil {
+		return err
+	}
+
+	return writeMappingData(stream, buf)
+}
+
+// prepareMapKeys extracts non-empty keys from the map and sorts them alphabetically.
+// Returns a sorted slice of keys for deterministic serialization.
+func prepareMapKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		if k != "" { // Skip empty keys
@@ -120,8 +130,12 @@ func (stream *Stream) WriteMapping(m map[string]string) error {
 		}
 	}
 	sort.Strings(keys)
+	return keys
+}
 
-	// Write each key=value; pair
+// writeKeyValuePairs writes all key=value; pairs to the buffer stream.
+// Each pair is formatted as: key_len|key|=|value_len|value|;
+func writeKeyValuePairs(buf *Stream, keys []string, m map[string]string) error {
 	for _, key := range keys {
 		if err := buf.WriteLenPrefixedString(key); err != nil {
 			return fmt.Errorf("failed to write key %q: %w", key, err)
@@ -136,8 +150,12 @@ func (stream *Stream) WriteMapping(m map[string]string) error {
 			return err
 		}
 	}
+	return nil
+}
 
-	// Write size prefix and mapping data
+// writeMappingData writes the size prefix followed by the mapping buffer data.
+// Format: size_uint16 | mapping_data
+func writeMappingData(stream *Stream, buf *Stream) error {
 	if err := stream.WriteUint16(uint16(buf.Len())); err != nil {
 		return err
 	}
