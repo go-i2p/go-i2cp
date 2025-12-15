@@ -117,18 +117,29 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 // SendMessageWithContext sends a message with context support for timeout control
 // per I2CP specification - implements context-aware message delivery with cancellation
 func (session *Session) SendMessageWithContext(ctx context.Context, destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
+	if err := validateSendContext(ctx); err != nil {
+		return err
+	}
+
+	return executeSendWithContext(ctx, session, destination, protocol, srcPort, destPort, payload, nonce)
+}
+
+// validateSendContext validates the context is non-nil and not already cancelled.
+func validateSendContext(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("context cannot be nil")
 	}
 
-	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("context cancelled before sending message: %w", ctx.Err())
 	default:
+		return nil
 	}
+}
 
-	// Set up timeout handling
+// executeSendWithContext executes the message send in a goroutine with context cancellation support.
+func executeSendWithContext(ctx context.Context, session *Session, destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- session.SendMessage(destination, protocol, srcPort, destPort, payload, nonce)

@@ -96,29 +96,41 @@ func NewSessionConfig() (*SessionConfig, error) {
 }
 
 func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (config SessionConfig) {
-	var home string
-	if file, err := os.Open(filename); err == nil {
-		config.destination, err = NewDestinationFromFile(file, crypto)
-		if err != nil {
-			Warning("Failed to load destination from file '%s', a new destination will be generated.", filename)
-		}
-	}
-	if config.destination == nil {
-		config.destination, _ = NewDestination(crypto)
-	}
-	if len(filename) > 0 {
-		config.destination.WriteToFile(filename)
-	}
-	home = os.Getenv("HOME")
-	if len(home) > 0 {
-		configFile := home + "/.i2cp.conf"
-		ParseConfig(configFile, func(name, value string) {
-			if prop := config.propFromString(name); prop >= 0 {
-				config.SetProperty(prop, value)
-			}
-		})
-	}
+	config.destination = loadOrCreateDestination(filename, crypto)
+	loadUserConfigFile(&config)
 	return config
+}
+
+// loadOrCreateDestination loads a destination from file or creates a new one if loading fails.
+func loadOrCreateDestination(filename string, crypto *Crypto) *Destination {
+	if file, err := os.Open(filename); err == nil {
+		dest, err := NewDestinationFromFile(file, crypto)
+		if err == nil {
+			return dest
+		}
+		Warning("Failed to load destination from file '%s', a new destination will be generated.", filename)
+	}
+
+	dest, _ := NewDestination(crypto)
+	if len(filename) > 0 {
+		dest.WriteToFile(filename)
+	}
+	return dest
+}
+
+// loadUserConfigFile loads user configuration from ~/.i2cp.conf if HOME is set.
+func loadUserConfigFile(config *SessionConfig) {
+	home := os.Getenv("HOME")
+	if len(home) == 0 {
+		return
+	}
+
+	configFile := home + "/.i2cp.conf"
+	ParseConfig(configFile, func(name, value string) {
+		if prop := config.propFromString(name); prop >= 0 {
+			config.SetProperty(prop, value)
+		}
+	})
 }
 
 func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, client *Client) {
