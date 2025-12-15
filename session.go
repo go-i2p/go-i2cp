@@ -179,29 +179,13 @@ func (session *Session) ReconfigureSession(properties map[string]string) error {
 // ReconfigureSessionWithContext updates session configuration with context support
 // per I2CP specification section 7.1 - implements context-aware reconfiguration with timeout
 func (session *Session) ReconfigureSessionWithContext(ctx context.Context, properties map[string]string) error {
-	if ctx == nil {
-		return fmt.Errorf("context cannot be nil")
-	}
-
-	// Check if context is already cancelled
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled before reconfiguration: %w", ctx.Err())
-	default:
-	}
-
-	// Set up timeout handling
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- session.ReconfigureSession(properties)
-	}()
-
-	select {
-	case err := <-errChan:
+	if err := validateContextNotNilOrCancelled(ctx, "reconfiguration"); err != nil {
 		return err
-	case <-ctx.Done():
-		return fmt.Errorf("session reconfiguration cancelled: %w", ctx.Err())
 	}
+
+	return executeWithContext(ctx, func() error {
+		return session.ReconfigureSession(properties)
+	}, "session reconfiguration cancelled")
 }
 
 // Destination returns the session's destination
@@ -697,29 +681,13 @@ func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, sr
 // SendMessageExpiresWithContext sends an expiring message with context support
 // per I2CP specification 0.7.1+ - implements context-aware expiring message delivery
 func (session *Session) SendMessageExpiresWithContext(ctx context.Context, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, flags uint16, expirationSeconds uint64) error {
-	if ctx == nil {
-		return fmt.Errorf("context cannot be nil")
-	}
-
-	// Check if context is already cancelled
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled before sending expiring message: %w", ctx.Err())
-	default:
-	}
-
-	// Set up timeout handling
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- session.SendMessageExpires(dest, protocol, srcPort, destPort, payload, flags, expirationSeconds)
-	}()
-
-	select {
-	case err := <-errChan:
+	if err := validateContextNotNilOrCancelled(ctx, "sending expiring message"); err != nil {
 		return err
-	case <-ctx.Done():
-		return fmt.Errorf("expiring message send cancelled: %w", ctx.Err())
 	}
+
+	return executeWithContext(ctx, func() error {
+		return session.SendMessageExpires(dest, protocol, srcPort, destPort, payload, flags, expirationSeconds)
+	}, "expiring message send cancelled")
 }
 
 // LookupDestination performs a destination lookup using HostLookupMessage
@@ -1269,4 +1237,33 @@ func (session *Session) GetProperty(prop SessionConfigProperty) string {
 	}
 
 	return session.config.properties[prop]
+}
+
+// validateContextNotNilOrCancelled validates that the context is non-nil and not already cancelled.
+func validateContextNotNilOrCancelled(ctx context.Context, operation string) error {
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled before %s: %w", operation, ctx.Err())
+	default:
+		return nil
+	}
+}
+
+// executeWithContext executes a function in a goroutine with context cancellation support.
+func executeWithContext(ctx context.Context, fn func() error, cancelMsg string) error {
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- fn()
+	}()
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("%s: %w", cancelMsg, ctx.Err())
+	}
 }
