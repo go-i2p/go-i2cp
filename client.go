@@ -1318,59 +1318,71 @@ func validateIntegerProperty(key, value string, min, max int, propertyType strin
 // onMsgReconfigureSession handles ReconfigureSessionMessage (type 2) for dynamic session updates
 // per I2CP specification section 7.1 - supports runtime tunnel and crypto parameter changes
 func (c *Client) onMsgReconfigureSession(stream *Stream) {
-	var sessionId uint16
-	var sess *Session
-	var err error
-
 	Debug("Received ReconfigureSessionMessage")
 
-	// Read session ID
-	sessionId, err = stream.ReadUint16()
+	sess, properties, err := c.readReconfigureSessionData(stream)
+	if err != nil {
+		return
+	}
+
+	if err := c.applyReconfigurationProperties(sess, properties); err != nil {
+		return
+	}
+
+	sess.dispatchStatus(I2CP_SESSION_STATUS_UPDATED)
+}
+
+// readReconfigureSessionData reads and validates the session ID and properties from the stream.
+// Returns the session, properties map, and any error encountered.
+func (c *Client) readReconfigureSessionData(stream *Stream) (*Session, map[string]string, error) {
+	sessionId, err := stream.ReadUint16()
 	if err != nil {
 		Error("Failed to read session ID from ReconfigureSessionMessage: %v", err)
-		return
+		return nil, nil, err
 	}
 
-	// Find session
 	c.lock.Lock()
-	sess = c.sessions[sessionId]
+	sess := c.sessions[sessionId]
 	c.lock.Unlock()
+
 	if sess == nil {
 		Error("ReconfigureSessionMessage received for unknown session ID %d", sessionId)
-		return
+		return nil, nil, fmt.Errorf("unknown session ID %d", sessionId)
 	}
 
-	// Read properties mapping
 	properties, err := stream.ReadMapping()
 	if err != nil {
 		Error("Failed to read properties mapping from ReconfigureSessionMessage: %v", err)
-		return
+		return nil, nil, err
 	}
 
 	Debug("Reconfiguring session %d with %d properties", sessionId, len(properties))
+	return sess, properties, nil
+}
 
-	// Validate property values before applying
+// applyReconfigurationProperties validates and applies configuration properties to a session.
+// Returns an error if validation fails or properties cannot be applied.
+func (c *Client) applyReconfigurationProperties(sess *Session, properties map[string]string) error {
 	if err := validateReconfigureProperties(properties); err != nil {
-		Error("Invalid reconfiguration properties for session %d: %v", sessionId, err)
-		return
+		Error("Invalid reconfiguration properties for session %d: %v", sess.ID(), err)
+		return err
 	}
 
-	// Apply properties to session configuration
-	if sess.config != nil {
-		for key, value := range properties {
-			// Convert property key to internal property enum
-			prop := sess.config.propFromString(key)
-			if prop >= 0 && prop < NR_OF_SESSION_CONFIG_PROPERTIES {
-				sess.config.SetProperty(prop, value)
-				Debug("Updated session %d property %s = %s", sessionId, key, value)
-			} else {
-				Warning("Unknown session property in reconfigure: %s", key)
-			}
+	if sess.config == nil {
+		return nil
+	}
+
+	for key, value := range properties {
+		prop := sess.config.propFromString(key)
+		if prop >= 0 && prop < NR_OF_SESSION_CONFIG_PROPERTIES {
+			sess.config.SetProperty(prop, value)
+			Debug("Updated session %d property %s = %s", sess.ID(), key, value)
+		} else {
+			Warning("Unknown session property in reconfigure: %s", key)
 		}
-
-		// Trigger session status update
-		sess.dispatchStatus(I2CP_SESSION_STATUS_UPDATED)
 	}
+
+	return nil
 }
 
 // onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
