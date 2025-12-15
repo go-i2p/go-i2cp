@@ -52,7 +52,13 @@ func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 		}
 	}
 
+	// Use NewSessionConfig to properly initialize with defaults including i2cp.leaseSetEncType
 	sess.config = &SessionConfig{destination: dest}
+	// Set default encryption type to ECIES-X25519 (type 4) to match destination certificate
+	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE, "4")
+	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY, "none")
+
 	sess.callbacks = &callbacks
 	sess.ctx = context.Background() // Default context
 

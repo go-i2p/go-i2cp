@@ -52,10 +52,10 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 		return nil, fmt.Errorf("failed to generate X25519 encryption keypair: %w", err)
 	}
 
-	// For KEY certificates, pubKey contains X25519 public key (32 bytes)
-	// Copy to first 32 bytes, rest stays zero for compatibility
+	// For KEY certificates with ECIES-X25519, pubKey contains X25519 public key (32 bytes)
+	// LEFT-align the 32-byte X25519 key in the 256-byte field (bytes 0-31)
 	x25519PubKey := x25519Kp.PublicKey()
-	copy(dest.pubKey[:32], x25519PubKey[:])
+	copy(dest.pubKey[:32], x25519PubKey[:]) // Left-align: bytes 0-31 contain the key
 
 	dest.generateB32()
 	dest.generateB64()
@@ -314,7 +314,14 @@ func (dest *Destination) WriteToFile(filename string) (err error) {
 }
 
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
-	// Write encryption public key (256 bytes)
+	// CRITICAL FIX: I2CP Destination format uses FIXED 256-byte encryption key field
+	// Per I2CP spec and Java I2P Destination.java:
+	//   - Wire format: pubKey(256 bytes) + signingPubKey(128 bytes) + certificate
+	//   - For ElGamal (type 0): full 256-byte key
+	//   - For ECIES-X25519 (type 4): 32-byte key LEFT-ALIGNED in 256-byte field (rest zero)
+	// The certificate indicates the actual key type, but wire format is always 256+128 bytes
+
+	// Always write 256 bytes for encryption key (X25519 keys are left-aligned with zero padding)
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}

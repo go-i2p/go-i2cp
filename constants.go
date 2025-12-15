@@ -345,15 +345,21 @@ func GetMessageStatusCategory(status SessionMessageStatus) string {
 
 // Session Status Constants
 // I2CP specification: SessionStatusMessage (type 20) status field values
-// Based on Java I2P reference implementation and observed router behavior
+// Per https://geti2p.net/spec/i2cp#sessionstatusmessage:
+//
+//	0 = Destroyed - The session with the given ID is terminated
+//	1 = Created - In response to CreateSessionMessage, a new session is now active
+//	2 = Updated - In response to ReconfigureSessionMessage
+//	3 = Invalid - The configuration is invalid
+//	4 = Refused - Router was unable to create the session (0.9.12+)
 type SessionStatus int
 
 const (
-	I2CP_SESSION_STATUS_CREATED   SessionStatus = iota // 0 - Session created successfully
-	I2CP_SESSION_STATUS_DESTROYED                      // 1 - Session destroyed
-	I2CP_SESSION_STATUS_UPDATED                        // 2 - Session configuration updated
-	I2CP_SESSION_STATUS_INVALID                        // 3 - Session invalid (see errors.go: ErrSessionInvalid)
-	I2CP_SESSION_STATUS_REFUSED                        // 4 - Session creation refused (0.9.12+, see errors.go: ErrSessionRefused)
+	I2CP_SESSION_STATUS_DESTROYED SessionStatus = 0 // 0 - Session destroyed
+	I2CP_SESSION_STATUS_CREATED   SessionStatus = 1 // 1 - Session created successfully
+	I2CP_SESSION_STATUS_UPDATED   SessionStatus = 2 // 2 - Session configuration updated
+	I2CP_SESSION_STATUS_INVALID   SessionStatus = 3 // 3 - Session invalid (see errors.go: ErrSessionInvalid)
+	I2CP_SESSION_STATUS_REFUSED   SessionStatus = 4 // 4 - Session creation refused (0.9.12+, see errors.go: ErrSessionRefused)
 )
 
 // getSessionStatusName returns a human-readable name for SessionStatus values.

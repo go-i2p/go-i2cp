@@ -15,6 +15,7 @@ const (
 	SESSION_CONFIG_PROP_I2CP_DONT_PUBLISH_LEASE_SET
 	SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE
 	SESSION_CONFIG_PROP_I2CP_GZIP
+	SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE
 	SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY
 	SESSION_CONFIG_PROP_I2CP_PASSWORD
 	SESSION_CONFIG_PROP_I2CP_USERNAME
@@ -45,6 +46,7 @@ var sessionOptions = [NR_OF_SESSION_CONFIG_PROPERTIES]string{
 	"i2cp.dontPublishLeaseSet",
 	"i2cp.fastReceive",
 	"i2cp.gzip",
+	"i2cp.leaseSetEncType",
 	"i2cp.messageReliability",
 	"i2cp.password",
 	"i2cp.username",
@@ -90,14 +92,28 @@ func NewSessionConfig() (*SessionConfig, error) {
 		return nil, fmt.Errorf("failed to create destination: %w", err)
 	}
 
-	return &SessionConfig{
+	config := &SessionConfig{
 		destination: dest,
-	}, nil
+	}
+
+	// Set default encryption type to ECIES-X25519 (type 4)
+	// Per I2CP spec, i2cp.leaseSetEncType declares the encryption type the router should use
+	// Default is 0 (ElGamal), but modern I2P uses X25519 (type 4)
+	// The Destination cert says ElGamal (legacy compatibility), but actual encryption via this option
+	config.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE, "4")
+
+	return config, nil
 }
 
 func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (config SessionConfig) {
 	config.destination = loadOrCreateDestination(filename, crypto)
 	loadUserConfigFile(&config)
+
+	// Set default encryption type to ECIES-X25519 (type 4) if not already configured
+	if config.properties[SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE] == "" {
+		config.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE, "4")
+	}
+
 	return config
 }
 
@@ -229,6 +245,7 @@ func (config *SessionConfig) writeMappingToMessage(stream *Stream) (err error) {
 			continue
 		}
 		m[option] = config.properties[i]
+		Debug("  Option: %s = %s", option, config.properties[i])
 	}
 	Debug("Writing %d options to mapping table", len(m))
 	return stream.WriteMapping(m)
