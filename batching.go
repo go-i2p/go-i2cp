@@ -83,23 +83,33 @@ func (c *Client) IsBatchingEnabled() bool {
 func (c *Client) batchFlushWorker() {
 	defer c.wg.Done()
 
-	// Get the ticker channel
-	c.batchMu.Lock()
-	if c.batchTicker == nil {
-		c.batchMu.Unlock()
+	tickerChan := c.getBatchTickerChannel()
+	if tickerChan == nil {
 		return
 	}
-	tickerChan := c.batchTicker.C
-	c.batchMu.Unlock()
 
+	c.runFlushLoop(tickerChan)
+}
+
+// getBatchTickerChannel safely retrieves the batch ticker channel.
+func (c *Client) getBatchTickerChannel() <-chan time.Time {
+	c.batchMu.Lock()
+	defer c.batchMu.Unlock()
+
+	if c.batchTicker == nil {
+		return nil
+	}
+	return c.batchTicker.C
+}
+
+// runFlushLoop runs the main flush worker loop until shutdown.
+func (c *Client) runFlushLoop(tickerChan <-chan time.Time) {
 	for {
 		select {
 		case <-c.shutdown:
-			// Flush any remaining messages before shutdown
 			_ = c.flushOutputQueue()
 			return
 		case <-tickerChan:
-			// Periodic flush on timer
 			if err := c.flushOutputQueue(); err != nil {
 				Warning("Batch flush failed: %v", err)
 			}

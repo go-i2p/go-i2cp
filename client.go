@@ -630,15 +630,29 @@ func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort, destPort uint1
 }
 
 func (c *Client) onMsgPayload(stream *Stream) {
-	var sessionId uint16
-	var messageId uint32
-	var srcDest *Destination
-	var err error
-
 	Debug("Received PayloadMessage message")
 
-	sessionId, err = stream.ReadUint16()
-	messageId, err = stream.ReadUint32()
+	session, srcDest, err := c.parsePayloadHeader(stream)
+	if err != nil {
+		return
+	}
+
+	payload, err := c.processPayloadData(stream)
+	if err != nil {
+		return
+	}
+
+	c.dispatchPayload(session, srcDest, payload, stream)
+}
+
+// parsePayloadHeader reads session, message, and destination information from payload stream.
+func (c *Client) parsePayloadHeader(stream *Stream) (*Session, *Destination, error) {
+	sessionId, err := stream.ReadUint16()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	messageId, _ := stream.ReadUint32()
 	_ = messageId // currently unused
 
 	c.lock.Lock()
@@ -647,47 +661,54 @@ func (c *Client) onMsgPayload(stream *Stream) {
 
 	if !ok {
 		Fatal("Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
+		return nil, nil, fmt.Errorf("session %d not found", sessionId)
 	}
 
-	payloadSize, err := stream.ReadUint32()
+	payloadSize, _ := stream.ReadUint32()
 	_ = payloadSize // currently unused
 
-	// Parse source destination (I2CP spec: destination follows payload size)
-	srcDest, err = NewDestinationFromMessage(stream, c.crypto)
+	srcDest, err := NewDestinationFromMessage(stream, c.crypto)
 	if err != nil {
 		Error("Failed to parse source destination from MessagePayload: %v", err)
-		return
+		return nil, nil, err
 	}
 
 	Debug("Message from source: %s", srcDest.Base32())
+	return session, srcDest, nil
+}
 
-	// Validate gzip header
-	if err = validateGzipHeader(stream); err != nil {
+// processPayloadData validates and decompresses the payload data.
+func (c *Client) processPayloadData(stream *Stream) (*bytes.Buffer, error) {
+	if err := validateGzipHeader(stream); err != nil {
 		Warning("Payload validation failed, skipping payload")
-		return
+		return nil, err
 	}
 
-	// Decompress payload
 	msgStream := bytes.NewBuffer(stream.Bytes())
 	payload, err := decompressPayload(msgStream)
 	if err != nil {
 		Error("Failed to decompress message payload: %v", err)
+		return nil, err
+	}
+
+	return payload, nil
+}
+
+// dispatchPayload parses payload header and dispatches the message to the session.
+func (c *Client) dispatchPayload(session *Session, srcDest *Destination, payload *bytes.Buffer, stream *Stream) {
+	if payload.Len() == 0 {
+		Debug("Empty payload received for session %d", session.id)
 		return
 	}
 
-	if payload.Len() > 0 {
-		// Parse payload header
-		protocol, srcPort, destPort, err := parsePayloadHeader(stream)
-		if err != nil {
-			Error("Failed to parse payload header: %v", err)
-			return
-		}
-
-		Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
-		session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
-	} else {
-		Debug("Empty payload received for session %d", sessionId)
+	protocol, srcPort, destPort, err := parsePayloadHeader(stream)
+	if err != nil {
+		Error("Failed to parse payload header: %v", err)
+		return
 	}
+
+	Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
+	session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
 }
 
 func (c *Client) onMsgStatus(stream *Stream) {

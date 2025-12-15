@@ -321,7 +321,6 @@ func (session *Session) SetPrimarySession(primary *Session) error {
 // per I2CP specification - implements proper session lifecycle management with cleanup
 // Sends DestroySession message to router and waits for cleanup completion
 func (session *Session) Close() error {
-	// Ensure session was properly initialized with NewSession()
 	if err := session.ensureInitialized(); err != nil {
 		return err
 	}
@@ -335,35 +334,40 @@ func (session *Session) Close() error {
 
 	Debug("Closing session %d", session.id)
 
-	// Send DestroySession message to router if client is connected
+	session.sendDestroyMessage()
+	session.cleanupResources()
+	session.finalizeClose()
+
+	return nil
+}
+
+// sendDestroyMessage sends DestroySession message to router if connected.
+func (session *Session) sendDestroyMessage() {
 	if session.client != nil && session.client.IsConnected() {
-		// Only send DestroySession for sessions that have been created by router
 		if session.id != 0 {
 			session.client.msgDestroySession(session, false)
 			Debug("Sent DestroySession message for session %d", session.id)
 		}
 	}
+}
 
-	// Cancel context if we have one
+// cleanupResources cancels context and clears pending messages.
+func (session *Session) cleanupResources() {
 	if session.cancel != nil {
 		session.cancel()
 	}
 
-	// Clear pending messages
 	pendingCount := session.ClearPendingMessages()
 	if pendingCount > 0 {
 		Debug("Cleared %d pending messages for session %d", pendingCount, session.id)
 	}
+}
 
-	// Dispatch destroyed status BEFORE marking as closed
-	// This allows callbacks to access session state during destruction notification
+// finalizeClose dispatches status and marks session as closed.
+func (session *Session) finalizeClose() {
 	session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
-
-	// Mark as closed after callbacks have been notified
 	session.closed = true
 	session.closedAt = time.Now()
-
-	return nil
 }
 
 // IsClosed returns whether the session has been closed
