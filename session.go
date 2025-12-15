@@ -710,26 +710,42 @@ func (session *Session) SendMessageExpiresWithContext(ctx context.Context, dest 
 // LookupDestination performs a destination lookup using HostLookupMessage
 // per I2CP specification 0.9.11+ - implements destination and hostname resolution
 func (session *Session) LookupDestination(address string, timeout time.Duration) (*Destination, error) {
-	// Ensure session was properly initialized with NewSession()
-	if err := session.ensureInitialized(); err != nil {
+	if err := session.validateLookupRequest(address); err != nil {
 		return nil, err
 	}
 
-	if address == "" {
-		return nil, fmt.Errorf("address cannot be empty")
-	}
-
-	if session.IsClosed() {
-		return nil, fmt.Errorf("session %d is closed", session.id)
-	}
-
-	// Generate unique request ID
 	requestId := session.client.crypto.Random32()
-
 	Debug("Looking up destination from session %d: address=%s, requestId=%d, timeout=%v",
 		session.id, address, requestId, timeout)
 
-	// Determine lookup type based on address format
+	lookupType, lookupDataBytes, err := session.prepareLookupData(address)
+	if err != nil {
+		return nil, err
+	}
+
+	timeoutMs := uint32(timeout.Milliseconds())
+	return nil, session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true)
+}
+
+// validateLookupRequest validates session state and address for lookup.
+func (session *Session) validateLookupRequest(address string) error {
+	if err := session.ensureInitialized(); err != nil {
+		return err
+	}
+
+	if address == "" {
+		return fmt.Errorf("address cannot be empty")
+	}
+
+	if session.IsClosed() {
+		return fmt.Errorf("session %d is closed", session.id)
+	}
+
+	return nil
+}
+
+// prepareLookupData determines lookup type and prepares lookup data bytes.
+func (session *Session) prepareLookupData(address string) (uint8, []byte, error) {
 	var lookupType uint8
 	var lookupData interface{}
 
@@ -742,27 +758,29 @@ func (session *Session) LookupDestination(address string, timeout time.Duration)
 		lookupData = address
 	}
 
-	timeoutMs := uint32(timeout.Milliseconds())
+	lookupDataBytes, err := session.convertLookupData(lookupType, lookupData)
+	if err != nil {
+		return 0, nil, err
+	}
 
-	// Convert lookupData to []byte with proper type assertion
-	var lookupDataBytes []byte
+	return lookupType, lookupDataBytes, nil
+}
+
+// convertLookupData converts lookup data to bytes based on lookup type.
+func (session *Session) convertLookupData(lookupType uint8, lookupData interface{}) ([]byte, error) {
 	if lookupType == 0 {
 		// Hash lookup - lookupData should be []byte
 		if data, ok := lookupData.([]byte); ok {
-			lookupDataBytes = data
-		} else {
-			return nil, fmt.Errorf("invalid lookup data type for hash lookup")
+			return data, nil
 		}
-	} else {
-		// Hostname lookup - lookupData should be string
-		if data, ok := lookupData.(string); ok {
-			lookupDataBytes = []byte(data)
-		} else {
-			return nil, fmt.Errorf("invalid lookup data type for hostname lookup")
-		}
+		return nil, fmt.Errorf("invalid lookup data type for hash lookup")
 	}
 
-	return nil, session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true)
+	// Hostname lookup - lookupData should be string
+	if data, ok := lookupData.(string); ok {
+		return []byte(data), nil
+	}
+	return nil, fmt.Errorf("invalid lookup data type for hostname lookup")
 }
 
 // LookupDestinationWithContext performs a destination lookup with context support
