@@ -28,53 +28,41 @@ type Version struct {
 func parseVersion(str string) Version {
 	v := Version{version: str}
 	segments := strings.Split(str, ".")
+	parseVersionComponents(&v, segments, str)
+	return v
+}
+
+// parseVersionSegment parses a single version segment string into a uint16.
+// Returns 0 and logs a warning if parsing fails.
+func parseVersionSegment(segment, segmentName, fullVersion string) uint16 {
+	i, err := strconv.Atoi(segment)
+	if err != nil {
+		Warning("Invalid %s version '%s' in router version '%s', defaulting to 0", segmentName, segment, fullVersion)
+		return 0
+	}
+	return uint16(i)
+}
+
+// parseVersionComponents parses all version segments (major, minor, micro, qualifier).
+// Updates the provided Version struct in place.
+func parseVersionComponents(v *Version, segments []string, fullVersion string) {
 	n := len(segments)
 
-	// Parse major version
 	if n > 0 {
-		i, err := strconv.Atoi(segments[0])
-		if err != nil {
-			Warning("Invalid major version '%s' in router version '%s', defaulting to 0", segments[0], str)
-			v.major = 0
-		} else {
-			v.major = uint16(i)
-		}
+		v.major = parseVersionSegment(segments[0], "major", fullVersion)
 	}
 
-	// Parse minor version
 	if n > 1 {
-		i, err := strconv.Atoi(segments[1])
-		if err != nil {
-			Warning("Invalid minor version '%s' in router version '%s', defaulting to 0", segments[1], str)
-			v.minor = 0
-		} else {
-			v.minor = uint16(i)
-		}
+		v.minor = parseVersionSegment(segments[1], "minor", fullVersion)
 	}
 
-	// Parse micro version
 	if n > 2 {
-		i, err := strconv.Atoi(segments[2])
-		if err != nil {
-			Warning("Invalid micro version '%s' in router version '%s', defaulting to 0", segments[2], str)
-			v.micro = 0
-		} else {
-			v.micro = uint16(i)
-		}
+		v.micro = parseVersionSegment(segments[2], "micro", fullVersion)
 	}
 
-	// Parse qualifier (optional)
 	if n > 3 {
-		i, err := strconv.Atoi(segments[3])
-		if err != nil {
-			Warning("Invalid qualifier '%s' in router version '%s', defaulting to 0", segments[3], str)
-			v.qualifier = 0
-		} else {
-			v.qualifier = uint16(i)
-		}
+		v.qualifier = parseVersionSegment(segments[3], "qualifier", fullVersion)
 	}
-
-	return v
 }
 
 func (v *Version) compare(other Version) int {
