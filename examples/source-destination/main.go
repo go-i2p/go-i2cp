@@ -88,12 +88,9 @@ func handleIncomingMessage(session *i2cp.Session, srcDest *i2cp.Destination, pro
 	fmt.Printf("  Use this to maintain per-connection state\n")
 }
 
-// demonstrateSignatureVerification shows how to verify signatures
-// using the source destination's public key
-func demonstrateSignatureVerification() {
-	fmt.Println("\n=== Example: Offline Signature Verification ===")
-
-	// Create a test destination (simulating a remote peer)
+// createRemotePeerAndPacket creates a test destination and signs a packet.
+// Returns the remote peer, packet data, and signature.
+func createRemotePeerAndPacket() (*i2cp.Destination, []byte, []byte) {
 	crypto := i2cp.NewCrypto()
 	remotePeer, err := i2cp.NewDestination(crypto)
 	if err != nil {
@@ -102,13 +99,10 @@ func demonstrateSignatureVerification() {
 
 	fmt.Printf("Remote peer destination: %s\n", remotePeer.Base32())
 
-	// Simulate a signed packet from the remote peer
 	packetData := []byte("I2P Streaming Protocol SYN packet data")
-
 	fmt.Printf("Packet data: %q\n", packetData)
 	fmt.Printf("Size: %d bytes\n", len(packetData))
 
-	// Remote peer signs the packet (in real usage, this happens on sender side)
 	signingKey, err := remotePeer.SigningKeyPair()
 	if err != nil {
 		log.Fatalf("Failed to get signing key: %v", err)
@@ -122,15 +116,16 @@ func demonstrateSignatureVerification() {
 	fmt.Println("✓ Packet signed by remote peer")
 	fmt.Printf("  Signature size: %d bytes\n", len(signature))
 
-	// === THIS IS THE KEY PART ===
-	// On the receiving side, we have srcDest from OnMessage callback
-	// We can verify the signature WITHOUT the private key
+	return remotePeer, packetData, signature
+}
 
+// verifySignatureWithMethods demonstrates two methods of signature verification.
+// Method 1 uses Destination.VerifySignature, Method 2 uses SigningPublicKey directly.
+func verifySignatureWithMethods(remotePeer *i2cp.Destination, packetData, signature []byte) {
 	fmt.Println("=== Receiver Side (Server) ===")
 	fmt.Println("Received srcDest from I2CP layer (OnMessage callback)")
 	fmt.Printf("Source: %s\n", remotePeer.Base32())
 
-	// Method 1: Using Destination.VerifySignature (recommended)
 	isValid := remotePeer.VerifySignature(packetData, signature)
 	fmt.Println("✓ Signature verification (Method 1 - Destination.VerifySignature)")
 	fmt.Printf("  Result: %v\n", isValid)
@@ -140,7 +135,6 @@ func demonstrateSignatureVerification() {
 		fmt.Println("  ✓ No private key needed for verification")
 	}
 
-	// Method 2: Using SigningPublicKey directly
 	pubKey := remotePeer.SigningPublicKey()
 	if pubKey != nil {
 		isValid2 := pubKey.Verify(packetData, signature)
@@ -148,11 +142,13 @@ func demonstrateSignatureVerification() {
 		fmt.Printf("  Result: %v\n", isValid2)
 		fmt.Println("  Public key algorithm: Ed25519-SHA512")
 	}
+}
 
-	// Test with invalid signature
+// testInvalidSignature verifies that corrupted signatures are correctly rejected.
+func testInvalidSignature(remotePeer *i2cp.Destination, packetData, signature []byte) {
 	invalidSignature := make([]byte, len(signature))
 	copy(invalidSignature, signature)
-	invalidSignature[0] ^= 0xFF // Corrupt first byte
+	invalidSignature[0] ^= 0xFF
 
 	isInvalid := remotePeer.VerifySignature(packetData, invalidSignature)
 	fmt.Println("✓ Invalid signature test")
@@ -160,6 +156,18 @@ func demonstrateSignatureVerification() {
 	if !isInvalid {
 		fmt.Println("  ✓ Correctly rejected corrupted signature")
 	}
+}
+
+// demonstrateSignatureVerification shows how to verify signatures
+// using the source destination's public key
+func demonstrateSignatureVerification() {
+	fmt.Println("\n=== Example: Offline Signature Verification ===")
+
+	remotePeer, packetData, signature := createRemotePeerAndPacket()
+
+	verifySignatureWithMethods(remotePeer, packetData, signature)
+
+	testInvalidSignature(remotePeer, packetData, signature)
 
 	fmt.Println("\n=== Summary ===")
 	fmt.Println("✓ Source destination is available from OnMessage callback")

@@ -749,42 +749,47 @@ func (ls *LeaseSet2) reconstructSignedData() ([]byte, error) {
 	return stream.Bytes(), nil
 }
 
-// writeLeaseSetMetadata writes the LeaseSet2 metadata fields to the stream.
-// This includes type, destination, published/expires timestamps, flags, and properties.
-func (ls *LeaseSet2) writeLeaseSetMetadata(stream *Stream) error {
-	// Write LeaseSet type
-	err := stream.WriteByte(ls.leaseSetType)
-	if err != nil {
+// writeLeaseSetType writes the LeaseSet2 type byte to the stream.
+func (ls *LeaseSet2) writeLeaseSetType(stream *Stream) error {
+	if err := stream.WriteByte(ls.leaseSetType); err != nil {
 		return fmt.Errorf("failed to write lease set type: %w", err)
 	}
+	return nil
+}
 
-	// Write destination
-	err = ls.destination.WriteToStream(stream)
-	if err != nil {
-		return fmt.Errorf("failed to write destination: %w", err)
-	}
-
-	// Write published timestamp
-	err = stream.WriteUint32(ls.published)
-	if err != nil {
+// writeLeaseSetTimestampsAndFlags writes published, expires timestamps and flags to stream.
+func (ls *LeaseSet2) writeLeaseSetTimestampsAndFlags(stream *Stream) error {
+	if err := stream.WriteUint32(ls.published); err != nil {
 		return fmt.Errorf("failed to write published timestamp: %w", err)
 	}
 
-	// Write expires timestamp
-	err = stream.WriteUint32(ls.expires)
-	if err != nil {
+	if err := stream.WriteUint32(ls.expires); err != nil {
 		return fmt.Errorf("failed to write expires timestamp: %w", err)
 	}
 
-	// Write flags
-	err = stream.WriteUint16(ls.flags)
-	if err != nil {
+	if err := stream.WriteUint16(ls.flags); err != nil {
 		return fmt.Errorf("failed to write flags: %w", err)
 	}
 
-	// Write properties mapping
-	err = stream.WriteMapping(ls.properties)
-	if err != nil {
+	return nil
+}
+
+// writeLeaseSetMetadata writes the LeaseSet2 metadata fields to the stream.
+// This includes type, destination, published/expires timestamps, flags, and properties.
+func (ls *LeaseSet2) writeLeaseSetMetadata(stream *Stream) error {
+	if err := ls.writeLeaseSetType(stream); err != nil {
+		return err
+	}
+
+	if err := ls.destination.WriteToStream(stream); err != nil {
+		return fmt.Errorf("failed to write destination: %w", err)
+	}
+
+	if err := ls.writeLeaseSetTimestampsAndFlags(stream); err != nil {
+		return err
+	}
+
+	if err := stream.WriteMapping(ls.properties); err != nil {
 		return fmt.Errorf("failed to write properties: %w", err)
 	}
 
