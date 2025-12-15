@@ -155,7 +155,7 @@ func writeKeyValuePairs(buf *Stream, keys []string, m map[string]string) error {
 
 // writeMappingData writes the size prefix followed by the mapping buffer data.
 // Format: size_uint16 | mapping_data
-func writeMappingData(stream *Stream, buf *Stream) error {
+func writeMappingData(stream, buf *Stream) error {
 	if err := stream.WriteUint16(uint16(buf.Len())); err != nil {
 		return err
 	}

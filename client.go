@@ -580,7 +580,7 @@ func decompressPayload(msgStream *bytes.Buffer) (*bytes.Buffer, error) {
 
 // parsePayloadHeader reads protocol, port, and other header information from the payload stream.
 // Returns protocol, source port, destination port, or an error.
-func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort uint16, destPort uint16, err error) {
+func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort, destPort uint16, err error) {
 	// Skip gzip flags
 	if _, err = stream.ReadByte(); err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to read gzip flags: %w", err)
@@ -946,8 +946,8 @@ func readUndefinedBandwidthFields(stream *Stream) ([]uint32, error) {
 // dispatchBandwidthLimits creates a BandwidthLimits structure and dispatches it to the callback.
 // This notifies the application of bandwidth limits received from the router.
 func dispatchBandwidthLimits(c *Client, clientInbound, clientOutbound, routerInbound,
-	routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime uint32, undefined []uint32) {
-
+	routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime uint32, undefined []uint32,
+) {
 	limits := &BandwidthLimits{
 		ClientInbound:       clientInbound,
 		ClientOutbound:      clientOutbound,

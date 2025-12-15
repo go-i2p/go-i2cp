@@ -35,7 +35,7 @@ import (
 //
 // shouldRetryAfterError determines if a retry should occur based on the error type and attempt count.
 // Returns an error if retry should not occur (either fatal error or max retries exceeded), nil otherwise.
-func shouldRetryAfterError(err error, attempt int, maxRetries int) error {
+func shouldRetryAfterError(err error, attempt, maxRetries int) error {
 	// Check if error is temporary
 	if !isTemporary(err) {
 		Debug("Encountered fatal error (not retrying): %v", err)
@@ -75,7 +75,7 @@ func waitWithBackoff(ctx context.Context, backoff time.Duration, attempt int, er
 }
 
 // calculateNextBackoff computes the next backoff duration using exponential backoff with a maximum cap.
-func calculateNextBackoff(current time.Duration, maxBackoff time.Duration) time.Duration {
+func calculateNextBackoff(current, maxBackoff time.Duration) time.Duration {
 	next := current * 2
 	if next > maxBackoff {
 		return maxBackoff
