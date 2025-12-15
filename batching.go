@@ -127,36 +127,52 @@ func (c *Client) flushOutputQueue() error {
 		return nil
 	}
 
+	c.logFlushStart()
+
+	if err := c.sendQueuedMessages(); err != nil {
+		return err
+	}
+
+	c.clearQueue()
+	return nil
+}
+
+// logFlushStart logs the batch flush operation details.
+func (c *Client) logFlushStart() {
 	queueSize := len(c.outputQueue)
 	totalBytes := c.getTotalQueueSize()
-
 	Debug("Flushing batch: %d messages, %d bytes", queueSize, totalBytes)
+}
 
-	// Send all queued messages
+// sendQueuedMessages sends all messages currently in the output queue.
+func (c *Client) sendQueuedMessages() error {
 	for _, stream := range c.outputQueue {
-		// Track bandwidth and messages
-		if c.metrics != nil {
-			c.metrics.AddBytesSent(uint64(stream.Len()))
-			// Message type is embedded in the stream at offset 4
-			if stream.Len() >= 5 {
-				msgType := stream.Bytes()[4]
-				c.metrics.IncrementMessageSent(msgType)
-			}
-		}
+		c.trackMessageMetrics(stream)
 
 		ret, err := c.tcp.Send(stream)
 		if ret < 0 {
 			return fmt.Errorf("failed to send batched message: %w", err)
 		}
 		if ret == 0 {
-			// Connection not ready, leave remaining messages in queue
 			Warning("Connection not ready during batch flush")
 			break
 		}
 	}
-
-	// Clear the queue
-	c.outputQueue = make([]*Stream, 0)
-
 	return nil
+}
+
+// trackMessageMetrics updates bandwidth and message metrics for a queued message.
+func (c *Client) trackMessageMetrics(stream *Stream) {
+	if c.metrics != nil {
+		c.metrics.AddBytesSent(uint64(stream.Len()))
+		if stream.Len() >= 5 {
+			msgType := stream.Bytes()[4]
+			c.metrics.IncrementMessageSent(msgType)
+		}
+	}
+}
+
+// clearQueue resets the output queue to empty.
+func (c *Client) clearQueue() {
+	c.outputQueue = make([]*Stream, 0)
 }
