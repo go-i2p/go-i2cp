@@ -65,34 +65,33 @@ func parseVersionComponents(v *Version, segments []string, fullVersion string) {
 	}
 }
 
+// compare compares this version to another version.
+// Returns -1 if v < other, 0 if v == other, 1 if v > other.
+// Compares components in order: major, minor, micro, qualifier.
 func (v *Version) compare(other Version) int {
-	if v.major != other.major {
-		if (v.major - other.major) > 0 {
-			return 1
-		} else {
-			return -1
-		}
+	if result := compareComponent(v.major, other.major); result != 0 {
+		return result
 	}
-	if v.minor != other.minor {
-		if (v.minor - other.minor) > 0 {
-			return 1
-		} else {
-			return -1
-		}
+	if result := compareComponent(v.minor, other.minor); result != 0 {
+		return result
 	}
-	if v.micro != other.micro {
-		if (v.micro - other.micro) > 0 {
-			return 1
-		} else {
-			return -1
-		}
+	if result := compareComponent(v.micro, other.micro); result != 0 {
+		return result
 	}
-	if v.qualifier != other.qualifier {
-		if (v.qualifier - other.qualifier) > 0 {
-			return 1
-		} else {
-			return -1
-		}
+	if result := compareComponent(v.qualifier, other.qualifier); result != 0 {
+		return result
 	}
 	return 0
+}
+
+// compareComponent compares two uint16 version components.
+// Returns -1 if a < b, 0 if a == b, 1 if a > b.
+func compareComponent(a, b uint16) int {
+	if a == b {
+		return 0
+	}
+	if a > b {
+		return 1
+	}
+	return -1
 }

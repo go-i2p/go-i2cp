@@ -259,22 +259,22 @@ func TestSupportsMultiSession(t *testing.T) {
 			expectedSupport: true,
 		},
 		{
-			name: "router version 0.9.20 does not support multi-session (underflow bug)",
+			name: "router version 0.9.20 does not support multi-session (fixed)",
 			setupClient: func() *Client {
 				client := NewClient(&ClientCallBacks{})
 				client.router.version = Version{major: 0, minor: 9, micro: 20, qualifier: 0}
 				return client
 			},
-			expectedSupport: true, // Bug: should be false due to version compare underflow
+			expectedSupport: false, // Fixed: version compare now works correctly
 		},
 		{
-			name: "router version 0.9.10 does not support multi-session (underflow bug)",
+			name: "router version 0.9.10 does not support multi-session (fixed)",
 			setupClient: func() *Client {
 				client := NewClient(&ClientCallBacks{})
 				client.router.version = Version{major: 0, minor: 9, micro: 10, qualifier: 0}
 				return client
 			},
-			expectedSupport: true, // Bug: should be false due to version compare underflow
+			expectedSupport: false, // Fixed: version compare now works correctly
 		},
 		{
 			name: "router version 1.0.0 supports multi-session",
@@ -428,10 +428,10 @@ func TestRouterVersionComparison(t *testing.T) {
 		// matter because router version is only set after connecting to a router,
 		// so we never compare against invalid/zero versions.
 		{
-			name:            "lower micro (underflow bug)",
+			name:            "lower micro (fixed)",
 			routerVersion:   Version{major: 0, minor: 9, micro: 20, qualifier: 0},
 			requiredVersion: Version{major: 0, minor: 9, micro: 21, qualifier: 0},
-			shouldSupport:   true, // Bug: should be false, but underflow makes it true
+			shouldSupport:   false, // Fixed: version compare now works correctly
 		},
 		{
 			name:            "higher minor supports feature",
