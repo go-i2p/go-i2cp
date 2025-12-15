@@ -1557,38 +1557,34 @@ func (c *Client) storeBlindingInfo(session *Session, authScheme uint8, flags uin
 	Debug("Blinding info stored for session %d: enabled=%v", session.id, session.IsBlindingEnabled())
 }
 
-func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
-	var err error
+// initializeLeaseSetStream creates and initializes the lease set stream with null bytes.
+func initializeLeaseSetStream(c *Client, sessionId uint16) *Stream {
 	var nullbytes [256]byte
-	var leaseSet *Stream
-	var config *SessionConfig
-	var dest *Destination
-	var sgk *SignatureKeyPair
-	Debug("Sending CreateLeaseSetMessage")
-	leaseSet = NewStream(make([]byte, 4096))
-	config = session.config
-	dest = config.destination
-	sgk = &dest.sgk
-	// memset 0 nullbytes
 	for i := 0; i < len(nullbytes); i++ {
 		nullbytes[i] = 0
 	}
-	// construct the message
+
 	c.messageStream.WriteUint16(sessionId)
 	c.messageStream.Write(nullbytes[:20])
 	c.messageStream.Write(nullbytes[:256])
-	// Build leaseset stream and sign it
+
+	return NewStream(make([]byte, 4096))
+}
+
+// buildLeaseSetData writes destination and lease data to the lease set stream.
+func buildLeaseSetData(leaseSet *Stream, dest *Destination, sgk *SignatureKeyPair, tunnels uint8, leases []*Lease) error {
+	var nullbytes [256]byte
+
 	dest.WriteToMessage(leaseSet)
 	leaseSet.Write(nullbytes[:256])
 
-	// Write Ed25519 public key (padded to 128 bytes for I2CP compatibility)
 	if sgk.ed25519KeyPair == nil {
-		Error("Ed25519 keypair is nil for CreateLeaseSet")
-		return
+		return fmt.Errorf("Ed25519 keypair is nil for CreateLeaseSet")
 	}
+
 	paddedPubKey := make([]byte, 128)
 	ed25519PubKey := sgk.ed25519KeyPair.PublicKey()
-	copy(paddedPubKey[96:], ed25519PubKey[:]) // Right-align Ed25519 32-byte key in 128-byte field
+	copy(paddedPubKey[96:], ed25519PubKey[:])
 	leaseSet.Write(paddedPubKey)
 
 	leaseSet.WriteByte(tunnels)
@@ -1596,15 +1592,30 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 		leases[i].WriteToMessage(leaseSet)
 	}
 
-	// Sign with Ed25519
-	err = sgk.ed25519KeyPair.SignStream(leaseSet)
-	if err != nil {
+	return nil
+}
+
+func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
+	Debug("Sending CreateLeaseSetMessage")
+
+	leaseSet := initializeLeaseSetStream(c, sessionId)
+
+	config := session.config
+	dest := config.destination
+	sgk := &dest.sgk
+
+	if err := buildLeaseSetData(leaseSet, dest, sgk, tunnels, leases); err != nil {
+		Error("%v", err)
+		return
+	}
+
+	if err := sgk.ed25519KeyPair.SignStream(leaseSet); err != nil {
 		Error("Failed to sign CreateLeaseSet: %v", err)
 		return
 	}
 
 	c.messageStream.Write(leaseSet.Bytes())
-	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
+	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateLeaseSet")
 	}
 }
@@ -2732,48 +2743,54 @@ func (c *Client) executeLookupRequest(session *Session, requestId uint32, addres
 	return nil
 }
 
-func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
-	// Ensure client was properly initialized with NewClient()
-	if err := c.ensureInitialized(); err != nil {
-		return 0, err
-	}
-
-	// Validate parameters
-	if err := validateLookupParameters(ctx, session, address); err != nil {
-		return 0, err
-	}
-
-	// Check if router supports HostLookup and validate address format
+// validateLookupAddress checks if router supports the address format.
+// Returns error if validation fails.
+func (c *Client) validateLookupAddress(address string) error {
 	routerCanHostLookup := (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
 	b32Len := 56 + 8
 
 	if !routerCanHostLookup && len(address) != b32Len {
 		Warning("Address '%s' is not a b32 address %d.", address, len(address))
-		return 0, ErrInvalidDestination
+		return ErrInvalidDestination
 	}
 
-	// Attempt to decode b32 address
+	return nil
+}
+
+// cleanupLookupRequest removes a lookup request from the registry.
+func (c *Client) cleanupLookupRequest(requestId uint32) {
+	c.lock.Lock()
+	delete(c.lookupReq, requestId)
+	c.lock.Unlock()
+}
+
+func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
+	if err := c.ensureInitialized(); err != nil {
+		return 0, err
+	}
+
+	if err := validateLookupParameters(ctx, session, address); err != nil {
+		return 0, err
+	}
+
+	if err := c.validateLookupAddress(address); err != nil {
+		return 0, err
+	}
+
 	hashStream, err := decodeB32Address(address)
 	if err != nil {
 		return 0, err
 	}
 
-	// Register lookup request
 	requestId := c.registerLookupRequest(session, address)
 
-	// Check context before sending lookup
 	if err := ctx.Err(); err != nil {
-		c.lock.Lock()
-		delete(c.lookupReq, requestId)
-		c.lock.Unlock()
+		c.cleanupLookupRequest(requestId)
 		return 0, fmt.Errorf("context cancelled before sending lookup: %w", err)
 	}
 
-	// Execute lookup request
 	if err := c.executeLookupRequest(session, requestId, address, hashStream); err != nil {
-		c.lock.Lock()
-		delete(c.lookupReq, requestId)
-		c.lock.Unlock()
+		c.cleanupLookupRequest(requestId)
 		return 0, fmt.Errorf("failed to send host lookup: %w", err)
 	}
 

@@ -94,15 +94,66 @@ func monitorLeaseSet2() error {
 	return nil
 }
 
+// logBlindingScheme logs the blinding scheme type in human-readable format.
+func logBlindingScheme(blindingScheme uint16) {
+	fmt.Printf("  - Blinding scheme: %d ", blindingScheme)
+	switch blindingScheme {
+	case 0:
+		fmt.Println("(DH)")
+	case 1:
+		fmt.Println("(PSK)")
+	default:
+		fmt.Println("(Unknown)")
+	}
+}
+
+// storeBlindingParameters securely stores blinding parameters.
+// Returns encrypted parameters and error.
+func storeBlindingParameters(blindingScheme, blindingFlags uint16, blindingParams []byte, password string) ([]byte, error) {
+	encrypted, err := encryptBlindingParams(blindingParams, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt blinding params: %w", err)
+	}
+
+	fmt.Printf("  ✓ Encrypted blinding params: %d bytes\n", len(encrypted))
+	fmt.Println()
+	fmt.Println("  IMPORTANT: Save this encrypted data to secure storage!")
+	fmt.Println("  - Store in password manager or KMS")
+	fmt.Println("  - Backup to multiple locations")
+	fmt.Println("  - Never commit to version control")
+	fmt.Println("  - Required for all future connections")
+
+	return encrypted, nil
+}
+
+// createBlindingInfoCallback creates the OnBlindingInfo callback handler.
+func createBlindingInfoCallback(storedScheme, storedFlags *uint16, storedBlindingParams *[]byte) func(*i2cp.Session, uint16, uint16, []byte) {
+	return func(session *i2cp.Session, blindingScheme, blindingFlags uint16, blindingParams []byte) {
+		fmt.Printf("✓ Blinding info received!\n")
+		logBlindingScheme(blindingScheme)
+		fmt.Printf("  - Blinding flags: 0x%04x\n", blindingFlags)
+		fmt.Printf("  - Blinding params: %d bytes\n", len(blindingParams))
+
+		*storedScheme = blindingScheme
+		*storedFlags = blindingFlags
+		*storedBlindingParams = make([]byte, len(blindingParams))
+		copy(*storedBlindingParams, blindingParams)
+
+		password := "your-strong-password-here"
+		_, err := storeBlindingParameters(blindingScheme, blindingFlags, blindingParams, password)
+		if err != nil {
+			log.Printf("ERROR: %v", err)
+		}
+	}
+}
+
 // handleBlindingInfo demonstrates secure storage of blinding parameters
 func handleBlindingInfo() error {
 	fmt.Println("--- Example 2: Handle Blinding Information ---")
 
-	// Storage for blinding parameters (in production, use secure storage)
 	var storedBlindingParams []byte
 	var storedScheme, storedFlags uint16
 
-	// Create client
 	client := i2cp.NewClient(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -113,49 +164,8 @@ func handleBlindingInfo() error {
 	}
 	defer client.Close()
 
-	// Create session with blinding info callback
 	callbacks := i2cp.SessionCallbacks{
-		OnBlindingInfo: func(session *i2cp.Session, blindingScheme, blindingFlags uint16, blindingParams []byte) {
-			fmt.Printf("✓ Blinding info received!\n")
-			fmt.Printf("  - Blinding scheme: %d ", blindingScheme)
-			switch blindingScheme {
-			case 0:
-				fmt.Println("(DH)")
-			case 1:
-				fmt.Println("(PSK)")
-			default:
-				fmt.Println("(Unknown)")
-			}
-			fmt.Printf("  - Blinding flags: 0x%04x\n", blindingFlags)
-			fmt.Printf("  - Blinding params: %d bytes\n", len(blindingParams))
-
-			// CRITICAL: Store blinding parameters securely!
-			// These are required to:
-			// - Decrypt the encrypted LeaseSet
-			// - Allow clients to connect to this destination
-			// - Cannot be recovered if lost!
-
-			storedScheme = blindingScheme
-			storedFlags = blindingFlags
-			storedBlindingParams = make([]byte, len(blindingParams))
-			copy(storedBlindingParams, blindingParams)
-
-			// Encrypt blinding params with password (for secure storage)
-			password := "your-strong-password-here"
-			encrypted, err := encryptBlindingParams(blindingParams, password)
-			if err != nil {
-				log.Printf("ERROR: Failed to encrypt blinding params: %v", err)
-				return
-			}
-
-			fmt.Printf("  ✓ Encrypted blinding params: %d bytes\n", len(encrypted))
-			fmt.Println()
-			fmt.Println("  IMPORTANT: Save this encrypted data to secure storage!")
-			fmt.Println("  - Store in password manager or KMS")
-			fmt.Println("  - Backup to multiple locations")
-			fmt.Println("  - Never commit to version control")
-			fmt.Println("  - Required for all future connections")
-		},
+		OnBlindingInfo: createBlindingInfoCallback(&storedScheme, &storedFlags, &storedBlindingParams),
 		OnLeaseSet2: func(session *i2cp.Session, leaseSet *i2cp.LeaseSet2) {
 			fmt.Printf("✓ LeaseSet2 published with blinding enabled\n")
 			fmt.Printf("  - Expires: %s\n", leaseSet.Expires())

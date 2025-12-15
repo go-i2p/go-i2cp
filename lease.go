@@ -16,47 +16,65 @@ type Lease struct {
 	endDate       uint64
 }
 
+// readLeaseFields reads the tunnel gateway, tunnel ID, and end date from stream.
+// Returns the data and any error encountered.
+func readLeaseFields(stream *Stream) ([32]byte, uint32, uint64, error) {
+	var tunnelGateway [32]byte
+
+	n, err := stream.Read(tunnelGateway[:])
+	if err != nil {
+		return tunnelGateway, 0, 0, err
+	}
+	if n != 32 {
+		return tunnelGateway, 0, 0, fmt.Errorf("failed to read complete tunnel gateway hash: got %d bytes, expected 32", n)
+	}
+
+	tunnelId, err := stream.ReadUint32()
+	if err != nil {
+		return tunnelGateway, 0, 0, err
+	}
+
+	endDate, err := stream.ReadUint64()
+	if err != nil {
+		return tunnelGateway, 0, 0, err
+	}
+
+	return tunnelGateway, tunnelId, endDate, nil
+}
+
+// constructLeaseBytes creates a 44-byte lease array from lease components.
+func constructLeaseBytes(tunnelGateway [32]byte, tunnelId uint32, endDate uint64) [44]byte {
+	var leaseBytes [44]byte
+	copy(leaseBytes[0:32], tunnelGateway[:])
+	leaseBytes[32] = byte(tunnelId >> 24)
+	leaseBytes[33] = byte(tunnelId >> 16)
+	leaseBytes[34] = byte(tunnelId >> 8)
+	leaseBytes[35] = byte(tunnelId)
+	leaseBytes[36] = byte(endDate >> 56)
+	leaseBytes[37] = byte(endDate >> 48)
+	leaseBytes[38] = byte(endDate >> 40)
+	leaseBytes[39] = byte(endDate >> 32)
+	leaseBytes[40] = byte(endDate >> 24)
+	leaseBytes[41] = byte(endDate >> 16)
+	leaseBytes[42] = byte(endDate >> 8)
+	leaseBytes[43] = byte(endDate)
+	return leaseBytes
+}
+
 // NewLeaseFromStream reads a Lease from an I2CP Stream
 func NewLeaseFromStream(stream *Stream) (l *Lease, err error) {
 	l = &Lease{}
 
-	// Read tunnel gateway hash (32 bytes)
-	n, err := stream.Read(l.tunnelGateway[:])
-	if err != nil {
-		return nil, err
-	}
-	if n != 32 {
-		return nil, fmt.Errorf("failed to read complete tunnel gateway hash: got %d bytes, expected 32", n)
-	}
-
-	// Read tunnel ID (4 bytes)
-	l.tunnelId, err = stream.ReadUint32()
+	tunnelGateway, tunnelId, endDate, err := readLeaseFields(stream)
 	if err != nil {
 		return nil, err
 	}
 
-	// Read end date (8 bytes - milliseconds since epoch)
-	l.endDate, err = stream.ReadUint64()
-	if err != nil {
-		return nil, err
-	}
+	l.tunnelGateway = tunnelGateway
+	l.tunnelId = tunnelId
+	l.endDate = endDate
 
-	// Construct the common/lease from the read data
-	// The lease format is: [32 bytes gateway][4 bytes tunnel ID][8 bytes end date]
-	var leaseBytes [44]byte
-	copy(leaseBytes[0:32], l.tunnelGateway[:])
-	leaseBytes[32] = byte(l.tunnelId >> 24)
-	leaseBytes[33] = byte(l.tunnelId >> 16)
-	leaseBytes[34] = byte(l.tunnelId >> 8)
-	leaseBytes[35] = byte(l.tunnelId)
-	leaseBytes[36] = byte(l.endDate >> 56)
-	leaseBytes[37] = byte(l.endDate >> 48)
-	leaseBytes[38] = byte(l.endDate >> 40)
-	leaseBytes[39] = byte(l.endDate >> 32)
-	leaseBytes[40] = byte(l.endDate >> 24)
-	leaseBytes[41] = byte(l.endDate >> 16)
-	leaseBytes[42] = byte(l.endDate >> 8)
-	leaseBytes[43] = byte(l.endDate)
+	leaseBytes := constructLeaseBytes(tunnelGateway, tunnelId, endDate)
 
 	commonLease, _, err := lease.ReadLease(leaseBytes[:])
 	if err != nil {
@@ -67,30 +85,35 @@ func NewLeaseFromStream(stream *Stream) (l *Lease, err error) {
 	return
 }
 
+// writeCommonLease writes a common/lease byte representation to the stream.
+// Returns error if write fails or incomplete.
+func (l *Lease) writeCommonLease(stream *Stream) error {
+	n, err := stream.Write(l.lease[:])
+	if err != nil {
+		return err
+	}
+	if n != 44 {
+		return fmt.Errorf("failed to write complete lease: wrote %d bytes, expected 44", n)
+	}
+	return nil
+}
+
+// writeLegacyLeaseFields writes legacy lease fields to the stream.
+// Used when common lease is not initialized.
+func (l *Lease) writeLegacyLeaseFields(stream *Stream) error {
+	if _, err := stream.Write(l.tunnelGateway[:]); err != nil {
+		return err
+	}
+	if err := stream.WriteUint32(l.tunnelId); err != nil {
+		return err
+	}
+	return stream.WriteUint64(l.endDate)
+}
+
 // WriteToMessage writes the Lease to an I2CP Stream
 func (l *Lease) WriteToMessage(stream *Stream) (err error) {
 	if l.lease != nil {
-		// Use the common/lease's byte representation
-		// Lease is a [44]byte array type, so we can write it directly
-		n, err := stream.Write(l.lease[:])
-		if err != nil {
-			return err
-		}
-		if n != 44 {
-			return fmt.Errorf("failed to write complete lease: wrote %d bytes, expected 44", n)
-		}
-		return nil
+		return l.writeCommonLease(stream)
 	}
-
-	// Fallback to legacy fields if common lease not initialized
-	_, err = stream.Write(l.tunnelGateway[:])
-	if err != nil {
-		return err
-	}
-	err = stream.WriteUint32(l.tunnelId)
-	if err != nil {
-		return err
-	}
-	err = stream.WriteUint64(l.endDate)
-	return
+	return l.writeLegacyLeaseFields(stream)
 }

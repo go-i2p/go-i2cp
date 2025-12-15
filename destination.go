@@ -62,55 +62,69 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	return
 }
 
+// readDestinationKeys reads the public key and signing key from a message stream.
+// Returns the public key array, signing key padded bytes, and any error.
+func readDestinationKeys(stream *Stream) ([256]byte, []byte, error) {
+	var pubKey [256]byte
+
+	_, err := stream.Read(pubKey[:])
+	if err != nil {
+		return pubKey, nil, fmt.Errorf("failed to read public key: %w", err)
+	}
+
+	signingKeyPadded := make([]byte, 128)
+	_, err = stream.Read(signingKeyPadded)
+	if err != nil {
+		return pubKey, nil, fmt.Errorf("failed to read signing key: %w", err)
+	}
+
+	return pubKey, signingKeyPadded, nil
+}
+
+// createEd25519SigningKeyPair creates a SignatureKeyPair from Ed25519 public key bytes.
+// Extracts the 32-byte Ed25519 public key from the right-aligned 128-byte field.
+func createEd25519SigningKeyPair(signingKeyPadded []byte) (SignatureKeyPair, error) {
+	ed25519PubKeyBytes := signingKeyPadded[96:128]
+
+	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(ed25519PubKeyBytes)
+	if err != nil {
+		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 public key: %w", err)
+	}
+
+	return SignatureKeyPair{
+		algorithmType: ED25519_SHA256,
+		ed25519KeyPair: &Ed25519KeyPair{
+			algorithmType: ED25519_SHA256,
+			publicKey:     ed25519PubKey,
+		},
+	}, nil
+}
+
 // NewDestinationFromMessage reads a destination from an I2CP message stream.
 // NOTE: This function supports Ed25519 destinations with KEY certificates only.
 // Legacy DSA destinations are no longer supported.
 func NewDestinationFromMessage(stream *Stream, crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
 
-	// Read encryption public key (256 bytes, first 32 are X25519)
-	_, err = stream.Read(dest.pubKey[:])
+	pubKey, signingKeyPadded, err := readDestinationKeys(stream)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read public key: %w", err)
+		return nil, err
 	}
+	dest.pubKey = pubKey
 
-	// Read signing public key (128 bytes for I2CP compatibility, but Ed25519 is only 32)
-	// The Ed25519 public key is right-aligned in the 128-byte field
-	signingKeyPadded := make([]byte, 128)
-	_, err = stream.Read(signingKeyPadded)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read signing key: %w", err)
-	}
-
-	// Read certificate
-	var cert Certificate
-	cert, err = NewCertificateFromMessage(stream)
+	cert, err := NewCertificateFromMessage(stream)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
 	dest.cert = &cert
 
-	// For Ed25519 (in KEY certificates), extract the 32-byte public key from right side
-	// Create a Ed25519KeyPair with just the public key for verification
-	if cert.certType == CERTIFICATE_KEY {
-		// Extract Ed25519 public key (last 32 bytes of the 128-byte field)
-		ed25519PubKeyBytes := signingKeyPadded[96:128]
-
-		// Create public key using crypto package
-		ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(ed25519PubKeyBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Ed25519 public key: %w", err)
-		}
-
-		dest.sgk = SignatureKeyPair{
-			algorithmType: ED25519_SHA256,
-			ed25519KeyPair: &Ed25519KeyPair{
-				algorithmType: ED25519_SHA256,
-				publicKey:     ed25519PubKey,
-			},
-		}
-	} else {
+	if cert.certType != CERTIFICATE_KEY {
 		return nil, fmt.Errorf("unsupported certificate type: %d (only KEY certificates with Ed25519 supported)", cert.certType)
+	}
+
+	dest.sgk, err = createEd25519SigningKeyPair(signingKeyPadded)
+	if err != nil {
+		return nil, err
 	}
 
 	dest.generateB32()
