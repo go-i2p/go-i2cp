@@ -1,13 +1,29 @@
 package go_i2cp
 
+// I2CP Protocol Constants
+//
+// This file contains constants defined by the I2CP specification for the
+// I2P Control Protocol. I2CP is a lower-level protocol for managing sessions,
+// leases, and message routing between I2P clients and routers.
+//
+// Note: This library focuses solely on I2CP. Higher-level application protocols
+// such as streaming (protocol 6) and datagram (protocol 17/18) are intentionally
+// NOT defined here as they are built on top of I2CP, not part of the I2CP spec.
+// Applications using I2CP can define their own protocol identifiers as needed.
+
 // I2CP Client Constants
 // Moved from: client.go
 const (
-	I2CP_CLIENT_VERSION                = "0.9.33"
-	I2CP_PROTOCOL_INIT           uint8 = 0x2a
-	I2CP_MESSAGE_SIZE                  = 0xffff
-	I2CP_MAX_SESSIONS                  = 0xffff
-	I2CP_MAX_SESSIONS_PER_CLIENT       = 32
+	I2CP_CLIENT_VERSION                 = "0.9.33"
+	I2CP_PROTOCOL_INIT            uint8 = 0x2a
+	I2CP_MESSAGE_SIZE                   = 0xffff
+	I2CP_MAX_MESSAGE_PAYLOAD_SIZE       = 65536 // 64KB max payload per I2CP spec (spec says "about 64 KB")
+	I2CP_SAFE_MESSAGE_SIZE              = 64000 // Conservative limit for universal router compatibility
+	I2CP_MAX_SESSIONS                   = 0xffff
+	I2CP_MAX_SESSIONS_PER_CLIENT        = 32
+	// Session ID 0xFFFF is reserved per I2CP spec for "no session" operations
+	// Used for hostname lookups and other operations that don't require a session
+	I2CP_SESSION_ID_NONE uint16 = 0xFFFF
 )
 
 // I2CP Message Type Constants
@@ -43,12 +59,19 @@ const (
 
 // Authentication Method Constants
 // per I2CP specification for protocol initialization and authentication
+//
+// Support Status in go-i2cp:
+//   - AUTH_METHOD_NONE (0):           ✅ Fully supported
+//   - AUTH_METHOD_USERNAME_PWD (1):   ✅ Fully supported (via i2cp.username, i2cp.password)
+//   - AUTH_METHOD_SSL_TLS (2):        ✅ Fully supported (via i2cp.SSL configuration)
+//   - AUTH_METHOD_PER_CLIENT_DH (3):  ❌ Not yet implemented (planned for Phase 4)
+//   - AUTH_METHOD_PER_CLIENT_PSK (4): ❌ Not yet implemented (planned for Phase 4)
 const (
 	AUTH_METHOD_NONE           uint8 = 0 // No authentication required
 	AUTH_METHOD_USERNAME_PWD   uint8 = 1 // Username/password authentication (0.9.11+)
 	AUTH_METHOD_SSL_TLS        uint8 = 2 // SSL/TLS certificate authentication (0.8.3+)
-	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH authentication (0.9.41+)
-	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+)
+	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH authentication (0.9.41+) - NOT IMPLEMENTED
+	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+) - NOT IMPLEMENTED
 )
 
 // HostReply Error Codes (I2CP Proposal 167)
@@ -75,6 +98,20 @@ const (
 
 // Blinding Authentication Scheme Constants
 // per I2CP specification for BlindingInfoMessage authentication
+//
+// Blinding is used for encrypted LeaseSet access (I2CP 0.9.43+).
+// When a router sends BlindingInfo to a client, it indicates the authentication
+// scheme and parameters required to access an encrypted LeaseSet.
+//
+// Support Status in go-i2cp:
+//   - BLINDING_AUTH_SCHEME_DH (0):  ⚠️  Partial (storage only, crypto pending Phase 4)
+//   - BLINDING_AUTH_SCHEME_PSK (1): ⚠️  Partial (storage only, crypto pending Phase 4)
+//
+// Blinding workflow:
+//  1. Router sends BlindingInfoMessage with scheme, flags, and parameters
+//  2. Client stores blinding info in session (via SetBlindingInfo)
+//  3. Client uses blinding parameters when creating encrypted LeaseSet2
+//  4. Encrypted LeaseSet2 requires password or key for access
 const (
 	BLINDING_AUTH_SCHEME_DH  uint8 = 0 // Diffie-Hellman authentication
 	BLINDING_AUTH_SCHEME_PSK uint8 = 1 // Pre-Shared Key authentication
@@ -84,35 +121,31 @@ const (
 // Moved from: client.go
 const ROUTER_CAN_HOST_LOOKUP uint32 = 1
 
-// Protocol Constants
-// Moved from: client.go
+// Host Lookup Type Constants (I2CP § HostLookupMessage)
+// Per I2CP 0.9.11+, extended in 0.9.66 with options mappings (Proposal 167 - Service Records)
 const (
-	PROTOCOL_STREAMING    = 6
-	PROTOCOL_DATAGRAM     = 17
-	PROTOCOL_RAW_DATAGRAM = 18
-)
-
-// Host Lookup Type Constants
-// Moved from: client.go
-const (
-	HOST_LOOKUP_TYPE_HASH = iota
-	HOST_LOOKUP_TYPE_HOST = iota
+	HOST_LOOKUP_TYPE_HASH                  = 0 // Basic hash lookup (since 0.9.11)
+	HOST_LOOKUP_TYPE_HOSTNAME              = 1 // Basic hostname lookup (since 0.9.11)
+	HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS     = 2 // Hash + LeaseSet options mapping (since 0.9.66)
+	HOST_LOOKUP_TYPE_HOSTNAME_WITH_OPTIONS = 3 // Hostname + LeaseSet options mapping (since 0.9.66)
+	HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS     = 4 // Destination + LeaseSet options mapping (since 0.9.66)
 )
 
 // Certificate Type Constants
 // Moved from: certificate.go
 const (
-	CERTIFICATE_NULL     uint8 = iota
-	CERTIFICATE_HASHCASH uint8 = iota
-	CERTIFICATE_SIGNED   uint8 = iota
-	CERTIFICATE_MULTIPLE uint8 = iota
+	CERTIFICATE_NULL     uint8 = 0
+	CERTIFICATE_HASHCASH uint8 = 1
+	CERTIFICATE_SIGNED   uint8 = 2
+	CERTIFICATE_MULTIPLE uint8 = 3
+	CERTIFICATE_KEY      uint8 = 5
 )
 
 // Destination Size Constants
 // Moved from: destination.go
 const (
 	PUB_KEY_SIZE = 256
-	DIGEST_SIZE  = 40
+	DIGEST_SIZE  = 32 // SHA-256 digest size for Ed25519
 	DEST_SIZE    = 4096
 )
 
@@ -125,9 +158,8 @@ const (
 
 // Signature Algorithm Constants
 // Moved from: crypto.go
+// Modern I2CP uses Ed25519 (type 7) exclusively
 const (
-	DSA_SHA1       uint32 = iota
-	DSA_SHA256     uint32 = iota
 	ED25519_SHA256 uint32 = 7
 )
 
@@ -140,7 +172,7 @@ const (
 
 // Key Exchange Algorithm Constants
 const (
-	X25519 uint32 = 3
+	X25519 uint32 = 4
 )
 
 // Encryption Algorithm Constants
@@ -148,9 +180,19 @@ const (
 	CHACHA20_POLY1305 uint32 = 4
 )
 
-// TLS Constants
-// Moved from: tcp.go
-const USE_TLS = false
+// TLS Configuration
+//
+// TLS support is controlled via client properties, not a global constant.
+// The legacy USE_TLS constant has been removed in favor of per-client configuration.
+//
+// To enable TLS, set these client properties:
+//   - i2cp.SSL="true"                  // Enable TLS connection to router
+//   - i2cp.SSL.certFile="path/to/cert" // Client certificate (optional)
+//   - i2cp.SSL.keyFile="path/to/key"   // Client private key (optional)
+//   - i2cp.SSL.caFile="path/to/ca"     // CA certificate (optional, system pool used as fallback)
+//   - i2cp.SSL.insecure="false"        // Skip certificate verification (DEV ONLY, default: false)
+//
+// For details, see client.go SetProperty() and tcp.go SetupTLS().
 
 // Logger Level Constants
 // Moved from: logger.go
@@ -230,13 +272,86 @@ const (
 // DEPRECATED: Use uint8 MSG_STATUS_* constants directly
 type SessionMessageStatus = uint8
 
+// IsMessageStatusSuccess returns true if the message status indicates successful delivery.
+// Success statuses include accepted, best-effort success, guaranteed success, and local success.
+func IsMessageStatusSuccess(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_ACCEPTED,
+		MSG_STATUS_BEST_EFFORT_SUCCESS,
+		MSG_STATUS_GUARANTEED_SUCCESS,
+		MSG_STATUS_LOCAL_SUCCESS:
+		return true
+	}
+	return false
+}
+
+// IsMessageStatusFailure returns true if the message status indicates a delivery failure.
+// This includes all failure codes except transient/retriable failures.
+func IsMessageStatusFailure(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_BEST_EFFORT_FAILURE,
+		MSG_STATUS_GUARANTEED_FAILURE,
+		MSG_STATUS_LOCAL_FAILURE,
+		MSG_STATUS_ROUTER_FAILURE,
+		MSG_STATUS_BAD_SESSION,
+		MSG_STATUS_BAD_MESSAGE,
+		MSG_STATUS_MESSAGE_EXPIRED,
+		MSG_STATUS_BAD_LOCAL_LEASESET,
+		MSG_STATUS_UNSUPPORTED_ENCRYPTION,
+		MSG_STATUS_BAD_DESTINATION,
+		MSG_STATUS_BAD_LEASESET,
+		MSG_STATUS_EXPIRED_LEASESET,
+		MSG_STATUS_NO_LEASESET,
+		MSG_STATUS_SEND_BEST_EFFORT_FAILURE,
+		MSG_STATUS_LOOPBACK_DENIED:
+		return true
+	}
+	return false
+}
+
+// IsMessageStatusRetriable returns true if the message status indicates a transient failure
+// that may succeed if retried later. This includes queue overflow, network failures,
+// and temporary tunnel unavailability.
+func IsMessageStatusRetriable(status SessionMessageStatus) bool {
+	switch status {
+	case MSG_STATUS_OVERFLOW_FAILURE, // Queue full - retry later
+		MSG_STATUS_NO_LOCAL_TUNNELS, // Tunnels building - retry
+		MSG_STATUS_NETWORK_FAILURE:  // Transient network error
+		return true
+	}
+	return false
+}
+
+// GetMessageStatusCategory returns a human-readable category for the message status.
+// Categories: "success", "failure", "retriable", "pending", or "unknown"
+func GetMessageStatusCategory(status SessionMessageStatus) string {
+	if IsMessageStatusSuccess(status) {
+		return "success"
+	}
+	if IsMessageStatusRetriable(status) {
+		return "retriable"
+	}
+	if IsMessageStatusFailure(status) {
+		return "failure"
+	}
+	if status == MSG_STATUS_AVAILABLE {
+		return "pending" // Deprecated status
+	}
+	if status == MSG_STATUS_META_LEASESET {
+		return "meta" // Special status for MetaLeaseSet
+	}
+	return "unknown"
+}
+
 // Session Status Constants
-// Moved from: session.go
+// I2CP specification: SessionStatusMessage (type 20) status field values
+// Based on Java I2P reference implementation and observed router behavior
 type SessionStatus int
 
 const (
-	I2CP_SESSION_STATUS_DESTROYED SessionStatus = iota
-	I2CP_SESSION_STATUS_CREATED
-	I2CP_SESSION_STATUS_UPDATED
-	I2CP_SESSION_STATUS_INVALID
+	I2CP_SESSION_STATUS_CREATED   SessionStatus = iota // 0 - Session created successfully
+	I2CP_SESSION_STATUS_DESTROYED                      // 1 - Session destroyed
+	I2CP_SESSION_STATUS_UPDATED                        // 2 - Session configuration updated
+	I2CP_SESSION_STATUS_INVALID                        // 3 - Session invalid (see errors.go: ErrSessionInvalid)
+	I2CP_SESSION_STATUS_REFUSED                        // 4 - Session creation refused (0.9.12+, see errors.go: ErrSessionRefused)
 )

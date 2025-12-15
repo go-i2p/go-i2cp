@@ -11,13 +11,13 @@ func TestNewSession(t *testing.T) {
 
 	// Define test callbacks
 	callbacks := SessionCallbacks{
-		onDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
+		OnDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
 			// Mock callback for testing
 		},
-		onStatus: func(session *Session, status SessionStatus) {
+		OnStatus: func(session *Session, status SessionStatus) {
 			// Mock callback for testing
 		},
-		onMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			// Mock callback for testing
 		},
 	}
@@ -84,7 +84,8 @@ func TestSessionSendMessage(t *testing.T) {
 	payload := NewStream([]byte("test message"))
 
 	// Test message sending (should not panic)
-	session.SendMessage(testDest, PROTOCOL_STREAMING, 1234, 5678, payload, 123456)
+	// Using protocol=6 as test value (not I2CP-defined, represents application-level protocol)
+	session.SendMessage(testDest, 6, 1234, 5678, payload, 123456)
 
 	// Verify no immediate errors (actual sending requires router connection)
 }
@@ -98,10 +99,12 @@ func TestSessionDispatchMessage(t *testing.T) {
 	var receivedProtocol uint8
 	var receivedSrcPort, receivedDestPort uint16
 	var receivedPayload *Stream
+	var receivedSrcDest *Destination
 
 	callbacks := SessionCallbacks{
-		onMessage: func(session *Session, protocol uint8, srcPort, destPort uint16, payload *Stream) {
+		OnMessage: func(session *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			callbackInvoked = true
+			receivedSrcDest = srcDest
 			receivedProtocol = protocol
 			receivedSrcPort = srcPort
 			receivedDestPort = destPort
@@ -112,16 +115,24 @@ func TestSessionDispatchMessage(t *testing.T) {
 	session := NewSession(client, callbacks)
 
 	// Test message dispatch
+	// Using protocol=17 as test value (not I2CP-defined, represents application-level protocol)
+	const testProtocol uint8 = 17
 	testPayload := NewStream([]byte("test payload"))
-	session.dispatchMessage(PROTOCOL_DATAGRAM, 1111, 2222, testPayload)
+	// Create a test source destination
+	testSrcDest, _ := NewDestination(client.crypto)
+	session.dispatchMessage(testSrcDest, testProtocol, 1111, 2222, testPayload)
 
 	// Verify callback was invoked with correct parameters
 	if !callbackInvoked {
 		t.Error("Message callback was not invoked")
 	}
 
-	if receivedProtocol != PROTOCOL_DATAGRAM {
-		t.Errorf("Expected protocol %d, got %d", PROTOCOL_DATAGRAM, receivedProtocol)
+	if receivedSrcDest != testSrcDest {
+		t.Error("Received source destination does not match sent source destination")
+	}
+
+	if receivedProtocol != testProtocol {
+		t.Errorf("Expected protocol %d, got %d", testProtocol, receivedProtocol)
 	}
 
 	if receivedSrcPort != 1111 {
@@ -148,7 +159,7 @@ func TestSessionDispatchDestination(t *testing.T) {
 	var receivedDest *Destination
 
 	callbacks := SessionCallbacks{
-		onDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
+		OnDestination: func(session *Session, requestId uint32, address string, dest *Destination) {
 			callbackInvoked = true
 			receivedRequestId = requestId
 			receivedAddress = address
@@ -194,7 +205,7 @@ func TestSessionDispatchStatus(t *testing.T) {
 	var receivedStatus SessionStatus
 
 	callbacks := SessionCallbacks{
-		onStatus: func(session *Session, status SessionStatus) {
+		OnStatus: func(session *Session, status SessionStatus) {
 			callbackInvoked = true
 			receivedStatus = status
 		},
@@ -233,7 +244,9 @@ func TestSessionWithNilCallbacks(t *testing.T) {
 	testPayload := NewStream([]byte("test"))
 
 	// These should not panic even with nil callbacks
-	session.dispatchMessage(PROTOCOL_STREAMING, 1, 2, testPayload)
+	// Using protocol=6 as test value (not I2CP-defined, represents application-level protocol)
+	testSrcDest, _ := NewDestination(client.crypto)
+	session.dispatchMessage(testSrcDest, 6, 1, 2, testPayload)
 	session.dispatchDestination(1, "test", nil)
 	session.dispatchStatus(I2CP_SESSION_STATUS_CREATED)
 }

@@ -96,12 +96,22 @@ var (
 	ErrBlindingRequired = errors.New("i2cp: blinding info required for encrypted leaseset")
 
 	// ErrUnsupportedCrypto indicates an unsupported cryptographic algorithm was encountered.
-	// The library supports DSA, ECDSA, EdDSA, ElGamal, and ECIES-X25519.
+	// The library supports Ed25519 signatures, X25519 key exchange, and ChaCha20-Poly1305 AEAD.
 	ErrUnsupportedCrypto = errors.New("i2cp: unsupported cryptographic algorithm")
 
 	// ErrInvalidSignature indicates a cryptographic signature verification failed.
 	// This typically indicates data corruption or a security issue.
 	ErrInvalidSignature = errors.New("i2cp: invalid signature")
+
+	// ErrOfflineSignatureExpired indicates an offline signature has expired.
+	// Offline signatures have an expiration timestamp and must be rejected after expiry.
+	// I2CP spec: LeaseSet2 § Offline Signatures
+	ErrOfflineSignatureExpired = errors.New("i2cp: offline signature expired")
+
+	// ErrOfflineSignatureInvalid indicates offline signature cryptographic verification failed.
+	// The signature over [signingKey||expires||transientKey] did not match.
+	// I2CP spec: LeaseSet2 § Offline Signatures
+	ErrOfflineSignatureInvalid = errors.New("i2cp: offline signature verification failed")
 
 	// ErrMaxSessionsReached indicates the maximum number of sessions per client has been reached.
 	// I2CP spec: Maximum sessions per client is defined by I2CP_MAX_SESSIONS_PER_CLIENT
@@ -110,6 +120,20 @@ var (
 	// ErrClientClosed indicates an operation was attempted on a closed client.
 	// All operations will fail after Close() has been called.
 	ErrClientClosed = errors.New("i2cp: client is closed")
+
+	// ErrClientNotInitialized indicates an operation was attempted on an uninitialized client.
+	// Clients must be created using NewClient() to ensure proper initialization.
+	// Zero-value Client{} instances are not safe to use.
+	ErrClientNotInitialized = errors.New("i2cp: client not initialized (use NewClient)")
+
+	// ErrSessionNotInitialized indicates an operation was attempted on an uninitialized session.
+	// Sessions must be created using NewSession() or NewSessionWithContext() to ensure proper initialization.
+	// Zero-value Session{} instances are not safe to use.
+	ErrSessionNotInitialized = errors.New("i2cp: session not initialized (use NewSession)")
+
+	// ErrInvalidArgument indicates a nil or invalid argument was passed to a public API method.
+	// All public methods validate their parameters and return this error for nil values.
+	ErrInvalidArgument = errors.New("i2cp: invalid argument (nil or empty value)")
 )
 
 // MessageError represents an error related to I2CP message processing.

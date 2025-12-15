@@ -127,52 +127,81 @@ func backgroundProcessing() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err := client.Connect(ctx)
-	if err != nil {
-		log.Printf("Connect failed: %v", err)
+	if err := setupClientAndSession(ctx, client); err != nil {
 		return
 	}
 	defer client.Close()
 
-	// Create session with empty callbacks
-	session := i2cp.NewSession(client, i2cp.SessionCallbacks{})
-
-	err = client.CreateSession(ctx, session)
-	if err != nil {
-		log.Printf("Session creation failed: %v", err)
-		return
-	}
-
-	// Process I/O in background with context cancellation support
-	go func() {
-		for {
-			err := client.ProcessIO(ctx)
-			if err != nil {
-				if err == i2cp.ErrClientClosed {
-					log.Println("Client closed, stopping I/O processing")
-					return
-				}
-				if err == context.Canceled || err == context.DeadlineExceeded {
-					log.Printf("Context cancelled: %v", err)
-					return
-				}
-				log.Printf("ProcessIO error: %v", err)
-			}
-
-			// Small delay to prevent busy loop
-			time.Sleep(100 * time.Millisecond)
-
-			// Check if context is done
-			select {
-			case <-ctx.Done():
-				log.Println("Context done, stopping processing")
-				return
-			default:
-			}
-		}
-	}()
+	startBackgroundIOProcessor(ctx, client)
 
 	// Simulate some work
 	time.Sleep(2 * time.Second)
 	fmt.Println("Background processing completed")
+}
+
+// setupClientAndSession establishes a client connection and creates a session.
+// Returns an error if either the connection or session creation fails.
+func setupClientAndSession(ctx context.Context, client *i2cp.Client) error {
+	err := client.Connect(ctx)
+	if err != nil {
+		log.Printf("Connect failed: %v", err)
+		return err
+	}
+
+	session := i2cp.NewSession(client, i2cp.SessionCallbacks{})
+	err = client.CreateSession(ctx, session)
+	if err != nil {
+		log.Printf("Session creation failed: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// startBackgroundIOProcessor launches a goroutine that continuously processes I/O
+// operations until the context is cancelled or the client is closed.
+func startBackgroundIOProcessor(ctx context.Context, client *i2cp.Client) {
+	go func() {
+		for {
+			if shouldStopProcessing(ctx, client) {
+				return
+			}
+
+			// Small delay to prevent busy loop
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+}
+
+// shouldStopProcessing attempts to process I/O and determines if processing should stop.
+// Returns true if the client is closed, context is cancelled, or context check fails.
+func shouldStopProcessing(ctx context.Context, client *i2cp.Client) bool {
+	err := client.ProcessIO(ctx)
+	if err != nil {
+		return handleProcessIOError(err)
+	}
+
+	// Check if context is done
+	select {
+	case <-ctx.Done():
+		log.Println("Context done, stopping processing")
+		return true
+	default:
+		return false
+	}
+}
+
+// handleProcessIOError handles errors from ProcessIO operations.
+// Returns true if processing should stop, false otherwise.
+func handleProcessIOError(err error) bool {
+	if err == i2cp.ErrClientClosed {
+		log.Println("Client closed, stopping I/O processing")
+		return true
+	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		log.Printf("Context cancelled: %v", err)
+		return true
+	}
+	log.Printf("ProcessIO error: %v", err)
+	return false
 }

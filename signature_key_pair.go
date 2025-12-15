@@ -2,13 +2,10 @@
 // Moved from: crypto.go
 package go_i2cp
 
-import (
-	"crypto/dsa"
-)
-
-// SignatureKeyPair represents a DSA signature key pair
+// SignatureKeyPair represents an Ed25519 signature key pair.
+// This struct is maintained for backward compatibility.
+// New code should use Ed25519KeyPair directly.
 type SignatureKeyPair struct {
-	algorithmType uint32
-	pub           dsa.PublicKey
-	priv          dsa.PrivateKey
+	algorithmType  uint32
+	ed25519KeyPair *Ed25519KeyPair // Ed25519 keypair for modern signatures
 }

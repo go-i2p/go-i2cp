@@ -116,7 +116,7 @@ func TestOnMsgDisconnectErrorHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &Client{
 				callbacks: &ClientCallBacks{
-					onDisconnect: func(c *Client, reason string, data *interface{}) {
+					OnDisconnect: func(c *Client, reason string, data *interface{}) {
 						t.Logf("Disconnect callback called with reason: %s", reason)
 					},
 				},
@@ -233,14 +233,14 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 	}{
 		{
 			name:            "invalid b32 address - decode fails",
-			address:         "invalid-b32-address!@#$%^&*().b32.i2p",
+			address:         "invalid!@#$%^&*invalid!@#$%^&*invalid!@#$%^&*invalid!@#$.b32.i2p", // 56 chars + .b32.i2p but invalid base32
 			mockDecodeError: true,
 			wantRequestId:   0, // Should return 0 on decode failure
 			description:     "Should return 0 and log warning when b32 decode fails",
 		},
 		{
 			name:            "valid b32 address format",
-			address:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.b32.i2p",
+			address:         "cekpd6d32cnpou7dmib4lraea5lzxhfnfd4qmpjjs2wbqh3tl6xa====.b32.i2p", // Valid base32-encoded 32-byte hash (56 chars with padding) + .b32.i2p
 			mockDecodeError: false,
 			wantRequestId:   1, // Should return valid request ID
 			description:     "Should handle valid b32 address",
@@ -263,14 +263,6 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 			session := &Session{
 				id:        1,
 				callbacks: &SessionCallbacks{},
-			}
-
-			// Create mock crypto that can simulate decode errors
-			if tt.mockDecodeError {
-				client.crypto = &Crypto{
-					// This would need to be implemented to return specific errors
-					// For now, we'll test the actual implementation
-				}
 			}
 
 			requestId, err := client.DestinationLookup(context.Background(), session, tt.address)
