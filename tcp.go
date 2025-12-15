@@ -87,50 +87,81 @@ func (tcp *Tcp) SetupTLS(certFile, keyFile, caFile string, insecure bool) error 
 		MinVersion: tls.VersionTLS12, // I2CP requires TLS 1.2+ for security
 	}
 
-	// Load client certificate if provided (for mutual TLS authentication)
-	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return fmt.Errorf("failed to load client certificate: %w", err)
-		}
-		tcp.tlsConfig.Certificates = []tls.Certificate{cert}
-		Debug("Loaded client certificate from %s", certFile)
+	if err := tcp.loadClientCertificate(certFile, keyFile); err != nil {
+		return err
 	}
 
-	// Load CA certificate if provided (for server certificate validation)
+	if err := tcp.loadCACertificate(caFile); err != nil {
+		return err
+	}
+
+	tcp.configureInsecureMode(insecure)
+	return nil
+}
+
+// loadClientCertificate loads client certificate and key for mutual TLS authentication.
+func (tcp *Tcp) loadClientCertificate(certFile, keyFile string) error {
+	if certFile == "" || keyFile == "" {
+		return nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load client certificate: %w", err)
+	}
+
+	tcp.tlsConfig.Certificates = []tls.Certificate{cert}
+	Debug("Loaded client certificate from %s", certFile)
+	return nil
+}
+
+// loadCACertificate loads CA certificate for server validation or uses system CA pool.
+func (tcp *Tcp) loadCACertificate(caFile string) error {
 	if caFile != "" {
-		caCert, err := os.ReadFile(caFile)
-		if err != nil {
-			return fmt.Errorf("failed to read CA certificate: %w", err)
-		}
+		return tcp.loadCustomCA(caFile)
+	}
+	return tcp.loadSystemCA()
+}
 
-		caPool := x509.NewCertPool()
-		if !caPool.AppendCertsFromPEM(caCert) {
-			return fmt.Errorf("failed to parse CA certificate from %s", caFile)
-		}
-		tcp.tlsConfig.RootCAs = caPool
-		Debug("Loaded CA certificate from %s", caFile)
-	} else {
-		// Use system CA pool if no custom CA provided
-		if roots, err := x509.SystemCertPool(); err == nil {
-			tcp.tlsConfig.RootCAs = roots
-			Debug("Using system CA certificate pool")
-		} else {
-			Warning("Failed to load system CA pool: %v", err)
-			// Create empty pool as fallback
-			tcp.tlsConfig.RootCAs = x509.NewCertPool()
-		}
+// loadCustomCA loads and configures a custom CA certificate from file.
+func (tcp *Tcp) loadCustomCA(caFile string) error {
+	caCert, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("failed to read CA certificate: %w", err)
 	}
 
-	// Configure insecure mode (development/testing only)
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caCert) {
+		return fmt.Errorf("failed to parse CA certificate from %s", caFile)
+	}
+
+	tcp.tlsConfig.RootCAs = caPool
+	Debug("Loaded CA certificate from %s", caFile)
+	return nil
+}
+
+// loadSystemCA configures the system CA certificate pool.
+func (tcp *Tcp) loadSystemCA() error {
+	roots, err := x509.SystemCertPool()
+	if err == nil {
+		tcp.tlsConfig.RootCAs = roots
+		Debug("Using system CA certificate pool")
+		return nil
+	}
+
+	Warning("Failed to load system CA pool: %v", err)
+	tcp.tlsConfig.RootCAs = x509.NewCertPool()
+	return nil
+}
+
+// configureInsecureMode sets TLS certificate verification mode.
+func (tcp *Tcp) configureInsecureMode(insecure bool) {
 	if insecure {
 		Warning("TLS certificate verification DISABLED - insecure mode active")
 		tcp.tlsConfig.InsecureSkipVerify = true
 	} else {
 		tcp.tlsConfig.InsecureSkipVerify = false
 	}
-
-	return nil
 }
 
 // Connect establishes a TCP or TLS connection to the I2P router.
