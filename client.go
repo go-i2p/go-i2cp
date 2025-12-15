@@ -1376,43 +1376,55 @@ func (c *Client) onMsgReconfigureSession(stream *Stream) {
 // onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
 // per I2CP specification 0.9.43+ - encrypted LeaseSet blinding parameters
 func (c *Client) onMsgBlindingInfo(stream *Stream) {
-	var err error
-	var sessionId uint16
-	var authScheme uint8
-	var flags uint16
-
 	Debug("Received BlindingInfoMessage")
 
-	// Read session ID
+	sessionId, authScheme, flags, blindingParams, err := c.readBlindingInfoFields(stream)
+	if err != nil {
+		return
+	}
+
+	Debug("BlindingInfo for session %d: scheme %d, flags 0x%04x, params %d bytes",
+		sessionId, authScheme, flags, len(blindingParams))
+
+	session, ok := c.findSession(sessionId)
+	if !ok {
+		Error("Session with id %d doesn't exist for BlindingInfoMessage", sessionId)
+		return
+	}
+
+	c.storeBlindingInfo(session, authScheme, flags, blindingParams)
+	session.dispatchBlindingInfo(uint16(authScheme), flags, blindingParams)
+
+	Debug("BlindingInfo callback not yet implemented")
+}
+
+// readBlindingInfoFields reads all fields from a BlindingInfoMessage stream.
+func (c *Client) readBlindingInfoFields(stream *Stream) (sessionId uint16, authScheme uint8, flags uint16, blindingParams []byte, err error) {
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
 		Error("Failed to read session ID from BlindingInfoMessage: %v", err)
 		return
 	}
 
-	// Read authentication scheme
 	authScheme, err = stream.ReadByte()
 	if err != nil {
 		Error("Failed to read auth scheme from BlindingInfoMessage: %v", err)
 		return
 	}
 
-	// Read flags
 	flags, err = stream.ReadUint16()
 	if err != nil {
 		Error("Failed to read flags from BlindingInfoMessage: %v", err)
 		return
 	}
 
-	// Read blinding parameter length
 	paramLen, err := stream.ReadUint16()
 	if err != nil {
 		Error("Failed to read param length from BlindingInfoMessage: %v", err)
 		return
 	}
 
-	// Read blinding parameters
-	blindingParams := make([]byte, paramLen)
+	blindingParams = make([]byte, paramLen)
 	n, err := stream.Read(blindingParams)
 	if err != nil || n != int(paramLen) {
 		if err == nil {
@@ -1422,30 +1434,23 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 		return
 	}
 
-	Debug("BlindingInfo for session %d: scheme %d, flags 0x%04x, params %d bytes",
-		sessionId, authScheme, flags, paramLen)
+	return
+}
 
-	// Find session with proper locking
+// findSession retrieves a session by ID with proper locking.
+func (c *Client) findSession(sessionId uint16) (*Session, bool) {
 	c.lock.Lock()
+	defer c.lock.Unlock()
 	session, ok := c.sessions[sessionId]
-	c.lock.Unlock()
+	return session, ok
+}
 
-	if !ok {
-		Error("Session with id %d doesn't exist for BlindingInfoMessage", sessionId)
-		return
-	}
-
-	// Store blinding info in session
+// storeBlindingInfo stores blinding parameters in the session.
+func (c *Client) storeBlindingInfo(session *Session, authScheme uint8, flags uint16, blindingParams []byte) {
 	session.SetBlindingScheme(uint16(authScheme))
 	session.SetBlindingFlags(flags)
 	session.SetBlindingParams(blindingParams)
-
-	Debug("Blinding info stored for session %d: enabled=%v", sessionId, session.IsBlindingEnabled())
-
-	// Dispatch to session callback
-	session.dispatchBlindingInfo(uint16(authScheme), flags, blindingParams)
-
-	Debug("BlindingInfo callback not yet implemented")
+	Debug("Blinding info stored for session %d: enabled=%v", session.id, session.IsBlindingEnabled())
 }
 
 func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
@@ -1980,41 +1985,60 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
 	Debug("Sending SendMessageExpiresMessage")
 
-	// MAJOR FIX: Validate flags per I2CP spec § SendMessageExpiresMessage
-	// Bits 15-11 must be zero (reserved)
+	if err := c.validateSendMessageFlags(flags); err != nil {
+		return err
+	}
+
+	compressedPayload, err := c.compressPayload(payload, protocol, srcPort, destPort)
+	if err != nil {
+		return err
+	}
+
+	c.buildSendMessageStream(sess, dest, compressedPayload, nonce, flags, expirationSeconds)
+
+	if err := c.validateMessageSize(compressedPayload.Len()); err != nil {
+		return err
+	}
+
+	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
+		Error("Error while sending SendMessageExpiresMessage: %v", err)
+		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
+	}
+	return nil
+}
+
+// validateSendMessageFlags validates SendMessageExpires flags per I2CP specification.
+func (c *Client) validateSendMessageFlags(flags uint16) error {
 	const SEND_MSG_FLAGS_RESERVED_MASK uint16 = 0xF800
 	if flags&SEND_MSG_FLAGS_RESERVED_MASK != 0 {
 		return fmt.Errorf("invalid SendMessageExpires flags: reserved bits set (0x%04x)", flags)
 	}
 
-	// SPEC COMPLIANCE: Bits 10-9 are deprecated reliability override ("to be removed" per spec)
-	// Reject these rather than just warning, as spec indicates removal
 	const SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600
 	if flags&SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
 		return fmt.Errorf("deprecated reliability override flags (bits 10-9) no longer supported per I2CP spec")
 	}
 
-	// SPEC COMPLIANCE: Validate tag threshold (bits 7-4) - must be 0-15
 	tagThreshold := (flags >> 4) & 0x0F
 	if tagThreshold > 15 {
 		return fmt.Errorf("invalid tag threshold: %d (max 15)", tagThreshold)
 	}
 
-	// SPEC COMPLIANCE: Validate tag count (bits 3-0) - must be 0-15
 	tagCount := flags & 0x0F
 	if tagCount > 15 {
 		return fmt.Errorf("invalid tag count: %d (max 15)", tagCount)
 	}
 
-	// Log interpreted flag values for debugging
 	noLeaseSet := (flags & 0x0100) != 0
 	Debug("SendMessageExpires flags: noLeaseSet=%v, tagThreshold=%d, tagCount=%d",
 		noLeaseSet, tagThreshold, tagCount)
 
+	return nil
+}
+
+// compressPayload compresses the payload and adds protocol header information.
+func (c *Client) compressPayload(payload *Stream, protocol uint8, srcPort, destPort uint16) (*bytes.Buffer, error) {
 	out := &bytes.Buffer{}
-	c.messageStream.Reset()
-	c.messageStream.WriteUint16(sess.id)
-	dest.WriteToMessage(c.messageStream)
 	compress := gzip.NewWriter(out)
 	compress.Write(payload.Bytes())
 	compress.Close()
@@ -2022,27 +2046,31 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	binary.LittleEndian.PutUint16(header[4:6], srcPort)
 	binary.LittleEndian.PutUint16(header[6:8], destPort)
 	header[9] = protocol
-	c.messageStream.WriteUint32(uint32(out.Len()))
-	c.messageStream.Write(out.Bytes())
+	return out, nil
+}
+
+// buildSendMessageStream constructs the message stream for SendMessageExpires.
+func (c *Client) buildSendMessageStream(sess *Session, dest *Destination, compressedPayload *bytes.Buffer, nonce uint32, flags uint16, expirationSeconds uint64) {
+	c.messageStream.Reset()
+	c.messageStream.WriteUint16(sess.id)
+	dest.WriteToMessage(c.messageStream)
+	c.messageStream.WriteUint32(uint32(compressedPayload.Len()))
+	c.messageStream.Write(compressedPayload.Bytes())
 	c.messageStream.WriteUint32(nonce)
 	c.messageStream.WriteUint16(flags)
 	c.messageStream.WriteUint64(expirationSeconds)
+}
 
-	// Validate total message size per I2CP specification (max 64KB)
+// validateMessageSize validates the total message size against I2CP limits.
+func (c *Client) validateMessageSize(compressedSize int) error {
 	totalMessageSize := c.messageStream.Len()
 	if totalMessageSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
 		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
-			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
+			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, compressedSize)
 	}
-	// MINOR FIX: Warn if exceeding conservative size - spec says "about 64KB" (router-dependent)
 	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
 		Warning("SendMessageExpires size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
 			totalMessageSize, I2CP_SAFE_MESSAGE_SIZE, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
-	}
-
-	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
-		Error("Error while sending SendMessageExpiresMessage: %v", err)
-		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
 	}
 	return nil
 }
