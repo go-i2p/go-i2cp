@@ -2309,18 +2309,45 @@ func (c *Client) configureFastReceiveMode(sess *Session) {
 	}
 }
 
+// CreateSession creates a new I2CP session with the router.
+// This initiates session establishment which completes asynchronously via ProcessIO.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - sess: Session configuration and callbacks
+//
+// Returns error if validation fails or message cannot be sent.
+// Success is confirmed via OnStatus callback with I2CP_SESSION_STATUS_CREATED.
+//
+// I2CP Spec: CreateSessionMessage (type 1), I2CP 0.9.21+ for multi-session support
 func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
-	// Ensure client was properly initialized with NewClient()
+	if err := c.validateSessionCreationPrerequisites(ctx, sess); err != nil {
+		return err
+	}
+
+	if err := c.configureSessionProperties(sess); err != nil {
+		return err
+	}
+
+	if err := c.sendSessionCreationRequest(sess); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSessionCreationPrerequisites checks all preconditions required to create a session.
+// Returns an error if client is not initialized, session is nil, context is cancelled,
+// or maximum sessions limit is reached.
+func (c *Client) validateSessionCreationPrerequisites(ctx context.Context, sess *Session) error {
 	if err := c.ensureInitialized(); err != nil {
 		return err
 	}
 
-	// Validate parameters
 	if sess == nil {
 		return fmt.Errorf("session cannot be nil: %w", ErrInvalidArgument)
 	}
 
-	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before session creation: %w", err)
 	}
@@ -2330,8 +2357,12 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		return ErrMaxSessionsReached
 	}
 
-	// Multi-session support (I2CP 0.9.21+)
-	// If this is a subsession, validate router support and inherit primary configuration
+	return nil
+}
+
+// configureSessionProperties applies session configuration based on type and router capabilities.
+// Handles subsession configuration, fast receive mode, and message reliability settings.
+func (c *Client) configureSessionProperties(sess *Session) error {
 	if !sess.IsPrimary() {
 		if err := c.validateAndConfigureSubsession(sess); err != nil {
 			return err
@@ -2339,24 +2370,23 @@ func (c *Client) CreateSession(ctx context.Context, sess *Session) error {
 		disableSubsessionTunnels(sess)
 	}
 
-	// Configure fast receive mode based on router capabilities
 	c.configureFastReceiveMode(sess)
-
 	sess.config.SetProperty(SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY, "none")
 
-	err := c.msgCreateSession(sess.config, false)
-	if err != nil {
+	return nil
+}
+
+// sendSessionCreationRequest sends the CreateSession message to the router and updates metrics.
+// The session status response will be processed asynchronously by ProcessIO.
+func (c *Client) sendSessionCreationRequest(sess *Session) error {
+	if err := c.msgCreateSession(sess.config, false); err != nil {
 		return fmt.Errorf("failed to send CreateSession message: %w", err)
 	}
 
 	c.currentSession = sess
 
-	// NOTE: The SessionStatus response will be received and processed by ProcessIO.
-	// The session will be registered in onMsgSessionStatus when the router responds.
-	// The OnStatus callback will be invoked with I2CP_SESSION_STATUS_CREATED.
 	Debug("CreateSession message sent for session, awaiting response via ProcessIO")
 
-	// Update metrics for pending session
 	if c.metrics != nil {
 		c.lock.Lock()
 		c.metrics.SetActiveSessions(len(c.sessions))
