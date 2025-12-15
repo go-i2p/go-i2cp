@@ -410,3 +410,43 @@ func (dest *Destination) Base32() string {
 func (dest *Destination) Base64() string {
 	return dest.b64
 }
+
+// SigningKeyPair returns the Ed25519 signing key pair for this destination.
+// This provides access to both signing (with private key) and verification (with public key).
+// For verification-only use cases (without private key access), use SigningPublicKey() instead.
+//
+// Returns error if the destination has no Ed25519 keypair available.
+func (dest *Destination) SigningKeyPair() (*Ed25519KeyPair, error) {
+	if dest.sgk.ed25519KeyPair == nil {
+		return nil, fmt.Errorf("destination has no Ed25519 keypair")
+	}
+	return dest.sgk.ed25519KeyPair, nil
+}
+
+// SigningPublicKey returns the Ed25519 public key for signature verification.
+// This allows verification of signatures without needing the private key.
+// Returns nil if no Ed25519 keypair is available.
+func (dest *Destination) SigningPublicKey() *Ed25519KeyPair {
+	if dest.sgk.ed25519KeyPair != nil {
+		// Return a copy with only the public key (no private key)
+		return &Ed25519KeyPair{
+			algorithmType: dest.sgk.ed25519KeyPair.algorithmType,
+			publicKey:     dest.sgk.ed25519KeyPair.publicKey,
+			// privateKey is intentionally nil for verification-only use
+		}
+	}
+	return nil
+}
+
+// VerifySignature verifies a signature against the given message using this destination's
+// signing public key. This is useful for offline signature verification without access
+// to the private key.
+//
+// Returns true if the signature is valid, false otherwise.
+func (dest *Destination) VerifySignature(message, signature []byte) bool {
+	signingKey := dest.SigningPublicKey()
+	if signingKey == nil {
+		return false
+	}
+	return signingKey.Verify(message, signature)
+}
