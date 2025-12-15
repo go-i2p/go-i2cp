@@ -1456,41 +1456,77 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 
 // readBlindingInfoFields reads all fields from a BlindingInfoMessage stream.
 func (c *Client) readBlindingInfoFields(stream *Stream) (sessionId uint16, authScheme uint8, flags uint16, blindingParams []byte, err error) {
-	sessionId, err = stream.ReadUint16()
-	if err != nil {
-		Error("Failed to read session ID from BlindingInfoMessage: %v", err)
+	if sessionId, err = c.readBlindingSessionID(stream); err != nil {
 		return
 	}
 
-	authScheme, err = stream.ReadByte()
-	if err != nil {
-		Error("Failed to read auth scheme from BlindingInfoMessage: %v", err)
+	if authScheme, err = c.readBlindingAuthScheme(stream); err != nil {
 		return
 	}
 
-	flags, err = stream.ReadUint16()
-	if err != nil {
-		Error("Failed to read flags from BlindingInfoMessage: %v", err)
+	if flags, err = c.readBlindingFlags(stream); err != nil {
 		return
 	}
 
-	paramLen, err := stream.ReadUint16()
-	if err != nil {
-		Error("Failed to read param length from BlindingInfoMessage: %v", err)
-		return
-	}
-
-	blindingParams = make([]byte, paramLen)
-	n, err := stream.Read(blindingParams)
-	if err != nil || n != int(paramLen) {
-		if err == nil {
-			err = fmt.Errorf("expected %d bytes, got %d", paramLen, n)
-		}
-		Error("Failed to read blinding params from BlindingInfoMessage: %v", err)
+	if blindingParams, err = c.readBlindingParams(stream); err != nil {
 		return
 	}
 
 	return
+}
+
+// readBlindingSessionID reads the session ID from a BlindingInfoMessage stream.
+func (c *Client) readBlindingSessionID(stream *Stream) (uint16, error) {
+	sessionId, err := stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read session ID from BlindingInfoMessage: %v", err)
+		return 0, err
+	}
+	return sessionId, nil
+}
+
+// readBlindingAuthScheme reads the authentication scheme from a BlindingInfoMessage stream.
+func (c *Client) readBlindingAuthScheme(stream *Stream) (uint8, error) {
+	authScheme, err := stream.ReadByte()
+	if err != nil {
+		Error("Failed to read auth scheme from BlindingInfoMessage: %v", err)
+		return 0, err
+	}
+	return authScheme, nil
+}
+
+// readBlindingFlags reads the flags from a BlindingInfoMessage stream.
+func (c *Client) readBlindingFlags(stream *Stream) (uint16, error) {
+	flags, err := stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read flags from BlindingInfoMessage: %v", err)
+		return 0, err
+	}
+	return flags, nil
+}
+
+// readBlindingParams reads the blinding parameters from a BlindingInfoMessage stream.
+func (c *Client) readBlindingParams(stream *Stream) ([]byte, error) {
+	paramLen, err := stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read param length from BlindingInfoMessage: %v", err)
+		return nil, err
+	}
+
+	blindingParams := make([]byte, paramLen)
+	n, err := stream.Read(blindingParams)
+	if err != nil {
+		Error("Failed to read blinding params from BlindingInfoMessage: %v", err)
+		return nil, err
+	}
+
+	if n != int(paramLen) {
+		err = fmt.Errorf("expected %d bytes, got %d", paramLen, n)
+		Error("Failed to read blinding params from BlindingInfoMessage: %v", err)
+		return nil, err
+	}
+
+	return blindingParams, nil
 }
 
 // findSession retrieves a session by ID with proper locking.
