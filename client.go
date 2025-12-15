@@ -711,50 +711,62 @@ func (c *Client) dispatchPayload(session *Session, srcDest *Destination, payload
 	session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
 }
 
-func (c *Client) onMsgStatus(stream *Stream) {
-	var status uint8
-	var sessionId uint16
-	var messageId, size, nonce uint32
-	var err error
-	Debug("Received MessageStatus message")
-	sessionId, err = stream.ReadUint16()
+// readMessageStatusFields reads all fields from a MessageStatus message.
+// Returns sessionId, messageId, status, size, nonce, and any error encountered.
+func readMessageStatusFields(stream *Stream) (uint16, uint32, uint8, uint32, uint32, error) {
+	sessionId, err := stream.ReadUint16()
 	if err != nil {
-		Error("Failed to read session ID from MessageStatus: %v", err)
-		return
+		return 0, 0, 0, 0, 0, fmt.Errorf("failed to read session ID from MessageStatus: %w", err)
 	}
-	messageId, err = stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read message ID from MessageStatus: %v", err)
-		return
-	}
-	status, err = stream.ReadByte()
-	if err != nil {
-		Error("Failed to read status from MessageStatus: %v", err)
-		return
-	}
-	size, err = stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read size from MessageStatus: %v", err)
-		return
-	}
-	nonce, err = stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read nonce from MessageStatus: %v", err)
-		return
-	}
-	Debug("Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
 
-	// Find session and dispatch status if available
+	messageId, err := stream.ReadUint32()
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("failed to read message ID from MessageStatus: %w", err)
+	}
+
+	status, err := stream.ReadByte()
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("failed to read status from MessageStatus: %w", err)
+	}
+
+	size, err := stream.ReadUint32()
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("failed to read size from MessageStatus: %w", err)
+	}
+
+	nonce, err := stream.ReadUint32()
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("failed to read nonce from MessageStatus: %w", err)
+	}
+
+	return sessionId, messageId, status, size, nonce, nil
+}
+
+// dispatchStatusToSession finds the session and dispatches message status to it.
+func (c *Client) dispatchStatusToSession(sessionId uint16, messageId uint32, status uint8, size, nonce uint32) {
 	c.lock.Lock()
 	sess := c.sessions[sessionId]
 	c.lock.Unlock()
+
 	if sess != nil {
-		// Dispatch message status to session callbacks
-		// I2CP 0.9.4+ MessageStatusMessage (type 22) - supports status codes 0-23
 		sess.dispatchMessageStatus(messageId, SessionMessageStatus(status), size, nonce)
 	} else {
 		Warning("MessageStatus received for unknown session %d", sessionId)
 	}
+}
+
+func (c *Client) onMsgStatus(stream *Stream) {
+	Debug("Received MessageStatus message")
+
+	sessionId, messageId, status, size, nonce, err := readMessageStatusFields(stream)
+	if err != nil {
+		Error("%v", err)
+		return
+	}
+
+	Debug("Message status; session id %d, message id %d, status %d, size %d, nonce %d", sessionId, messageId, status, size, nonce)
+
+	c.dispatchStatusToSession(sessionId, messageId, status, size, nonce)
 }
 
 func (c *Client) onMsgDestReply(stream *Stream) {
