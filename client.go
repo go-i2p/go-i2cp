@@ -436,65 +436,88 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 
 func (c *Client) onMsgSetDate(stream *Stream) {
 	Debug("Received SetDate message.")
+	c.debugRawMessage(stream)
 
-	// DEBUG: Dump raw message bytes
+	routerDate, err := c.readRouterDate(stream)
+	if err != nil {
+		return
+	}
+
+	version, err := c.readRouterVersion(stream)
+	if err != nil {
+		return
+	}
+
+	c.updateRouterInfo(routerDate, version)
+	c.synchronizeRouterTime(routerDate)
+}
+
+// debugRawMessage logs the raw bytes of the SetDate message for debugging.
+func (c *Client) debugRawMessage(stream *Stream) {
 	rawBytes := stream.Bytes()
 	Debug("SetDate raw bytes (length=%d): %v", len(rawBytes), rawBytes)
+}
 
-	// Read router date (8 bytes, big-endian uint64)
+// readRouterDate reads and validates the router date from the stream.
+func (c *Client) readRouterDate(stream *Stream) (uint64, error) {
 	routerDate, err := stream.ReadUint64()
 	if err != nil {
 		Error("Failed to read router date: %s", err.Error())
-		c.router.date = uint64(time.Now().Unix() * 1000) // Fallback to local time
-		return
+		c.router.date = uint64(time.Now().Unix() * 1000)
+		return 0, err
 	}
 	Debug("Read router.date = %d", routerDate)
+	return routerDate, nil
+}
 
-	// Read version string length (1 byte)
+// readRouterVersion reads the router version string from the stream.
+func (c *Client) readRouterVersion(stream *Stream) (string, error) {
 	verLength, err := stream.ReadByte()
 	if err != nil {
 		Error("Failed to read version length: %s", err.Error())
-		return
+		return "", err
 	}
 	Debug("Read version length = %d", verLength)
 
-	// Read version string
 	version := make([]byte, verLength)
 	_, err = stream.Read(version)
 	if err != nil {
 		Error("Failed to read version string: %s", err.Error())
-		return
+		return "", err
 	}
 
+	return string(version), nil
+}
+
+// updateRouterInfo updates the client's router date, version, and capabilities.
+func (c *Client) updateRouterInfo(routerDate uint64, version string) {
 	c.router.date = routerDate
-	c.router.version = parseVersion(string(version))
-	Debug("Router version %s, date %d", string(version), c.router.date)
+	c.router.version = parseVersion(version)
+	Debug("Router version %s, date %d", version, c.router.date)
 
 	if c.router.version.compare(Version{major: 0, minor: 9, micro: 10, qualifier: 0}) >= 0 {
 		c.router.capabilities |= ROUTER_CAN_HOST_LOOKUP
 	}
+}
 
-	// CRITICAL FIX: Calculate router time delta for session config timestamp sync
-	// Per I2CP spec: session config date must be within ±30 seconds of router time
+// synchronizeRouterTime calculates and stores the time delta between local and router time.
+func (c *Client) synchronizeRouterTime(routerDate uint64) {
 	localTime := uint64(time.Now().Unix() * 1000)
 	c.routerTimeMu.Lock()
+	defer c.routerTimeMu.Unlock()
 
-	// Handle edge case: router sends zero/invalid date (e.g., during initialization)
-	// Zero date would cause session timestamp to become 0, triggering Java NullPointerException
-	if c.router.date == 0 {
+	if routerDate == 0 {
 		Warning("Router sent zero/invalid date - falling back to unsynchronized local time")
 		c.routerTimeDelta = 0
-	} else {
-		c.routerTimeDelta = int64(c.router.date) - int64(localTime)
-		c.routerTimeMu.Unlock()
-
-		Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, c.router.date)
-		if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
-			Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
-		}
 		return
 	}
-	c.routerTimeMu.Unlock()
+
+	c.routerTimeDelta = int64(routerDate) - int64(localTime)
+	Debug("Router time delta: %d ms (local: %d, router: %d)", c.routerTimeDelta, localTime, routerDate)
+
+	if c.routerTimeDelta > 30000 || c.routerTimeDelta < -30000 {
+		Warning("Large clock skew detected: %d ms. Session creation may fail if not corrected.", c.routerTimeDelta)
+	}
 }
 
 func (c *Client) onMsgDisconnect(stream *Stream) {
