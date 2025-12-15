@@ -2599,18 +2599,36 @@ func (c *Client) sendQueuedMessage(stream *Stream) (int, error) {
 	return ret, sendErr
 }
 
+// checkContextCancellation verifies if the context has been cancelled during message processing.
+// Returns an error if the context is cancelled, nil otherwise.
+func (c *Client) checkContextCancellation(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during message receive: %w", err)
+	}
+	return nil
+}
+
+// checkShutdownSignal verifies if the client shutdown signal has been triggered.
+// Returns ErrClientClosed if shutdown is in progress, nil otherwise.
+func (c *Client) checkShutdownSignal() error {
+	select {
+	case <-c.shutdown:
+		return ErrClientClosed
+	default:
+		return nil
+	}
+}
+
 // processIncomingMessages receives and processes all available messages from the router.
 func (c *Client) processIncomingMessages(ctx context.Context) error {
 	var err error
 	for c.tcp.CanRead() {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled during message receive: %w", err)
+		if err = c.checkContextCancellation(ctx); err != nil {
+			return err
 		}
 
-		select {
-		case <-c.shutdown:
-			return ErrClientClosed
-		default:
+		if err = c.checkShutdownSignal(); err != nil {
+			return err
 		}
 
 		if err = c.recvMessage(I2CP_MSG_ANY, c.receiveStream, true); err != nil {
