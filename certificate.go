@@ -37,47 +37,68 @@ func NewCertificate(typ uint8) (cert Certificate) {
 // NewCertificateFromMessage reads a Certificate from an I2CP message stream.
 // This maintains backward compatibility while using common/certificate internally.
 func NewCertificateFromMessage(stream *Stream) (cert Certificate, err error) {
-	// Read the certificate bytes from the stream
-	// Certificate format: [type:1][length:2][data:length]
-	var certType uint8
-	var length uint16
+	certType, length, err := readCertificateHeader(stream)
+	if err != nil {
+		return
+	}
 
+	if err = validateCertificateFormat(certType, length); err != nil {
+		return
+	}
+
+	certBytes, err := buildCertificateBytes(stream, certType, length)
+	if err != nil {
+		return
+	}
+
+	cert, err = parseCertificate(certBytes, certType, length)
+	return
+}
+
+// readCertificateHeader reads the certificate type and length from the stream.
+// Certificate format: [type:1][length:2][data:length]
+func readCertificateHeader(stream *Stream) (certType uint8, length uint16, err error) {
 	certType, err = stream.ReadByte()
 	if err != nil {
 		return
 	}
 	length, err = stream.ReadUint16()
-	if err != nil {
-		return
-	}
+	return
+}
 
-	// Validation: null certificates must have zero length
+// validateCertificateFormat ensures non-null certificates have non-zero length.
+func validateCertificateFormat(certType uint8, length uint16) error {
 	if (certType != CERTIFICATE_NULL) && (length == 0) {
 		Fatal("Non-null certificates must have non-zero length.")
-		return
+		return ErrMessageParsing
 	}
+	return nil
+}
 
-	// Build the complete certificate bytes for common package
+// buildCertificateBytes constructs the complete certificate byte array for parsing.
+func buildCertificateBytes(stream *Stream, certType uint8, length uint16) ([]byte, error) {
 	certBytes := make([]byte, 3+length)
 	certBytes[0] = certType
 	certBytes[1] = byte(length >> 8)
 	certBytes[2] = byte(length)
 
 	if length > 0 {
-		_, err = stream.Read(certBytes[3:])
+		_, err := stream.Read(certBytes[3:])
 		if err != nil {
-			return
+			return nil, err
 		}
 	}
+	return certBytes, nil
+}
 
-	// Parse using common/certificate
+// parseCertificate parses certificate bytes and populates legacy fields for backward compatibility.
+func parseCertificate(certBytes []byte, certType uint8, length uint16) (cert Certificate, err error) {
 	commonCert, _, err := certificate.ReadCertificate(certBytes)
 	if err != nil {
 		return
 	}
 
 	cert.cert = &commonCert
-	// Populate legacy fields for backward compatibility
 	cert.certType = certType
 	cert.length = length
 	if length > 0 {
