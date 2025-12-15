@@ -1608,6 +1608,20 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(session.id)
 
+	if err := c.buildLeaseSet2Content(session, leaseSet, dest, leaseCount); err != nil {
+		return err
+	}
+
+	if err := c.signAndSendLeaseSet2(session, leaseSet, dest, queue); err != nil {
+		return err
+	}
+
+	Debug("Successfully sent CreateLeaseSet2Message for session %d", session.id)
+	return nil
+}
+
+// buildLeaseSet2Content constructs the complete LeaseSet2 content including header, timestamps, flags, properties, leases, and blinding parameters.
+func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest *Destination, leaseCount int) error {
 	if err := c.writeLeaseSet2Header(session, leaseSet, dest); err != nil {
 		return err
 	}
@@ -1628,16 +1642,7 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 		return err
 	}
 
-	if err := c.writeLeaseSet2BlindingParams(session, leaseSet); err != nil {
-		return err
-	}
-
-	if err := c.signAndSendLeaseSet2(session, leaseSet, dest, queue); err != nil {
-		return err
-	}
-
-	Debug("Successfully sent CreateLeaseSet2Message for session %d", session.id)
-	return nil
+	return c.writeLeaseSet2BlindingParams(session, leaseSet)
 }
 
 // writeLeaseSet2Header writes the LeaseSet2 type and destination to the stream.

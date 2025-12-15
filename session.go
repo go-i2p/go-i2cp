@@ -823,6 +823,20 @@ func (session *Session) LookupDestinationWithContext(ctx context.Context, addres
 
 // Helper function to work around visibility issues
 func getMessageStatusName(status uint8) string {
+	if name := getMessageSuccessStatusName(status); name != "" {
+		return name
+	}
+	if name := getMessageFailureStatusName(status); name != "" {
+		return name
+	}
+	if name := getMessageErrorStatusName(status); name != "" {
+		return name
+	}
+	return fmt.Sprintf("Unknown(%d)", status)
+}
+
+// getMessageSuccessStatusName returns names for successful message delivery statuses.
+func getMessageSuccessStatusName(status uint8) string {
 	switch status {
 	case 0:
 		return "Available"
@@ -830,30 +844,48 @@ func getMessageStatusName(status uint8) string {
 		return "Accepted"
 	case 2:
 		return "BestEffortSuccess"
-	case 3:
-		return "BestEffortFailure"
 	case 4:
 		return "GuaranteedSuccess"
-	case 5:
-		return "GuaranteedFailure"
 	case 6:
 		return "LocalSuccess"
+	case 23:
+		return "SendAccepted"
+	default:
+		return ""
+	}
+}
+
+// getMessageFailureStatusName returns names for message delivery failure statuses.
+func getMessageFailureStatusName(status uint8) string {
+	switch status {
+	case 3:
+		return "BestEffortFailure"
+	case 5:
+		return "GuaranteedFailure"
 	case 7:
 		return "LocalFailure"
 	case 8:
 		return "RouterFailure"
 	case 9:
 		return "NetworkFailure"
+	case 13:
+		return "OverflowFailure"
+	case 14:
+		return "MessageExpired"
+	default:
+		return ""
+	}
+}
+
+// getMessageErrorStatusName returns names for message error conditions.
+func getMessageErrorStatusName(status uint8) string {
+	switch status {
 	case 10:
 		return "BadSession"
 	case 11:
 		return "BadProtocol"
 	case 12:
 		return "BadOptions"
-	case 13:
-		return "OverflowFailure"
-	case 14:
-		return "MessageExpired"
 	case 15:
 		return "BadLocalLeaseset"
 	case 16:
@@ -870,10 +902,8 @@ func getMessageStatusName(status uint8) string {
 		return "NoLeaseset"
 	case 22:
 		return "InsufficientTags"
-	case 23:
-		return "SendAccepted"
 	default:
-		return fmt.Sprintf("Unknown(%d)", status)
+		return ""
 	}
 }
 
