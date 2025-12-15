@@ -157,10 +157,13 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	// 4. Signature over fields 1-3
 
 	// Build data to sign - everything BEFORE the signature
+	// CRITICAL: Must use WriteForSignature, NOT WriteToMessage!
+	// Java reads wire format (128-byte signing key), extracts actual key (32 bytes for Ed25519),
+	// then re-serializes with truncated key (32 bytes) for signature verification.
 	dataToSign := NewStream(make([]byte, 0, 512))
 	Debug("dataToSign initial length: %d", dataToSign.Len())
 
-	if err := config.destination.WriteToMessage(dataToSign); err != nil {
+	if err := config.destination.WriteForSignature(dataToSign); err != nil {
 		Fatal("Failed to write destination to dataToSign: %v", err)
 		return
 	}
@@ -192,6 +195,8 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	Debug("Session config data to sign: %d bytes", dataToSign.Len())
 	if dataToSign.Len() > 0 {
 		Debug("Data to sign (first 64 bytes): %x", dataToSign.Bytes()[:min(64, dataToSign.Len())])
+		Debug("Data to sign (last 64 bytes): %x", dataToSign.Bytes()[max(0, dataToSign.Len()-64):])
+		Debug("FULL data to sign (%d bytes): %x", dataToSign.Len(), dataToSign.Bytes())
 	}
 
 	// Generate signature over the data
@@ -214,6 +219,14 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 // min returns the minimum of two integers
 func min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+// max returns the maximum of two integers
+func max(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

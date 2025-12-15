@@ -308,22 +308,17 @@ func (dest *Destination) WriteToFile(filename string) (err error) {
 }
 
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
-	// CRITICAL FIX: I2CP Destination format uses FIXED 256-byte encryption key field
-	// Per I2CP spec and Java I2P Destination.java:
-	//   - Wire format: pubKey(256 bytes) + signingPubKey(128 bytes) + certificate
-	//   - For ElGamal (type 0): full 256-byte key
-	//   - For ECIES-X25519 (type 4): 32-byte key LEFT-ALIGNED in 256-byte field (rest zero)
-	// The certificate indicates the actual key type, but wire format is always 256+128 bytes
+	// CRITICAL: This is the WIRE FORMAT for sending Destinations over I2CP
+	// Wire format: pubKey(256 bytes) + signingPubKey(128 bytes) + certificate
+	// The router will read this, extract the actual key sizes from the certificate,
+	// and store the keys in their native sizes (32 bytes for Ed25519)
 
-	// Always write 256 bytes for encryption key (X25519 keys are left-aligned with zero padding)
+	// Always write 256 bytes for encryption key
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
 
-	// I2CP Destination format ALWAYS uses 128-byte signing key field
-	// Per Java I2P Destination.java: pubKey(256) + signingPubKey(128) + certificate
-	// Even for Ed25519 (32 bytes), we must pad to 128 bytes for I2CP compatibility
-	// Ed25519 public key is right-aligned in the 128-byte field
+	// Write 128-byte signing key field with Ed25519 key right-aligned at bytes 96-127
 	paddedSignKey := make([]byte, 128)
 	if dest.sgk.ed25519KeyPair != nil {
 		ed25519PubKey := dest.sgk.ed25519KeyPair.PublicKey()
@@ -337,6 +332,35 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	}
 
 	// Write certificate
+	if err = dest.cert.WriteToMessage(stream); err != nil {
+		return fmt.Errorf("failed to write certificate: %w", err)
+	}
+	return nil
+}
+
+// WriteForSignature writes the destination in the format used by Java I2P for signature computation.
+// CRITICAL: This differs from WriteToMessage!
+// When Java reads a Destination from the wire, it extracts keys based on the certificate's declared sizes.
+// When re-serializing for signature verification, it writes the EXTRACTED key sizes, not the padded wire format.
+// For Ed25519: wire format has 128-byte field (key at bytes 96-127), but signature format has only 32 bytes.
+func (dest *Destination) WriteForSignature(stream *Stream) (err error) {
+	// Write 256 bytes for encryption key (same as wire format)
+	if _, err = stream.Write(dest.pubKey[:]); err != nil {
+		return fmt.Errorf("failed to write public key: %w", err)
+	}
+
+	// Write TRUNCATED signing key (not padded!) - this matches Java's writeTruncatedBytes()
+	// For Ed25519 (32 bytes), write just the 32 bytes (NOT right-aligned in 128-byte field)
+	if dest.sgk.ed25519KeyPair != nil {
+		ed25519PubKey := dest.sgk.ed25519KeyPair.PublicKey()
+		if _, err = stream.Write(ed25519PubKey[:]); err != nil {
+			return fmt.Errorf("failed to write signing public key: %w", err)
+		}
+	} else {
+		return fmt.Errorf("no Ed25519 keypair available")
+	}
+
+	// Write certificate (same as wire format)
 	if err = dest.cert.WriteToMessage(stream); err != nil {
 		return fmt.Errorf("failed to write certificate: %w", err)
 	}
