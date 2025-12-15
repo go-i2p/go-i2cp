@@ -45,48 +45,75 @@ func NewX25519KeyPair() (*X25519KeyPair, error) {
 	}, nil
 }
 
-// X25519KeyPairFromStream reads an X25519 key pair from a stream
-// Uses go.step.sm/crypto/x25519 for key reconstruction and validation
-func X25519KeyPairFromStream(stream *Stream) (*X25519KeyPair, error) {
-	var algorithmType uint32
-	var err error
-
-	algorithmType, err = stream.ReadUint32()
+// readX25519AlgorithmType reads and validates the algorithm type from the stream.
+// Returns the algorithm type if valid for X25519, error otherwise.
+func readX25519AlgorithmType(stream *Stream) (uint32, error) {
+	algorithmType, err := stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read algorithm type: %w", err)
+		return 0, fmt.Errorf("failed to read algorithm type: %w", err)
 	}
 
 	if algorithmType != X25519 {
-		return nil, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
+		return 0, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
 	}
 
+	return algorithmType, nil
+}
+
+// readX25519KeyBytes reads private and public key bytes from the stream.
+// Returns private key bytes, public key bytes, and any error encountered.
+func readX25519KeyBytes(stream *Stream) ([]byte, []byte, error) {
 	// Read private key (32 bytes)
 	privKeyBytes := make([]byte, 32)
-	_, err = stream.Read(privKeyBytes)
+	_, err := stream.Read(privKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read X25519 private key: %w", err)
+		return nil, nil, fmt.Errorf("failed to read X25519 private key: %w", err)
 	}
 
 	// Read public key (32 bytes)
 	pubKeyBytes := make([]byte, 32)
 	_, err = stream.Read(pubKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read X25519 public key: %w", err)
+		return nil, nil, fmt.Errorf("failed to read X25519 public key: %w", err)
 	}
 
-	// Validate that the public key corresponds to the private key
+	return privKeyBytes, pubKeyBytes, nil
+}
+
+// validateX25519KeyPair verifies that the public key corresponds to the private key.
+// Returns an error if the keys don't match or validation fails.
+func validateX25519KeyPair(privKeyBytes, pubKeyBytes []byte) error {
 	privKey := make(x25519.PrivateKey, 32)
 	copy(privKey, privKeyBytes)
 
 	expectedPubKeyInterface := privKey.Public()
 	expectedPubKey, ok := expectedPubKeyInterface.(x25519.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("failed to convert public key to x25519.PublicKey")
+		return fmt.Errorf("failed to convert public key to x25519.PublicKey")
 	}
 
-	// Compare public keys
 	if !bytesEqual(expectedPubKey, pubKeyBytes) {
-		return nil, fmt.Errorf("public key does not match private key")
+		return fmt.Errorf("public key does not match private key")
+	}
+
+	return nil
+}
+
+// X25519KeyPairFromStream reads an X25519 key pair from a stream
+// Uses go.step.sm/crypto/x25519 for key reconstruction and validation
+func X25519KeyPairFromStream(stream *Stream) (*X25519KeyPair, error) {
+	algorithmType, err := readX25519AlgorithmType(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	privKeyBytes, pubKeyBytes, err := readX25519KeyBytes(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = validateX25519KeyPair(privKeyBytes, pubKeyBytes); err != nil {
+		return nil, err
 	}
 
 	return &X25519KeyPair{

@@ -632,16 +632,9 @@ func (ls *LeaseSet2) HasOfflineSignature() bool {
 	return ls.offlineSig != nil
 }
 
-// VerifySignature verifies the LeaseSet2 cryptographic signature.
-// Uses the destination's signing public key to verify the signature over all LeaseSet2 data
-// preceding the signature field.
-//
-// I2CP 0.9.38+ - Supports DSA-SHA1 (legacy) and Ed25519-SHA512 (modern) signatures.
-//
-// Returns true if signature is cryptographically valid, false otherwise.
-// Basic validation (non-empty signature, correct length) is performed first.
-func (ls *LeaseSet2) VerifySignature() bool {
-	// Basic validation: signature must be non-empty and correct length
+// validateSignatureBasics performs basic validation on the signature field.
+// Returns true if signature is non-empty and has correct length, false otherwise.
+func (ls *LeaseSet2) validateSignatureBasics() bool {
 	if len(ls.signature) == 0 {
 		return false
 	}
@@ -651,38 +644,69 @@ func (ls *LeaseSet2) VerifySignature() bool {
 		return false
 	}
 
-	// Get signing public key and algorithm type from destination
+	return true
+}
+
+// extractSigningKey extracts the signing public key and algorithm from destination.
+// Returns public key bytes, algorithm type, and any error encountered.
+func (ls *LeaseSet2) extractSigningKey() ([]byte, uint32, error) {
 	pubKeyBytes, algorithmType, err := getSigningPublicKeyFromDestination(ls.destination)
 	if err != nil {
 		Error("Failed to extract signing public key: %v", err)
+		return nil, 0, err
+	}
+
+	if algorithmType != ED25519_SHA256 {
+		err = fmt.Errorf("unsupported signature algorithm type: %d (only Ed25519 supported)", algorithmType)
+		Error("%v", err)
+		return nil, 0, err
+	}
+
+	return pubKeyBytes, algorithmType, nil
+}
+
+// createVerificationKeyPair creates a temporary Ed25519KeyPair for signature verification.
+// Returns the key pair configured with the provided public key bytes.
+func createVerificationKeyPair(pubKeyBytes []byte) (*Ed25519KeyPair, error) {
+	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(pubKeyBytes)
+	if err != nil {
+		Error("Failed to create Ed25519 public key: %v", err)
+		return nil, err
+	}
+
+	return &Ed25519KeyPair{
+		algorithmType: ED25519_SHA256,
+		publicKey:     ed25519PubKey,
+	}, nil
+}
+
+// VerifySignature verifies the LeaseSet2 cryptographic signature.
+// Uses the destination's signing public key to verify the signature over all LeaseSet2 data
+// preceding the signature field.
+//
+// I2CP 0.9.38+ - Supports DSA-SHA1 (legacy) and Ed25519-SHA512 (modern) signatures.
+//
+// Returns true if signature is cryptographically valid, false otherwise.
+// Basic validation (non-empty signature, correct length) is performed first.
+func (ls *LeaseSet2) VerifySignature() bool {
+	if !ls.validateSignatureBasics() {
 		return false
 	}
 
-	// Reconstruct the signed data (all fields before signature)
+	pubKeyBytes, _, err := ls.extractSigningKey()
+	if err != nil {
+		return false
+	}
+
 	signedData, err := ls.reconstructSignedData()
 	if err != nil {
 		Error("Failed to reconstruct signed data: %v", err)
 		return false
 	}
 
-	// Verify signature based on algorithm type
-	// Modern I2CP uses Ed25519 exclusively
-	if algorithmType != ED25519_SHA256 {
-		Error("Unsupported signature algorithm type: %d (only Ed25519 supported)", algorithmType)
-		return false
-	}
-
-	// Verify Ed25519 signature
-	// Create a temporary Ed25519KeyPair with just the public key for verification
-	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(pubKeyBytes)
+	tempKeyPair, err := createVerificationKeyPair(pubKeyBytes)
 	if err != nil {
-		Error("Failed to create Ed25519 public key: %v", err)
 		return false
-	}
-
-	tempKeyPair := &Ed25519KeyPair{
-		algorithmType: ED25519_SHA256,
-		publicKey:     ed25519PubKey,
 	}
 
 	return tempKeyPair.Verify(signedData, ls.signature)

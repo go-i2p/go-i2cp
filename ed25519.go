@@ -54,47 +54,75 @@ func NewEd25519KeyPair() (*Ed25519KeyPair, error) {
 	}, nil
 }
 
-// Ed25519KeyPairFromStream reads an Ed25519 key pair from a stream.
-// Uses github.com/go-i2p/crypto/ed25519 for key reconstruction.
-func Ed25519KeyPairFromStream(stream *Stream) (*Ed25519KeyPair, error) {
-	var algorithmType uint32
-	var err error
-
-	algorithmType, err = stream.ReadUint32()
+// readEd25519AlgorithmType reads and validates the algorithm type from the stream.
+// Returns the algorithm type if valid for Ed25519, error otherwise.
+func readEd25519AlgorithmType(stream *Stream) (uint32, error) {
+	algorithmType, err := stream.ReadUint32()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read algorithm type: %w", err)
+		return 0, fmt.Errorf("failed to read algorithm type: %w", err)
 	}
 
 	if algorithmType != ED25519_SHA256 {
-		return nil, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
+		return 0, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
 	}
 
+	return algorithmType, nil
+}
+
+// readEd25519KeyBytes reads private and public key bytes from the stream.
+// Returns private key bytes, public key bytes, and any error encountered.
+func readEd25519KeyBytes(stream *Stream) ([]byte, []byte, error) {
 	// Read private key (64 bytes for Ed25519)
 	privateKeyBytes := make([]byte, ed25519.PrivateKeySize)
-	_, err = stream.Read(privateKeyBytes)
+	_, err := stream.Read(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read private key: %w", err)
+		return nil, nil, fmt.Errorf("failed to read private key: %w", err)
 	}
 
 	// Read public key (32 bytes for Ed25519)
 	publicKeyBytes := make([]byte, ed25519.PublicKeySize)
 	_, err = stream.Read(publicKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read public key: %w", err)
+		return nil, nil, fmt.Errorf("failed to read public key: %w", err)
 	}
 
-	// Construct crypto package keys from raw bytes
+	return privateKeyBytes, publicKeyBytes, nil
+}
+
+// createEd25519KeyPairFromBytes constructs crypto package keys from raw bytes.
+// Returns Ed25519PrivateKey, Ed25519PublicKey, and any error encountered.
+func createEd25519KeyPairFromBytes(privateKeyBytes, publicKeyBytes []byte) (cryptoed25519.Ed25519PrivateKey, cryptoed25519.Ed25519PublicKey, error) {
 	privKey, err := cryptoed25519.CreateEd25519PrivateKeyFromBytes(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create private key: %w", err)
+		return nil, nil, fmt.Errorf("failed to create private key: %w", err)
 	}
 
 	pubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(publicKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create public key: %w", err)
+		return nil, nil, fmt.Errorf("failed to create public key: %w", err)
 	}
 
-	// CreateFromBytes returns values, not pointers
+	return privKey, pubKey, nil
+}
+
+// Ed25519KeyPairFromStream reads an Ed25519 key pair from a stream.
+// Uses github.com/go-i2p/crypto/ed25519 for key reconstruction.
+func Ed25519KeyPairFromStream(stream *Stream) (*Ed25519KeyPair, error) {
+	algorithmType, err := readEd25519AlgorithmType(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	privateKeyBytes, publicKeyBytes, err := readEd25519KeyBytes(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	privKey, pubKey, err := createEd25519KeyPairFromBytes(privateKeyBytes, publicKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Ed25519KeyPair{
 		algorithmType: algorithmType,
 		privateKey:    privKey,
