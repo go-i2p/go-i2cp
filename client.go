@@ -207,12 +207,12 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 	_, err = send.Write(stream.Bytes())
 	lenc := send.Len()
 	_ = lenc
-	
+
 	// Track message being sent (if stats enabled)
 	if c.messageStats != nil && c.messageStats.IsEnabled() {
 		c.messageStats.RecordSent(typ, uint64(lenc))
 	}
-	
+
 	if queue {
 		Debug("Putting %d bytes message on the output queue.", send.Len())
 		c.lock.Lock()
@@ -387,7 +387,7 @@ func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *St
 		c.metrics.AddBytesReceived(uint64(length + 5)) // +5 for header
 		c.metrics.IncrementMessageReceived(msgType)
 	}
-	
+
 	// Track message statistics (if enabled)
 	if c.messageStats != nil && c.messageStats.IsEnabled() {
 		c.messageStats.RecordReceived(msgType, uint64(length+5))

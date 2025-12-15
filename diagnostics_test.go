@@ -8,12 +8,12 @@ import (
 // TestMessageStats_EnableDisable verifies message statistics can be enabled and disabled
 func TestMessageStats_EnableDisable(t *testing.T) {
 	client := NewClient(nil)
-	
+
 	// Initially disabled
 	if client.messageStats != nil && client.messageStats.IsEnabled() {
 		t.Error("Message stats should be disabled by default")
 	}
-	
+
 	// Enable
 	client.EnableMessageStats()
 	stats := client.GetMessageStats()
@@ -23,7 +23,7 @@ func TestMessageStats_EnableDisable(t *testing.T) {
 	if !stats.IsEnabled() {
 		t.Error("Message stats should be enabled after EnableMessageStats()")
 	}
-	
+
 	// Disable
 	client.DisableMessageStats()
 	if stats.IsEnabled() {
@@ -35,11 +35,11 @@ func TestMessageStats_EnableDisable(t *testing.T) {
 func TestMessageStats_RecordMessages(t *testing.T) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	// Record some messages
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
-	
+
 	// Verify counts
 	if count := stats.GetSentCount(I2CP_MSG_CREATE_SESSION); count != 1 {
 		t.Errorf("Expected 1 CreateSession sent, got %d", count)
@@ -47,14 +47,14 @@ func TestMessageStats_RecordMessages(t *testing.T) {
 	if count := stats.GetReceivedCount(I2CP_MSG_SESSION_STATUS); count != 1 {
 		t.Errorf("Expected 1 SessionStatus received, got %d", count)
 	}
-	
+
 	// Verify timestamps
 	if lastSent, ok := stats.GetLastSent(I2CP_MSG_CREATE_SESSION); !ok {
 		t.Error("Expected timestamp for sent CreateSession")
 	} else if time.Since(lastSent) > time.Second {
 		t.Error("Timestamp for sent message is too old")
 	}
-	
+
 	if lastRecv, ok := stats.GetLastReceived(I2CP_MSG_SESSION_STATUS); !ok {
 		t.Error("Expected timestamp for received SessionStatus")
 	} else if time.Since(lastRecv) > time.Second {
@@ -66,14 +66,14 @@ func TestMessageStats_RecordMessages(t *testing.T) {
 func TestMessageStats_DiagnosticReport(t *testing.T) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	// Test case 1: No messages (should warn about no CreateSession)
 	report := stats.DiagnosticReport()
 	if report == "" {
 		t.Error("DiagnosticReport() should return non-empty report")
 	}
 	t.Logf("Diagnostic report (no messages):\n%s", report)
-	
+
 	// Test case 2: CreateSession sent but no SessionStatus
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	report = stats.DiagnosticReport()
@@ -81,7 +81,7 @@ func TestMessageStats_DiagnosticReport(t *testing.T) {
 		t.Error("DiagnosticReport() should return non-empty report")
 	}
 	t.Logf("Diagnostic report (no response):\n%s", report)
-	
+
 	// Test case 3: Both CreateSession and SessionStatus
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
 	report = stats.DiagnosticReport()
@@ -95,13 +95,13 @@ func TestMessageStats_DiagnosticReport(t *testing.T) {
 func TestMessageStats_Summary(t *testing.T) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	// Record various messages
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	stats.RecordSent(I2CP_MSG_SEND_MESSAGE, 200)
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
 	stats.RecordReceived(I2CP_MSG_PAYLOAD_MESSAGE, 150)
-	
+
 	summary := stats.Summary()
 	if summary == "" {
 		t.Error("Summary() should return non-empty summary")
@@ -113,19 +113,19 @@ func TestMessageStats_Summary(t *testing.T) {
 func TestMessageStats_Reset(t *testing.T) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	// Record some messages
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
-	
+
 	// Verify counts
 	if count := stats.GetSentCount(I2CP_MSG_CREATE_SESSION); count != 1 {
 		t.Errorf("Expected 1 message before reset, got %d", count)
 	}
-	
+
 	// Reset
 	stats.Reset()
-	
+
 	// Verify counts are cleared
 	if count := stats.GetSentCount(I2CP_MSG_CREATE_SESSION); count != 0 {
 		t.Errorf("Expected 0 messages after reset, got %d", count)
@@ -138,17 +138,17 @@ func TestMessageStats_Reset(t *testing.T) {
 // TestConnectionState verifies connection state inspection
 func TestConnectionState(t *testing.T) {
 	client := NewClient(nil)
-	
+
 	state := client.GetConnectionState()
 	if state == nil {
 		t.Fatal("GetConnectionState() returned nil")
 	}
-	
+
 	// Should not be connected initially
 	if state.Connected {
 		t.Error("Client should not be connected initially")
 	}
-	
+
 	// Check other fields are initialized
 	if state.SessionsActive < 0 {
 		t.Error("SessionsActive should not be negative")
@@ -159,14 +159,14 @@ func TestConnectionState(t *testing.T) {
 func TestPrintDiagnostics(t *testing.T) {
 	client := NewClient(nil)
 	client.EnableMessageStats()
-	
+
 	// Should not panic even without connection
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("PrintDiagnostics() panicked: %v", r)
 		}
 	}()
-	
+
 	client.PrintDiagnostics()
 }
 
@@ -183,7 +183,7 @@ func TestSessionStatusName(t *testing.T) {
 		{I2CP_SESSION_STATUS_REFUSED, "REFUSED"},
 		{SessionStatus(99), "UNKNOWN"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			name := getSessionStatusName(tt.status)
@@ -198,9 +198,9 @@ func TestSessionStatusName(t *testing.T) {
 func TestMessageStats_ThreadSafety(t *testing.T) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	done := make(chan bool)
-	
+
 	// Concurrent writers
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -211,7 +211,7 @@ func TestMessageStats_ThreadSafety(t *testing.T) {
 			done <- true
 		}()
 	}
-	
+
 	// Concurrent readers
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -223,12 +223,12 @@ func TestMessageStats_ThreadSafety(t *testing.T) {
 			done <- true
 		}()
 	}
-	
+
 	// Wait for all goroutines
 	for i := 0; i < 20; i++ {
 		<-done
 	}
-	
+
 	// Verify counts are correct
 	totalSent := stats.GetSentCount(I2CP_MSG_CREATE_SESSION)
 	if totalSent != 1000 {
@@ -240,11 +240,11 @@ func TestMessageStats_ThreadSafety(t *testing.T) {
 func TestMessageStats_DisabledNoTracking(t *testing.T) {
 	stats := NewMessageStats()
 	// Don't enable stats
-	
+
 	// Record messages (should be ignored)
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
-	
+
 	// Verify no tracking occurred
 	if count := stats.GetSentCount(I2CP_MSG_CREATE_SESSION); count != 0 {
 		t.Errorf("Disabled stats should not track, got count=%d", count)
@@ -255,19 +255,19 @@ func TestMessageStats_DisabledNoTracking(t *testing.T) {
 func TestClient_MessageStatsIntegration(t *testing.T) {
 	client := NewClient(nil)
 	client.EnableMessageStats()
-	
+
 	// Simulate sending a message (without actual TCP connection)
 	stream := NewStream(make([]byte, 0, 100))
 	stream.WriteUint16(123) // session ID
-	
+
 	// This would normally send via TCP, but we just test the stats tracking
 	// The actual sendMessage will fail without a connection, but stats should work
-	
+
 	stats := client.GetMessageStats()
 	if stats == nil {
 		t.Fatal("GetMessageStats() returned nil")
 	}
-	
+
 	if !stats.IsEnabled() {
 		t.Error("Stats should be enabled")
 	}
@@ -276,13 +276,13 @@ func TestClient_MessageStatsIntegration(t *testing.T) {
 // TestMessageStats_ConnectionStateIntegration verifies connection state tracking
 func TestMessageStats_ConnectionStateIntegration(t *testing.T) {
 	client := NewClient(nil)
-	
+
 	// Initially not connected
 	state := client.GetConnectionState()
 	if state.Connected {
 		t.Error("Client should not be connected initially")
 	}
-	
+
 	// Verify session counts
 	if state.SessionsActive != 0 {
 		t.Errorf("Expected 0 active sessions, got %d", state.SessionsActive)
@@ -299,7 +299,7 @@ func TestMessageStats_ConnectionStateIntegration(t *testing.T) {
 func BenchmarkMessageStats_RecordMessage(b *testing.B) {
 	stats := NewMessageStats()
 	stats.Enable()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
@@ -311,7 +311,7 @@ func BenchmarkMessageStats_GetCount(b *testing.B) {
 	stats := NewMessageStats()
 	stats.Enable()
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = stats.GetSentCount(I2CP_MSG_CREATE_SESSION)
@@ -324,7 +324,7 @@ func BenchmarkMessageStats_DiagnosticReport(b *testing.B) {
 	stats.Enable()
 	stats.RecordSent(I2CP_MSG_CREATE_SESSION, 100)
 	stats.RecordReceived(I2CP_MSG_SESSION_STATUS, 50)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = stats.DiagnosticReport()
