@@ -80,55 +80,88 @@ func synchronousSessionCreation() {
 	// You can send messages, etc.
 }
 
-// Example 2: Asynchronous Session Creation
-// Manual ProcessIO loop for production use
+// asynchronousSessionCreation demonstrates asynchronous session creation
+// with manual ProcessIO loop for production use.
 func asynchronousSessionCreation() {
-	// Create client
+	client := createAndConnectClient()
+	defer client.Close()
+
+	_, cancelProcessIO := startProcessIOLoop(client)
+	defer cancelProcessIO()
+
+	sessionReady := make(chan bool, 1)
+	session := createSessionWithCallback(client, sessionReady)
+
+	waitForSessionReady(session, sessionReady)
+
+	// Keep running for a bit to show ProcessIO continues
+	time.Sleep(2 * time.Second)
+}
+
+// createAndConnectClient creates a new I2CP client and connects to the I2P router.
+func createAndConnectClient() *i2cp.Client {
 	client := i2cp.NewClient(&i2cp.ClientCallBacks{})
 
-	// Connect
 	ctx := context.Background()
 	err := client.Connect(ctx)
 	if err != nil {
 		log.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
 
 	fmt.Println("Connected to I2P router")
+	return client
+}
 
-	// Start ProcessIO loop in background BEFORE creating session
-	// This is the KEY to fixing the hang!
+// startProcessIOLoop starts the ProcessIO loop in a background goroutine
+// and returns the context and cancel function for cleanup.
+func startProcessIOLoop(client *i2cp.Client) (context.Context, context.CancelFunc) {
 	processIOCtx, cancelProcessIO := context.WithCancel(context.Background())
-	defer cancelProcessIO()
 
-	go func() {
-		fmt.Println("Starting ProcessIO loop...")
-		for {
-			select {
-			case <-processIOCtx.Done():
-				fmt.Println("ProcessIO loop stopped")
-				return
-			default:
-			}
-
-			err := client.ProcessIO(processIOCtx)
-			if err != nil {
-				if err == i2cp.ErrClientClosed {
-					return
-				}
-				log.Printf("ProcessIO error: %v", err)
-			}
-
-			// Small sleep to prevent busy loop
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
+	go runProcessIOLoop(client, processIOCtx)
 
 	// Give ProcessIO time to start
 	time.Sleep(500 * time.Millisecond)
 
-	// Create session with callback notification
-	sessionReady := make(chan bool, 1)
+	return processIOCtx, cancelProcessIO
+}
+
+// runProcessIOLoop executes the ProcessIO loop continuously until the context is cancelled.
+func runProcessIOLoop(client *i2cp.Client, ctx context.Context) {
+	fmt.Println("Starting ProcessIO loop...")
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("ProcessIO loop stopped")
+			return
+		default:
+		}
+
+		if processIOShouldStop(client, ctx) {
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// processIOShouldStop executes a single ProcessIO cycle and returns true if the loop should stop.
+func processIOShouldStop(client *i2cp.Client, ctx context.Context) bool {
+	err := client.ProcessIO(ctx)
+	if err == nil {
+		return false
+	}
+
+	if err == i2cp.ErrClientClosed {
+		return true
+	}
+
+	log.Printf("ProcessIO error: %v", err)
+	return false
+}
+
+// createSessionWithCallback creates a new session with callback notification
+// and sends the CreateSession message to the router.
+func createSessionWithCallback(client *i2cp.Client, sessionReady chan bool) *i2cp.Session {
 	session := i2cp.NewSession(client, i2cp.SessionCallbacks{
 		OnStatus: func(s *i2cp.Session, status i2cp.SessionStatus) {
 			if status == i2cp.I2CP_SESSION_STATUS_CREATED {
@@ -138,14 +171,19 @@ func asynchronousSessionCreation() {
 		},
 	})
 
-	// Send CreateSession message (returns immediately)
 	fmt.Println("Sending CreateSession message...")
-	err = client.CreateSession(ctx, session)
+	ctx := context.Background()
+	err := client.CreateSession(ctx, session)
 	if err != nil {
 		log.Fatalf("CreateSession failed: %v", err)
 	}
 
-	// Wait for session creation confirmation via callback
+	return session
+}
+
+// waitForSessionReady waits for session creation confirmation via callback
+// or times out after 30 seconds.
+func waitForSessionReady(session *i2cp.Session, sessionReady chan bool) {
 	select {
 	case <-sessionReady:
 		fmt.Println("Session confirmed via callback")
@@ -154,7 +192,4 @@ func asynchronousSessionCreation() {
 	}
 
 	fmt.Printf("Session ready! Session ID: %d\n", session.ID())
-
-	// Keep running for a bit to show ProcessIO continues
-	time.Sleep(2 * time.Second)
 }
