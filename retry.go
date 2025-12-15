@@ -90,38 +90,45 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialBackoff time.D
 	backoff := initialBackoff
 
 	for {
-		// Try to execute the function
 		err := fn()
 
-		// Success!
 		if err == nil {
-			if attempt > 0 {
-				Debug("Retry succeeded after %d attempts", attempt)
-			}
+			logRetrySuccess(attempt)
 			return nil
 		}
 
-		// Increment attempt counter
 		attempt++
 
-		// Determine if we should retry
-		if retryErr := shouldRetryAfterError(err, attempt, maxRetries); retryErr != nil {
-			return retryErr
+		if err := handleRetryFailure(ctx, err, attempt, maxRetries, backoff); err != nil {
+			return err
 		}
 
-		// Check context cancellation before sleeping
-		if ctxErr := checkContextCancellation(ctx, attempt, "before backoff"); ctxErr != nil {
-			return ctxErr
-		}
-
-		// Wait before retrying
-		if waitErr := waitWithBackoff(ctx, backoff, attempt, err); waitErr != nil {
-			return waitErr
-		}
-
-		// Calculate next backoff duration
 		backoff = calculateNextBackoff(backoff, maxBackoff)
 	}
+}
+
+// logRetrySuccess logs successful retry completion if retries were attempted.
+func logRetrySuccess(attempt int) {
+	if attempt > 0 {
+		Debug("Retry succeeded after %d attempts", attempt)
+	}
+}
+
+// handleRetryFailure processes a failed attempt, checking retry conditions and waiting before next attempt.
+func handleRetryFailure(ctx context.Context, err error, attempt, maxRetries int, backoff time.Duration) error {
+	if retryErr := shouldRetryAfterError(err, attempt, maxRetries); retryErr != nil {
+		return retryErr
+	}
+
+	if ctxErr := checkContextCancellation(ctx, attempt, "before backoff"); ctxErr != nil {
+		return ctxErr
+	}
+
+	if waitErr := waitWithBackoff(ctx, backoff, attempt, err); waitErr != nil {
+		return waitErr
+	}
+
+	return nil
 }
 
 // isTemporary checks if an error is temporary and should be retried.
