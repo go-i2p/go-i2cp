@@ -355,3 +355,22 @@ const (
 	I2CP_SESSION_STATUS_INVALID                        // 3 - Session invalid (see errors.go: ErrSessionInvalid)
 	I2CP_SESSION_STATUS_REFUSED                        // 4 - Session creation refused (0.9.12+, see errors.go: ErrSessionRefused)
 )
+
+// getSessionStatusName returns a human-readable name for SessionStatus values.
+// This is useful for debugging and logging session state transitions.
+func getSessionStatusName(status SessionStatus) string {
+	switch status {
+	case I2CP_SESSION_STATUS_CREATED:
+		return "CREATED"
+	case I2CP_SESSION_STATUS_DESTROYED:
+		return "DESTROYED"
+	case I2CP_SESSION_STATUS_UPDATED:
+		return "UPDATED"
+	case I2CP_SESSION_STATUS_INVALID:
+		return "INVALID"
+	case I2CP_SESSION_STATUS_REFUSED:
+		return "REFUSED"
+	default:
+		return "UNKNOWN"
+	}
+}

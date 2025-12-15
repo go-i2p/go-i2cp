@@ -119,6 +119,9 @@ type Client struct {
 	batchSizeThreshold int           // Size threshold for immediate flush (default 16KB)
 	batchTicker        *time.Ticker  // Ticker for periodic batch flushing
 	batchMu            sync.Mutex    // Protects batch state
+
+	// Message statistics (diagnostic tool for troubleshooting)
+	messageStats *MessageStats // nil = stats disabled, use EnableMessageStats() to enable
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -204,6 +207,12 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 	_, err = send.Write(stream.Bytes())
 	lenc := send.Len()
 	_ = lenc
+	
+	// Track message being sent (if stats enabled)
+	if c.messageStats != nil && c.messageStats.IsEnabled() {
+		c.messageStats.RecordSent(typ, uint64(lenc))
+	}
+	
 	if queue {
 		Debug("Putting %d bytes message on the output queue.", send.Len())
 		c.lock.Lock()
@@ -378,6 +387,11 @@ func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *St
 		c.metrics.AddBytesReceived(uint64(length + 5)) // +5 for header
 		c.metrics.IncrementMessageReceived(msgType)
 	}
+	
+	// Track message statistics (if enabled)
+	if c.messageStats != nil && c.messageStats.IsEnabled() {
+		c.messageStats.RecordReceived(msgType, uint64(length+5))
+	}
 
 	if dispatch {
 		c.onMessage(msgType, stream)
@@ -385,6 +399,7 @@ func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *St
 }
 
 func (c *Client) onMessage(msgType uint8, stream *Stream) {
+	Debug("Dispatching I2CP message type %d (%s) to handler", msgType, getMessageTypeName(msgType))
 	switch msgType {
 	case I2CP_MSG_SET_DATE:
 		c.onMsgSetDate(stream)
@@ -1090,6 +1105,7 @@ func (c *Client) handleSessionCreated(sessionID uint16, sessionStatus uint8) {
 	c.currentSession = nil
 	c.lock.Unlock()
 
+	Debug(">>> Session %d created successfully, invoking OnStatus callback with SESSION_STATUS_CREATED", sessionID)
 	// Now dispatch status callback - session is already registered
 	sess.dispatchStatus(SessionStatus(sessionStatus))
 }
@@ -1127,7 +1143,7 @@ func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
 }
 
 func (c *Client) onMsgSessionStatus(stream *Stream) {
-	Debug("Received SessionStatus message.")
+	Debug("<<< RECEIVED SessionStatus message from router")
 
 	// Read session ID and status from message
 	sessionID, sessionStatus, err := readSessionStatusMessage(stream)
@@ -1858,7 +1874,7 @@ func (c *Client) msgGetDate(queue bool) {
 
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
-	Debug("Sending CreateSessionMessage")
+	Debug(">>> SENDING CreateSessionMessage to router")
 
 	// Build the session config message first (this sets config.date)
 	c.messageStream.Reset()
@@ -1897,6 +1913,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 		Error("Error while sending CreateSessionMessage.")
 		return err
 	}
+	Debug("<<< CreateSessionMessage sent successfully, awaiting SessionCreated response")
 	return err
 }
 
@@ -2527,7 +2544,8 @@ func (c *Client) sendSessionCreationRequest(sess *Session) error {
 
 	c.currentSession = sess
 
-	Debug("CreateSession message sent for session, awaiting response via ProcessIO")
+	Debug("CreateSession message sent, waiting for SessionCreated response...")
+	Debug("IMPORTANT: Ensure ProcessIO() is running in background to receive response")
 
 	if c.metrics != nil {
 		c.lock.Lock()
@@ -2654,6 +2672,7 @@ func (c *Client) processIncomingMessages(ctx context.Context) error {
 			return err
 		}
 
+		Debug("ProcessIO: Waiting for message from router...")
 		if err = c.recvMessage(I2CP_MSG_ANY, c.receiveStream, true); err != nil {
 			return fmt.Errorf("failed to receive message: %w", err)
 		}

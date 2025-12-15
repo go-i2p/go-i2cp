@@ -482,6 +482,7 @@ func (session *Session) dispatchStatus(status SessionStatus) {
 
 // dispatchStatusLocked is the internal version that requires the mutex to be held
 func (session *Session) dispatchStatusLocked(status SessionStatus) {
+	Debug(">>> Dispatching session status %d (%s) to callback for session %d", status, getSessionStatusName(status), session.id)
 	// Log status change with structured logging
 	switch status {
 	case I2CP_SESSION_STATUS_CREATED:
@@ -497,9 +498,11 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	}
 
 	if session.callbacks == nil || session.callbacks.OnStatus == nil {
+		Warning("Session %d has no OnStatus callback registered - status change not delivered to application", session.id)
 		return
 	}
 
+	Debug(">>> Invoking OnStatus callback for session %d with status %s", session.id, getSessionStatusName(status))
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
