@@ -10,9 +10,6 @@ import (
 // This test ensures the fix for the "CreateSession hangs with Java I2P router" bug
 func TestCreateSessionSync(t *testing.T) {
 	// This test requires a running I2P router on 127.0.0.1:7654
-	// Skip if not available
-	t.Skip("Requires running I2P router - manual test only")
-
 	client := NewClient(&ClientCallBacks{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -60,9 +57,6 @@ func TestCreateSessionSync(t *testing.T) {
 // TestCreateSessionAsync verifies the async pattern with manual ProcessIO
 func TestCreateSessionAsync(t *testing.T) {
 	// This test requires a running I2P router on 127.0.0.1:7654
-	// Skip if not available
-	t.Skip("Requires running I2P router - manual test only")
-
 	client := NewClient(&ClientCallBacks{})
 
 	ctx := context.Background()
@@ -134,8 +128,6 @@ func TestCreateSessionAsync(t *testing.T) {
 
 // Benchmark CreateSessionSync performance
 func BenchmarkCreateSessionSync(b *testing.B) {
-	b.Skip("Requires running I2P router - manual test only")
-
 	client := NewClient(&ClientCallBacks{})
 
 	ctx := context.Background()

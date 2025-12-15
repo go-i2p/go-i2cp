@@ -405,14 +405,14 @@ func TestMessageTracking_DispatchMessageStatus(t *testing.T) {
 func TestMessageTracking_SendMessageIntegration(t *testing.T) {
 	// This test would require a mock client that can intercept msgSendMessage
 	// For now, we verify the TrackMessage call is made (already tested in unit tests)
-	t.Skip("Integration test requires mock router connection - covered by other tests")
+	t.Error("Integration test requires mock router connection - covered by other tests")
 }
 
 // TestMessageTracking_SendMessageExpiresIntegration verifies SendMessageExpires tracks messages
 func TestMessageTracking_SendMessageExpiresIntegration(t *testing.T) {
 	// This test would require a mock client that can intercept msgSendMessageExpires
 	// For now, we verify the TrackMessage call is made (already tested in unit tests)
-	t.Skip("Integration test requires mock router connection - covered by other tests")
+	t.Error("Integration test requires mock router connection - covered by other tests")
 }
 
 // TestMessageTracking_MultipleStatuses verifies handling multiple status updates

@@ -25,7 +25,7 @@ import (
 //
 // Run with: go test -v -tags=integration -timeout=5m
 //
-// The tests will gracefully skip if the I2P router is unavailable.
+// IMPORTANT: These tests require a running I2P router and will FAIL if one is not available on localhost:7654.
 //
 // Note on Router Behavior:
 //   Some routers may not send SessionStatus CREATED messages (status code 1) immediately,
@@ -56,26 +56,6 @@ const (
 	protocolBidirectional uint8 = 201
 )
 
-// checkRouterAvailable attempts to connect to the I2P router and returns
-// whether it's available for testing. This allows tests to skip gracefully
-// when the router is not running.
-func checkRouterAvailable(t *testing.T) bool {
-	t.Helper()
-
-	client := NewClient(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := client.Connect(ctx)
-	if err != nil {
-		t.Logf("I2P router not available on localhost:7654: %v", err)
-		return false
-	}
-
-	client.Close()
-	return true
-}
-
 // TestSessionLifecycle validates complete session lifecycle including:
 // - Session creation
 // - Status callback invocation (OnStatus)
@@ -85,10 +65,6 @@ func checkRouterAvailable(t *testing.T) bool {
 // This test demonstrates the fundamental I2CP session management operations
 // that form the foundation for all I2P communications.
 func TestSessionLifecycle(t *testing.T) {
-	if !checkRouterAvailable(t) {
-		t.Skip("I2P router not available - skipping integration test")
-	}
-
 	// Track callback invocations for validation
 	var (
 		statusMu       sync.Mutex
@@ -273,10 +249,6 @@ func TestSessionLifecycle(t *testing.T) {
 // This test demonstrates actual I2P network communication over the anonymous
 // network, proving the library can successfully route messages between destinations.
 func TestBidirectionalDataTransfer(t *testing.T) {
-	if !checkRouterAvailable(t) {
-		t.Skip("I2P router not available - skipping integration test")
-	}
-
 	// Test payload with checksum for integrity verification
 	testPayload := []byte("Hello from go-i2cp integration test! This is a test message for bidirectional data transfer.")
 	payloadChecksum := sha256.Sum256(testPayload)
@@ -510,10 +482,6 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 // This test demonstrates the I2P naming/addressing system and how destinations
 // are resolved before communication can occur.
 func TestDestinationLookupAndRouting(t *testing.T) {
-	if !checkRouterAvailable(t) {
-		t.Skip("I2P router not available - skipping integration test")
-	}
-
 	// Create target client and session (the destination to be looked up)
 	targetClient := NewClient(nil)
 	targetCtx, targetCancel := context.WithTimeout(context.Background(), connectionTimeout)
@@ -746,10 +714,6 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 // - Data integrity across multiple transfers
 // - Protocol identifier handling
 func TestMultipleMessagesWithIntegrity(t *testing.T) {
-	if !checkRouterAvailable(t) {
-		t.Skip("I2P router not available - skipping integration test")
-	}
-
 	const messageCount = 5
 	messageSizes := []int{100, 500, 1000, 5000, 10000}
 
