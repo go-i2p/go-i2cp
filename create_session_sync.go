@@ -56,8 +56,10 @@ func (c *Client) CreateSessionSync(ctx context.Context, sess *Session) error {
 	// Create channel to signal session creation
 	sessionCreated := make(chan error, 1)
 
-	// Wrap callbacks to intercept status changes
+	// Wrap callbacks to intercept status changes and disconnects
 	wrapSessionCallbacks(sess, sessionCreated)
+	restoreDisconnect := wrapClientDisconnectCallback(c, sessionCreated)
+	defer restoreDisconnect()
 
 	// Start ProcessIO in background
 	processIOCtx, cancelProcessIO := context.WithCancel(ctx)
@@ -96,6 +98,37 @@ func wrapSessionCallbacks(sess *Session, sessionCreated chan<- error) {
 		case I2CP_SESSION_STATUS_DESTROYED:
 			Debug("CreateSessionSync: Session destroyed before creation confirmed")
 			sessionCreated <- fmt.Errorf("session destroyed: %w", ErrSessionInvalid)
+		}
+	}
+}
+
+// wrapClientDisconnectCallback wraps the client's OnDisconnect callback to catch router disconnects
+// during session creation. Returns a function to restore the original callback.
+func wrapClientDisconnectCallback(c *Client, sessionCreated chan<- error) func() {
+	var originalOnDisconnect func(*Client, string, *interface{})
+
+	if c.callbacks != nil {
+		originalOnDisconnect = c.callbacks.OnDisconnect
+		c.callbacks.OnDisconnect = func(client *Client, reason string, opaque *interface{}) {
+			// Call original callback if present
+			if originalOnDisconnect != nil {
+				originalOnDisconnect(client, reason, opaque)
+			}
+
+			// Signal session creation failure due to disconnect
+			Debug("CreateSessionSync: Router disconnected during session creation: %s", reason)
+			select {
+			case sessionCreated <- fmt.Errorf("router disconnected during session creation: %s", reason):
+			default:
+				// Channel already has a value, ignore
+			}
+		}
+	}
+
+	// Return function to restore original callback
+	return func() {
+		if c.callbacks != nil {
+			c.callbacks.OnDisconnect = originalOnDisconnect
 		}
 	}
 }
