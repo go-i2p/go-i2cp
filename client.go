@@ -2098,31 +2098,43 @@ func (c *Client) validateMessageSize(compressedSize int) error {
 //	defer cancel()
 //	err := client.Connect(ctx)
 func (c *Client) Connect(ctx context.Context) error {
-	// Ensure client was properly initialized with NewClient()
-	if err := c.ensureInitialized(); err != nil {
+	if err := c.validateConnectionPreconditions(ctx); err != nil {
 		return err
-	}
-
-	// Check context before starting
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled before connect: %w", err)
 	}
 
 	Info("Client connecting to i2cp at %s:%s", c.properties["i2cp.tcp.host"], c.properties["i2cp.tcp.port"])
 
-	// Setup TLS and establish connection
+	if err := c.establishConnection(ctx); err != nil {
+		return err
+	}
+
+	c.updateConnectionMetrics()
+	return nil
+}
+
+// validateConnectionPreconditions checks if client is initialized and context is valid.
+func (c *Client) validateConnectionPreconditions(ctx context.Context) error {
+	if err := c.ensureInitialized(); err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before connect: %w", err)
+	}
+
+	return nil
+}
+
+// establishConnection sets up TLS, connects TCP, and performs protocol handshake.
+func (c *Client) establishConnection(ctx context.Context) error {
 	if err := c.setupTLSIfEnabled(); err != nil {
 		return err
 	}
 
-	// Establish TCP/TLS connection
-	err := c.tcp.Connect()
-	if err != nil {
-		c.trackError("network")
-		return fmt.Errorf("failed to connect TCP: %w", err)
+	if err := c.connectTCP(); err != nil {
+		return err
 	}
 
-	// Set up cleanup on error - ensures TCP disconnects if any subsequent step fails
 	success := false
 	defer func() {
 		if !success {
@@ -2132,20 +2144,30 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	}()
 
-	// Complete I2CP protocol handshake
 	if err := c.performProtocolHandshake(ctx); err != nil {
 		return err
 	}
 
 	c.connected = true
 	success = true
+	return nil
+}
 
-	// Update metrics connection state
+// connectTCP establishes the TCP/TLS connection to the router.
+func (c *Client) connectTCP() error {
+	err := c.tcp.Connect()
+	if err != nil {
+		c.trackError("network")
+		return fmt.Errorf("failed to connect TCP: %w", err)
+	}
+	return nil
+}
+
+// updateConnectionMetrics updates metrics to reflect connected state.
+func (c *Client) updateConnectionMetrics() {
 	if c.metrics != nil {
 		c.metrics.SetConnectionState("connected")
 	}
-
-	return nil
 }
 
 // setupTLSIfEnabled configures TLS for the TCP connection if enabled in client properties.
