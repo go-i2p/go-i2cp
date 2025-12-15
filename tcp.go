@@ -133,48 +133,81 @@ func (tcp *Tcp) SetupTLS(certFile, keyFile, caFile string, insecure bool) error 
 	return nil
 }
 
+// Connect establishes a TCP or TLS connection to the I2P router.
+// Initializes the connection address if needed, then establishes either
+// a TLS connection (if configured) or plain TCP connection.
 func (tcp *Tcp) Connect() (err error) {
-	if tcp.address == nil {
-		err := tcp.Init()
-		if err != nil {
+	if err := tcp.ensureAddressInitialized(); err != nil {
+		return err
+	}
+
+	if tcp.tlsConfig != nil {
+		if err := tcp.connectTLS(); err != nil {
+			return err
+		}
+	} else {
+		if err := tcp.connectTCP(); err != nil {
 			return err
 		}
 	}
 
-	// Use TLS if configured via SetupTLS
-	if tcp.tlsConfig != nil {
-		// TLS configuration has been set up via SetupTLS
+	tcp.reader = bufio.NewReader(tcp.conn)
+	return nil
+}
 
-		Debug("Establishing TLS connection to %s", tcp.address.String())
-		tcp.conn, err = tls.Dial("tcp", tcp.address.String(), tcp.tlsConfig)
-		if err != nil {
-			return fmt.Errorf("i2cp: failed to dial TLS connection to %s: %w", tcp.address, err)
-		}
-
-		// Verify TLS handshake completed successfully
-		if tlsConn, ok := tcp.conn.(*tls.Conn); ok {
-			if err := tlsConn.Handshake(); err != nil {
-				tcp.conn.Close()
-				tcp.conn = nil
-				return fmt.Errorf("i2cp: TLS handshake failed: %w", err)
-			}
-			state := tlsConn.ConnectionState()
-			Debug("TLS connection established: version=%s cipher=%s",
-				tls.VersionName(state.Version), tls.CipherSuiteName(state.CipherSuite))
-		}
-	} else {
-		// Plain TCP connection
-		Debug("Establishing TCP connection to %s", tcp.address.String())
-		tcp.conn, err = net.Dial("tcp", tcp.address.String())
-		if err != nil {
-			return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
+// ensureAddressInitialized verifies the connection address is set,
+// initializing it if necessary.
+func (tcp *Tcp) ensureAddressInitialized() error {
+	if tcp.address == nil {
+		if err := tcp.Init(); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	// Initialize buffered reader for non-destructive peeking
-	// This prevents CanRead() from consuming bytes from the stream
-	tcp.reader = bufio.NewReader(tcp.conn)
+// connectTLS establishes a TLS connection and verifies the handshake.
+func (tcp *Tcp) connectTLS() error {
+	Debug("Establishing TLS connection to %s", tcp.address.String())
+	conn, err := tls.Dial("tcp", tcp.address.String(), tcp.tlsConfig)
+	if err != nil {
+		return fmt.Errorf("i2cp: failed to dial TLS connection to %s: %w", tcp.address, err)
+	}
 
+	if err := tcp.verifyTLSHandshake(conn); err != nil {
+		conn.Close()
+		return err
+	}
+
+	tcp.conn = conn
+	return nil
+}
+
+// verifyTLSHandshake completes and validates the TLS handshake.
+func (tcp *Tcp) verifyTLSHandshake(conn net.Conn) error {
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return nil
+	}
+
+	if err := tlsConn.Handshake(); err != nil {
+		return fmt.Errorf("i2cp: TLS handshake failed: %w", err)
+	}
+
+	state := tlsConn.ConnectionState()
+	Debug("TLS connection established: version=%s cipher=%s",
+		tls.VersionName(state.Version), tls.CipherSuiteName(state.CipherSuite))
+	return nil
+}
+
+// connectTCP establishes a plain TCP connection.
+func (tcp *Tcp) connectTCP() error {
+	Debug("Establishing TCP connection to %s", tcp.address.String())
+	conn, err := net.Dial("tcp", tcp.address.String())
+	if err != nil {
+		return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
+	}
+	tcp.conn = conn
 	return nil
 }
 
