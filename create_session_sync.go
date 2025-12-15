@@ -106,25 +106,39 @@ func (c *Client) runProcessIOLoop(ctx context.Context) {
 	Debug("CreateSessionSync: Starting ProcessIO loop")
 
 	for {
-		select {
-		case <-ctx.Done():
-			Debug("CreateSessionSync: ProcessIO context cancelled")
-			return
-		default:
-		}
-
-		err := c.ProcessIO(ctx)
-		if err != nil {
-			// Only log errors that aren't expected during shutdown
-			if err != ErrClientClosed && ctx.Err() == nil {
-				Warning("CreateSessionSync: ProcessIO error: %v", err)
-			}
+		if shouldStopProcessIO(ctx) {
 			return
 		}
 
-		// Small sleep to prevent busy loop
+		if err := c.processIOWithErrorHandling(ctx); err != nil {
+			return
+		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// shouldStopProcessIO checks if the context is cancelled and should stop processing.
+func shouldStopProcessIO(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		Debug("CreateSessionSync: ProcessIO context cancelled")
+		return true
+	default:
+		return false
+	}
+}
+
+// processIOWithErrorHandling processes I/O and handles errors appropriately.
+func (c *Client) processIOWithErrorHandling(ctx context.Context) error {
+	err := c.ProcessIO(ctx)
+	if err != nil {
+		if err != ErrClientClosed && ctx.Err() == nil {
+			Warning("CreateSessionSync: ProcessIO error: %v", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // awaitSessionCreation waits for session creation confirmation or timeout.
