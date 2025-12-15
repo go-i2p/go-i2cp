@@ -790,18 +790,29 @@ func (session *Session) convertLookupData(lookupType uint8, lookupData interface
 // LookupDestinationWithContext performs a destination lookup with context support
 // per I2CP specification 0.9.11+ - implements context-aware destination resolution
 func (session *Session) LookupDestinationWithContext(ctx context.Context, address string, timeout time.Duration) (*Destination, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("context cannot be nil")
+	if err := validateLookupContext(ctx); err != nil {
+		return nil, err
 	}
 
-	// Check if context is already cancelled
+	return executeLookupWithContext(ctx, session, address, timeout)
+}
+
+// validateLookupContext validates the context is non-nil and not already cancelled.
+func validateLookupContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context cancelled before destination lookup: %w", ctx.Err())
+		return fmt.Errorf("context cancelled before destination lookup: %w", ctx.Err())
 	default:
+		return nil
 	}
+}
 
-	// Set up timeout handling
+// executeLookupWithContext executes the destination lookup in a goroutine with context cancellation support.
+func executeLookupWithContext(ctx context.Context, session *Session, address string, timeout time.Duration) (*Destination, error) {
 	type result struct {
 		dest *Destination
 		err  error
