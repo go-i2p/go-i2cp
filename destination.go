@@ -329,39 +329,70 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 }
 
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
-	// Write certificate
-	if err = dest.cert.WriteToStream(stream); err != nil {
+	if err = dest.writeCertificateToStream(stream); err != nil {
+		return err
+	}
+
+	if err = dest.writeAlgorithmType(stream); err != nil {
+		return err
+	}
+
+	if err = dest.writeEd25519KeyPair(stream); err != nil {
+		return err
+	}
+
+	if err = dest.writeEncryptionPublicKey(stream); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// writeCertificateToStream writes the destination certificate to the stream.
+func (dest *Destination) writeCertificateToStream(stream *Stream) error {
+	if err := dest.cert.WriteToStream(stream); err != nil {
 		return fmt.Errorf("failed to write certificate to stream: %w", err)
 	}
+	return nil
+}
 
-	// Write algorithm type
-	if err = stream.WriteUint32(ED25519_SHA256); err != nil {
+// writeAlgorithmType writes the signature algorithm type to the stream.
+func (dest *Destination) writeAlgorithmType(stream *Stream) error {
+	if err := stream.WriteUint32(ED25519_SHA256); err != nil {
 		return fmt.Errorf("failed to write algorithm type: %w", err)
 	}
+	return nil
+}
 
-	// Write Ed25519 keypair (32 bytes private + 32 bytes public)
-	if dest.sgk.ed25519KeyPair != nil {
-		privKey := dest.sgk.ed25519KeyPair.PrivateKey()
-		pubKey := dest.sgk.ed25519KeyPair.PublicKey()
-		if _, err = stream.Write(privKey[:]); err != nil {
-			return fmt.Errorf("failed to write Ed25519 private key: %w", err)
-		}
-		if _, err = stream.Write(pubKey[:]); err != nil {
-			return fmt.Errorf("failed to write Ed25519 public key: %w", err)
-		}
-	} else {
+// writeEd25519KeyPair writes the Ed25519 private and public keys to the stream.
+func (dest *Destination) writeEd25519KeyPair(stream *Stream) error {
+	if dest.sgk.ed25519KeyPair == nil {
 		return fmt.Errorf("no Ed25519 keypair available")
 	}
 
-	// Write encryption public key length
-	if err = stream.WriteUint16(PUB_KEY_SIZE); err != nil {
+	privKey := dest.sgk.ed25519KeyPair.PrivateKey()
+	pubKey := dest.sgk.ed25519KeyPair.PublicKey()
+
+	if _, err := stream.Write(privKey[:]); err != nil {
+		return fmt.Errorf("failed to write Ed25519 private key: %w", err)
+	}
+	if _, err := stream.Write(pubKey[:]); err != nil {
+		return fmt.Errorf("failed to write Ed25519 public key: %w", err)
+	}
+
+	return nil
+}
+
+// writeEncryptionPublicKey writes the encryption public key length and data to the stream.
+func (dest *Destination) writeEncryptionPublicKey(stream *Stream) error {
+	if err := stream.WriteUint16(PUB_KEY_SIZE); err != nil {
 		return fmt.Errorf("failed to write public key size: %w", err)
 	}
 
-	// Write encryption public key
-	if _, err = stream.Write(dest.pubKey[:]); err != nil {
+	if _, err := stream.Write(dest.pubKey[:]); err != nil {
 		return fmt.Errorf("failed to write public key: %w", err)
 	}
+
 	return nil
 }
 
