@@ -58,19 +58,10 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	}
 	t.Logf("Creation date: %d (ms since epoch)", creationDate)
 
-	// Read signature type (added per Java I2P Signature.java format)
-	signatureType, err := parseStream.ReadUint16()
-	if err != nil {
-		t.Fatalf("Failed to read signature type: %v", err)
-	}
-	t.Logf("Signature type: %d", signatureType)
-
-	// Verify it's Ed25519 (type 7)
-	if signatureType != uint16(ED25519_SHA256) {
-		t.Fatalf("Expected Ed25519 signature type (%d), got %d", ED25519_SHA256, signatureType)
-	}
-
-	// Read Ed25519 signature (64 bytes)
+	// Signature follows directly (no type prefix)
+	// Java I2P determines signature type from Destination's signing key type in certificate
+	// Signature length depends on type: Ed25519 = 64 bytes, DSA = 40 bytes
+	// Our destination uses Ed25519, so expect 64-byte signature
 	signature := make([]byte, 64)
 	n, err := parseStream.Read(signature)
 	if err != nil {
@@ -140,21 +131,15 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 	stream := NewStream(make([]byte, 0, 1024))
 	config.writeToMessage(stream, crypto, nil)
 
-	// The message should end with: 2-byte signature type + 64-byte Ed25519 signature
+	// The message should end with: 64-byte Ed25519 signature (no type prefix)
+	// Java I2P determines signature type from the Destination's signing key certificate
 	messageBytes := stream.Bytes()
-	if len(messageBytes) < 66 {
+	if len(messageBytes) < 64 {
 		t.Fatalf("Message too short to contain signature: %d bytes", len(messageBytes))
 	}
 
-	// Last 66 bytes: type (2) + signature (64)
-	signatureSection := messageBytes[len(messageBytes)-66:]
-	signatureType := uint16(signatureSection[0])<<8 | uint16(signatureSection[1])
-
-	if signatureType != uint16(ED25519_SHA256) {
-		t.Fatalf("Expected Ed25519 signature type (%d), got %d", ED25519_SHA256, signatureType)
-	}
-
-	signature := signatureSection[2:]
+	// Last 64 bytes: signature only (no type prefix)
+	signature := messageBytes[len(messageBytes)-64:]
 
 	// Signature should not be all zeros
 	allZeros := true
@@ -169,7 +154,6 @@ func TestSessionConfigSignatureFormat(t *testing.T) {
 		t.Fatal("Signature is all zeros - signing failed")
 	}
 
-	t.Logf("Signature type: %d (Ed25519)", signatureType)
 	t.Logf("Signature (64 bytes): %x", signature)
 }
 

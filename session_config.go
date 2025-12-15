@@ -203,15 +203,12 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 
 	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
 
-	// Write the complete message: data + signature type + signature
-	// Per Java I2P Signature.java: signatures are prefixed with type (uint16)
+	// Write the complete message: data + signature
+	// Java I2P reads signature type from Destination certificate, NOT from a prefix
+	// Signature.readBytes() just reads the raw signature bytes based on the type
 	stream.Write(dataToSign.Bytes())
-
-	// Write Ed25519 signature type (7) and signature bytes
-	signatureType := uint16(ED25519_SHA256)
-	stream.WriteUint16(signatureType)
 	stream.Write(signature)
-	Debug("Complete CreateSession message: %d bytes (signature type: %d)", stream.Len(), signatureType)
+	Debug("Complete CreateSession message: %d bytes", stream.Len())
 }
 
 // min returns the minimum of two integers

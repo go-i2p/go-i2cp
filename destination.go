@@ -26,12 +26,13 @@ type Destination struct {
 func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	dest = &Destination{crypto: crypto}
 
-	// Modern I2CP uses KEY certificates with Ed25519 (signing) + X25519 (encryption)
-	// Certificate format: [type=5][length=4][sigType=7 (2 bytes)][cryptoType=4 (2 bytes)]
-	// KEY certificate payload: signingKeyType (2 bytes) + encryptionKeyType (2 bytes)
+	// I2CP requires ElGamal encryption type (0) in Destination certificate
+	// Per Java I2P router ClientMessageEventListener.java: only ELGAMAL_2048 is supported via I2CP
+	// Modern encryption (X25519) is specified separately via i2cp.leaseSetEncType session option
+	// Certificate format: [type=5][length=4][sigType=7][cryptoType=0]
 	keyCertPayload := []byte{
 		0, 7, // Signing key type: Ed25519 (7)
-		0, 4, // Encryption key type: ECIES-X25519 (4)
+		0, 0, // Encryption key type: ElGamal (0) - required for I2CP compatibility
 	}
 	commonCert, err := certificate.NewCertificateWithType(CERTIFICATE_KEY, keyCertPayload)
 	if err != nil {
@@ -46,16 +47,9 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 		return nil, fmt.Errorf("failed to generate Ed25519 signature keypair: %w", err)
 	}
 
-	// Generate X25519 encryption keypair (ECIES)
-	x25519Kp, err := crypto.X25519KeyExchangeKeygen()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate X25519 encryption keypair: %w", err)
-	}
-
-	// For KEY certificates with ECIES-X25519, pubKey contains X25519 public key (32 bytes)
-	// LEFT-align the 32-byte X25519 key in the 256-byte field (bytes 0-31)
-	x25519PubKey := x25519Kp.PublicKey()
-	copy(dest.pubKey[:32], x25519PubKey[:]) // Left-align: bytes 0-31 contain the key
+	// Destination pubKey field: must be 256 bytes (ElGamal size) even though unused
+	// Fill with zeros - field deprecated since 2005, actual encryption via LeaseSet
+	// Modern encryption (X25519) configured via i2cp.leaseSetEncType=4 session option
 
 	dest.generateB32()
 	dest.generateB64()
