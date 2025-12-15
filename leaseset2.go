@@ -83,35 +83,50 @@ type OfflineSignature struct {
 func NewLeaseSet2FromStream(stream *Stream, crypto *Crypto) (*LeaseSet2, error) {
 	ls := &LeaseSet2{}
 
-	if err := readLeaseSet2Type(stream, ls); err != nil {
+	if err := readLeaseSet2Header(stream, crypto, ls); err != nil {
 		return nil, err
 	}
 
-	if err := readLeaseSet2Destination(stream, crypto, ls); err != nil {
+	if err := readLeaseSet2Body(stream, ls); err != nil {
 		return nil, err
 	}
 
-	if err := readLeaseSet2Timestamps(stream, ls); err != nil {
-		return nil, err
-	}
-
-	if err := readLeaseSet2FlagsAndProperties(stream, ls); err != nil {
-		return nil, err
-	}
-
-	if err := readLeaseSet2Leases(stream, ls); err != nil {
-		return nil, err
-	}
-
-	if err := readLeaseSet2OfflineSignature(stream, ls); err != nil {
-		return nil, err
-	}
-
-	if err := readLeaseSet2Signature(stream, ls); err != nil {
+	if err := readLeaseSet2Signatures(stream, ls); err != nil {
 		return nil, err
 	}
 
 	return ls, nil
+}
+
+// readLeaseSet2Header reads the type, destination, and timestamps from the stream.
+func readLeaseSet2Header(stream *Stream, crypto *Crypto, ls *LeaseSet2) error {
+	if err := readLeaseSet2Type(stream, ls); err != nil {
+		return err
+	}
+
+	if err := readLeaseSet2Destination(stream, crypto, ls); err != nil {
+		return err
+	}
+
+	return readLeaseSet2Timestamps(stream, ls)
+}
+
+// readLeaseSet2Body reads the flags, properties, and leases from the stream.
+func readLeaseSet2Body(stream *Stream, ls *LeaseSet2) error {
+	if err := readLeaseSet2FlagsAndProperties(stream, ls); err != nil {
+		return err
+	}
+
+	return readLeaseSet2Leases(stream, ls)
+}
+
+// readLeaseSet2Signatures reads the offline signature and main signature from the stream.
+func readLeaseSet2Signatures(stream *Stream, ls *LeaseSet2) error {
+	if err := readLeaseSet2OfflineSignature(stream, ls); err != nil {
+		return err
+	}
+
+	return readLeaseSet2Signature(stream, ls)
 }
 
 // readLeaseSet2Type reads and validates the LeaseSet2 type byte from the stream.
@@ -174,34 +189,54 @@ func readLeaseSet2FlagsAndProperties(stream *Stream, ls *LeaseSet2) error {
 
 // readLeaseSet2Leases reads and validates all Lease2 structures from the stream.
 func readLeaseSet2Leases(stream *Stream, ls *LeaseSet2) error {
-	leaseCount, err := stream.ReadByte()
+	leaseCount, err := readLeaseCount(stream)
 	if err != nil {
-		return fmt.Errorf("failed to read LeaseSet2 lease count: %w", err)
-	}
-
-	if leaseCount > 16 {
-		return fmt.Errorf("invalid LeaseSet2 lease count: %d (max 16)", leaseCount)
+		return err
 	}
 
 	ls.leases = make([]*lease.Lease2, leaseCount)
 	for i := uint8(0); i < leaseCount; i++ {
-		leaseData := make([]byte, 40)
-		n, err := stream.Read(leaseData)
+		l2, err := readSingleLease(stream, i)
 		if err != nil {
-			return fmt.Errorf("failed to read LeaseSet2 lease %d: %w", i, err)
+			return err
 		}
-		if n != 40 {
-			return fmt.Errorf("incomplete Lease2 read: got %d bytes, expected 40", n)
-		}
-
-		l2, _, err := lease.ReadLease2(leaseData)
-		if err != nil {
-			return fmt.Errorf("failed to parse Lease2 %d: %w", i, err)
-		}
-		ls.leases[i] = &l2
+		ls.leases[i] = l2
 	}
 
 	return nil
+}
+
+// readLeaseCount reads and validates the lease count from the stream.
+func readLeaseCount(stream *Stream) (uint8, error) {
+	leaseCount, err := stream.ReadByte()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read LeaseSet2 lease count: %w", err)
+	}
+
+	if leaseCount > 16 {
+		return 0, fmt.Errorf("invalid LeaseSet2 lease count: %d (max 16)", leaseCount)
+	}
+
+	return leaseCount, nil
+}
+
+// readSingleLease reads and parses a single Lease2 from the stream.
+func readSingleLease(stream *Stream, index uint8) (*lease.Lease2, error) {
+	leaseData := make([]byte, 40)
+	n, err := stream.Read(leaseData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read LeaseSet2 lease %d: %w", index, err)
+	}
+	if n != 40 {
+		return nil, fmt.Errorf("incomplete Lease2 read: got %d bytes, expected 40", n)
+	}
+
+	l2, _, err := lease.ReadLease2(leaseData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Lease2 %d: %w", index, err)
+	}
+
+	return &l2, nil
 }
 
 // readLeaseSet2OfflineSignature reads the offline signature if the flags indicate it is present.
