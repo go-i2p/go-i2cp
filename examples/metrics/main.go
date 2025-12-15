@@ -76,13 +76,25 @@ func main() {
 	fmt.Println("\n✓ Metrics example completed successfully")
 }
 
+// printMetrics displays all collected metrics from the I2CP client.
 func printMetrics(m *i2cp.InMemoryMetrics) {
+	printBasicMetrics(m)
+	printMessagesSent(m)
+	printMessagesReceived(m)
+	printErrorMetrics(m)
+	printLatencyMetrics(m)
+}
+
+// printBasicMetrics displays connection state, active sessions, and byte counters.
+func printBasicMetrics(m *i2cp.InMemoryMetrics) {
 	fmt.Printf("Connection State: %s\n", m.ConnectionState())
 	fmt.Printf("Active Sessions: %d\n", m.ActiveSessions())
 	fmt.Printf("Bytes Sent: %d\n", m.BytesSent())
 	fmt.Printf("Bytes Received: %d\n", m.BytesReceived())
+}
 
-	// Message counters
+// printMessagesSent displays statistics for messages sent to the I2P router.
+func printMessagesSent(m *i2cp.InMemoryMetrics) {
 	createSessionSent := m.MessagesSent(i2cp.I2CP_MSG_CREATE_SESSION)
 	getDateSent := m.MessagesSent(i2cp.I2CP_MSG_GET_DATE)
 	sendMessageSent := m.MessagesSent(i2cp.I2CP_MSG_SEND_MESSAGE)
@@ -99,7 +111,10 @@ func printMetrics(m *i2cp.InMemoryMetrics) {
 			fmt.Printf("  SEND_MESSAGE: %d\n", sendMessageSent)
 		}
 	}
+}
 
+// printMessagesReceived displays statistics for messages received from the I2P router.
+func printMessagesReceived(m *i2cp.InMemoryMetrics) {
 	setDateRecv := m.MessagesReceived(i2cp.I2CP_MSG_SET_DATE)
 	sessionStatusRecv := m.MessagesReceived(i2cp.I2CP_MSG_SESSION_STATUS)
 	payloadMsgRecv := m.MessagesReceived(i2cp.I2CP_MSG_PAYLOAD_MESSAGE)
@@ -116,8 +131,10 @@ func printMetrics(m *i2cp.InMemoryMetrics) {
 			fmt.Printf("  PAYLOAD_MESSAGE: %d\n", payloadMsgRecv)
 		}
 	}
+}
 
-	// Error tracking
+// printErrorMetrics displays all tracked errors and their counts.
+func printErrorMetrics(m *i2cp.InMemoryMetrics) {
 	errors := m.AllErrors()
 	if len(errors) > 0 {
 		fmt.Println("\nErrors:")
@@ -125,8 +142,10 @@ func printMetrics(m *i2cp.InMemoryMetrics) {
 			fmt.Printf("  %s: %d\n", errType, count)
 		}
 	}
+}
 
-	// Latency stats for CREATE_SESSION
+// printLatencyMetrics displays latency statistics for CREATE_SESSION operations.
+func printLatencyMetrics(m *i2cp.InMemoryMetrics) {
 	if avg := m.AvgLatency(i2cp.I2CP_MSG_CREATE_SESSION); avg > 0 {
 		fmt.Println("\nCREATE_SESSION Latency:")
 		fmt.Printf("  Avg: %v\n", avg)
