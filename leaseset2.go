@@ -766,52 +766,80 @@ func (ls *LeaseSet2) writeOptionalOfflineSignature(stream *Stream) error {
 }
 
 // writeOfflineSignature writes an OfflineSignature to the stream for signature verification.
+// Coordinates the serialization of all offline signature components.
 func writeOfflineSignature(sig *OfflineSignature, stream *Stream) error {
-	// Write signing key type
-	err := stream.WriteUint16(sig.signingKeyType)
-	if err != nil {
+	if err := writeOfflineSigningKey(sig, stream); err != nil {
+		return err
+	}
+
+	if err := writeOfflineExpires(sig, stream); err != nil {
+		return err
+	}
+
+	if err := writeOfflineTransientKey(sig, stream); err != nil {
+		return err
+	}
+
+	if err := writeOfflineSignatureData(sig, stream); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// writeOfflineSigningKey writes the signing key type and key bytes to the stream.
+// Format: signingKeyType (2 bytes) || signingKeyLength (2 bytes) || signingKey (variable)
+func writeOfflineSigningKey(sig *OfflineSignature, stream *Stream) error {
+	if err := stream.WriteUint16(sig.signingKeyType); err != nil {
 		return fmt.Errorf("failed to write signing key type: %w", err)
 	}
 
-	// Write signing key length and key
-	err = stream.WriteUint16(uint16(len(sig.signingKey)))
-	if err != nil {
+	if err := stream.WriteUint16(uint16(len(sig.signingKey))); err != nil {
 		return fmt.Errorf("failed to write signing key length: %w", err)
 	}
-	_, err = stream.Write(sig.signingKey)
-	if err != nil {
+
+	if _, err := stream.Write(sig.signingKey); err != nil {
 		return fmt.Errorf("failed to write signing key: %w", err)
 	}
 
-	// Write expires
-	err = stream.WriteUint32(sig.expires)
-	if err != nil {
+	return nil
+}
+
+// writeOfflineExpires writes the expiration timestamp to the stream.
+// Format: expires (4 bytes, seconds since epoch)
+func writeOfflineExpires(sig *OfflineSignature, stream *Stream) error {
+	if err := stream.WriteUint32(sig.expires); err != nil {
 		return fmt.Errorf("failed to write expires: %w", err)
 	}
+	return nil
+}
 
-	// Write transient key type
-	err = stream.WriteUint16(sig.transientType)
-	if err != nil {
+// writeOfflineTransientKey writes the transient key type and key bytes to the stream.
+// Format: transientKeyType (2 bytes) || transientKeyLength (2 bytes) || transientKey (variable)
+func writeOfflineTransientKey(sig *OfflineSignature, stream *Stream) error {
+	if err := stream.WriteUint16(sig.transientType); err != nil {
 		return fmt.Errorf("failed to write transient key type: %w", err)
 	}
 
-	// Write transient key length and key
-	err = stream.WriteUint16(uint16(len(sig.transientKey)))
-	if err != nil {
+	if err := stream.WriteUint16(uint16(len(sig.transientKey))); err != nil {
 		return fmt.Errorf("failed to write transient key length: %w", err)
 	}
-	_, err = stream.Write(sig.transientKey)
-	if err != nil {
+
+	if _, err := stream.Write(sig.transientKey); err != nil {
 		return fmt.Errorf("failed to write transient key: %w", err)
 	}
 
-	// Write signature length and signature
-	err = stream.WriteUint16(uint16(len(sig.signature)))
-	if err != nil {
+	return nil
+}
+
+// writeOfflineSignatureData writes the cryptographic signature bytes to the stream.
+// Format: signatureLength (2 bytes) || signature (variable)
+func writeOfflineSignatureData(sig *OfflineSignature, stream *Stream) error {
+	if err := stream.WriteUint16(uint16(len(sig.signature))); err != nil {
 		return fmt.Errorf("failed to write signature length: %w", err)
 	}
-	_, err = stream.Write(sig.signature)
-	if err != nil {
+
+	if _, err := stream.Write(sig.signature); err != nil {
 		return fmt.Errorf("failed to write signature: %w", err)
 	}
 
