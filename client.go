@@ -1503,114 +1503,139 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 // msgCreateLeaseSet2 sends CreateLeaseSet2Message (type 41) for modern LeaseSet creation
 // per I2CP specification 0.9.39+ - supports LS2/EncryptedLS/MetaLS with modern crypto
 func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool) error {
-	var err error
-	var leaseSet *Stream
-	var config *SessionConfig
-	var dest *Destination
-	var sgk *SignatureKeyPair
-
 	Debug("Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
 
-	leaseSet = NewStream(make([]byte, 4096))
-	config = session.config
-	dest = config.destination
-	sgk = &dest.sgk
+	leaseSet := NewStream(make([]byte, 4096))
+	dest := session.config.destination
 
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(session.id)
 
-	// Build LeaseSet2 stream with modern format
-	// Determine LeaseSet2 type based on blinding configuration (I2CP 0.9.43+)
+	if err := c.writeLeaseSet2Header(session, leaseSet, dest); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2Timestamps(leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2Flags(session, leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2Properties(session, leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2Leases(leaseSet, leaseCount); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2BlindingParams(session, leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.signAndSendLeaseSet2(session, leaseSet, dest, queue); err != nil {
+		return err
+	}
+
+	Debug("Successfully sent CreateLeaseSet2Message for session %d", session.id)
+	return nil
+}
+
+// writeLeaseSet2Header writes the LeaseSet2 type and destination to the stream.
+func (c *Client) writeLeaseSet2Header(session *Session, leaseSet *Stream, dest *Destination) error {
 	var leaseSetType uint8
 	if session.IsBlindingEnabled() {
-		leaseSetType = LEASESET_TYPE_ENCRYPTED // Encrypted LeaseSet2 with blinding
+		leaseSetType = LEASESET_TYPE_ENCRYPTED
 		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
 	} else {
-		leaseSetType = LEASESET_TYPE_STANDARD // Standard LeaseSet2
+		leaseSetType = LEASESET_TYPE_STANDARD
 		Debug("Creating standard LeaseSet2 for session %d", session.id)
 	}
 	leaseSet.WriteByte(leaseSetType)
-
-	// Destination
 	dest.WriteToMessage(leaseSet)
+	return nil
+}
 
-	// Published timestamp (8 bytes)
+// writeLeaseSet2Timestamps writes the published and expires timestamps to the stream.
+func (c *Client) writeLeaseSet2Timestamps(leaseSet *Stream) error {
 	leaseSet.WriteUint64(uint64(c.router.date))
-
-	// Expires timestamp (8 bytes) - 10 minutes from published
 	expires := uint64(c.router.date) + 600000 // 10 minutes in milliseconds
 	leaseSet.WriteUint64(expires)
+	return nil
+}
 
-	// Flags (2 bytes) - set offline signature flag if needed
+// writeLeaseSet2Flags writes the flags field to the stream, including blinding flags if enabled.
+func (c *Client) writeLeaseSet2Flags(session *Session, leaseSet *Stream) error {
 	var flags uint16 = 0
-	// Add blinding flags if blinding is enabled
 	if session.IsBlindingEnabled() {
 		flags |= session.BlindingFlags()
 	}
 	leaseSet.WriteUint16(flags)
+	return nil
+}
 
-	// Properties (mapping) - include blinding info if enabled
+// writeLeaseSet2Properties writes the properties mapping to the stream, including blinding scheme if enabled.
+func (c *Client) writeLeaseSet2Properties(session *Session, leaseSet *Stream) error {
 	properties := make(map[string]string)
 	if session.IsBlindingEnabled() {
-		// Include blinding parameters in properties per I2CP 0.9.43+ spec
 		properties["blinding.scheme"] = fmt.Sprintf("%d", session.BlindingScheme())
 		Debug("Added blinding scheme %d to LeaseSet2 properties", session.BlindingScheme())
 	}
-	if err = leaseSet.WriteMapping(properties); err != nil {
+	if err := leaseSet.WriteMapping(properties); err != nil {
 		Error("Failed to write properties to LeaseSet2: %v", err)
 		return fmt.Errorf("failed to write properties: %w", err)
 	}
+	return nil
+}
 
-	// Number of leases (1 byte)
+// writeLeaseSet2Leases writes the lease count and placeholder lease data to the stream.
+func (c *Client) writeLeaseSet2Leases(leaseSet *Stream, leaseCount int) error {
 	leaseSet.WriteByte(uint8(leaseCount))
 
-	// Note: Actual lease data would be added by router in response to RequestVariableLeaseSetMessage
-	// For now, we create placeholder leases
 	for i := 0; i < leaseCount; i++ {
-		// Gateway hash (32 bytes) - placeholder
 		nullGateway := make([]byte, 32)
 		leaseSet.Write(nullGateway)
-
-		// Tunnel ID (4 bytes) - placeholder
 		leaseSet.WriteUint32(uint32(i + 1))
-
-		// End date (8 bytes) - 5 minutes from now
 		leaseEndDate := uint64(c.router.date) + 300000 // 5 minutes
 		leaseSet.WriteUint64(leaseEndDate)
 	}
+	return nil
+}
 
-	// For encrypted LeaseSet2 with blinding, write blinding parameters after leases
-	// per I2CP 0.9.43+ specification
-	if session.IsBlindingEnabled() {
-		blindingParams := session.BlindingParams()
-		if len(blindingParams) > 0 {
-			// Write length-prefixed blinding parameters
-			leaseSet.WriteUint16(uint16(len(blindingParams)))
-			leaseSet.Write(blindingParams)
-			Debug("Added %d bytes of blinding parameters to LeaseSet2", len(blindingParams))
-		} else {
-			// No blinding parameters - write zero length
-			leaseSet.WriteUint16(0)
-			Debug("Blinding enabled but no parameters present, wrote zero-length")
-		}
+// writeLeaseSet2BlindingParams writes blinding parameters to the stream if blinding is enabled.
+func (c *Client) writeLeaseSet2BlindingParams(session *Session, leaseSet *Stream) error {
+	if !session.IsBlindingEnabled() {
+		return nil
 	}
 
-	// Signature - sign the entire LeaseSet2 with destination's signing key
-	err = sgk.ed25519KeyPair.SignStream(leaseSet)
-	if err != nil {
+	blindingParams := session.BlindingParams()
+	if len(blindingParams) > 0 {
+		leaseSet.WriteUint16(uint16(len(blindingParams)))
+		leaseSet.Write(blindingParams)
+		Debug("Added %d bytes of blinding parameters to LeaseSet2", len(blindingParams))
+	} else {
+		leaseSet.WriteUint16(0)
+		Debug("Blinding enabled but no parameters present, wrote zero-length")
+	}
+	return nil
+}
+
+// signAndSendLeaseSet2 signs the LeaseSet2 stream and sends the message to the router.
+func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *Destination, queue bool) error {
+	sgk := &dest.sgk
+	if err := sgk.ed25519KeyPair.SignStream(leaseSet); err != nil {
 		Error("Failed to sign CreateLeaseSet2: %v", err)
 		return err
 	}
-	// Write LeaseSet2 to message stream
+
 	c.messageStream.Write(leaseSet.Bytes())
 
-	// Send message
-	if err = c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
+	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateLeaseSet2Message: %v", err)
 		return fmt.Errorf("failed to send CreateLeaseSet2Message: %w", err)
 	}
-
-	Debug("Successfully sent CreateLeaseSet2Message for session %d", session.id)
 	return nil
 }
 

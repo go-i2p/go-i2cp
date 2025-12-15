@@ -17,7 +17,7 @@ func main() {
 	client := i2cp.NewClient(nil)
 	session := i2cp.NewSession(client, i2cp.SessionCallbacks{})
 
-	fmt.Println("=== Session Signing Key Pair Usage Example ===\n")
+	fmt.Println("=== Session Signing Key Pair Usage Example ===")
 
 	// Get the session's signing key pair
 	keyPair, err := session.SigningKeyPair()
