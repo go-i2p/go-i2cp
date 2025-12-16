@@ -122,6 +122,12 @@ type Client struct {
 
 	// Message statistics (diagnostic tool for troubleshooting)
 	messageStats *MessageStats // nil = stats disabled, use EnableMessageStats() to enable
+
+	// Session state tracking (diagnostic tool for troubleshooting session lifecycle)
+	stateTracker *SessionStateTracker // nil = tracking disabled, use EnableDebugging() to enable
+
+	// Protocol debugging (enhanced diagnostic tool for protocol analysis)
+	protocolDebugger *ProtocolDebugger // nil = debugging disabled, use EnableDebugging() to enable
 }
 
 var defaultConfigFile = "/.i2cp.conf"
@@ -211,6 +217,11 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 	// Track message being sent (if stats enabled)
 	if c.messageStats != nil && c.messageStats.IsEnabled() {
 		c.messageStats.RecordSent(typ, uint64(lenc))
+	}
+
+	// Protocol debugging - log all sent messages
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		c.protocolDebugger.LogMessage("SEND", typ, uint32(stream.Len()), stream.Bytes(), 0)
 	}
 
 	if queue {
@@ -393,6 +404,12 @@ func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *St
 		c.messageStats.RecordReceived(msgType, uint64(length+5))
 	}
 
+	// Protocol debugging - log all received messages
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		data := stream.Bytes()
+		c.protocolDebugger.LogMessage("RECV", msgType, length, data, 0)
+	}
+
 	if dispatch {
 		c.onMessage(msgType, stream)
 	}
@@ -544,14 +561,30 @@ func (c *Client) onMsgDisconnect(stream *Stream) {
 	_ = lens
 	_, err = stream.Read(strbuf)
 
-	Debug("Received Disconnect message with reason %s", string(strbuf))
+	reason := string(strbuf)
+	Debug("Received Disconnect message with reason %s", reason)
+
+	// Record disconnect for debugging
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		c.protocolDebugger.RecordDisconnect(reason, strbuf)
+	}
+
+	// Update session states
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.lock.Lock()
+		for sessionID := range c.sessions {
+			c.stateTracker.SetState(sessionID, SessionStateDisconnected, fmt.Sprintf("disconnect: %s", reason))
+		}
+		c.lock.Unlock()
+	}
+
 	if err != nil {
 		Error("Could not read msgDisconnect correctly data")
 	}
 
 	// Invoke disconnect callback if registered
 	if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
-		c.callbacks.OnDisconnect(c, string(strbuf), nil)
+		c.callbacks.OnDisconnect(c, reason, nil)
 	}
 
 	// Mark as disconnected
@@ -1105,6 +1138,15 @@ func (c *Client) handleSessionCreated(sessionID uint16, sessionStatus uint8) {
 	c.currentSession = nil
 	c.lock.Unlock()
 
+	// Track session state - now awaiting RequestVariableLeaseSet
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.SetState(sessionID, SessionStateCreated, "SessionStatus CREATED received")
+		c.stateTracker.SetState(sessionID, SessionStateAwaitingLeaseSet, "waiting for RequestVariableLeaseSet")
+		// Start tracking how long we wait for RequestVariableLeaseSet
+		c.stateTracker.StartLeaseSetWait(sessionID, 120*time.Second) // 2 minute timeout
+	}
+
+	Info(">>> Session %d CREATED - now waiting for RequestVariableLeaseSet (type 37) from router...", sessionID)
 	Debug(">>> Session %d created successfully, invoking OnStatus callback with SESSION_STATUS_CREATED", sessionID)
 	// Now dispatch status callback - session is already registered
 	sess.dispatchStatus(SessionStatus(sessionStatus))
@@ -1120,6 +1162,11 @@ func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
 		// CRITICAL FIX: Handle router rejecting session creation
 		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
 			Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
+			// Track rejection state
+			if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+				c.stateTracker.SetState(sessionID, SessionStateRejected, "session rejected by router")
+			}
+			Error("❌ Session %d REJECTED by router (SessionStatus=DESTROYED without CREATED)", sessionID)
 			sess = c.currentSession
 			sess.id = sessionID
 			c.currentSession = nil
@@ -1132,6 +1179,9 @@ func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
 	} else {
 		// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
 		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
+			if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+				c.stateTracker.SetState(sessionID, SessionStateDestroyed, "SessionStatus DESTROYED received")
+			}
 			if sess.destroyConfirmed != nil {
 				close(sess.destroyConfirmed)
 				sess.destroyConfirmed = nil
@@ -1165,6 +1215,10 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	var sess *Session
 	var leases []*Lease
 	var err error
+
+	// This is the critical message we're debugging - log prominently
+	Info(">>> RECEIVED RequestVariableLeaseSet (type 37) - router is requesting LeaseSet publication!")
+
 	Debug("Received RequestVariableLeaseSet message.")
 	sessionId, err = stream.ReadUint16()
 	if err != nil {
@@ -1176,6 +1230,13 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 		Error("Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
 		return
 	}
+
+	// Record that we received the LeaseSet request
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.RecordLeaseSetReceived(sessionId, tunnels)
+		c.stateTracker.SetState(sessionId, SessionStateLeaseSetRequested, fmt.Sprintf("tunnels=%d", tunnels))
+	}
+
 	c.lock.Lock()
 	sess = c.sessions[sessionId]
 	c.lock.Unlock()
@@ -1193,6 +1254,11 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	}
 	Debug("Parsed %d leases for session %d", tunnels, sessionId)
 	c.msgCreateLeaseSet(sessionId, sess, tunnels, leases, true)
+
+	// Update state after sending LeaseSet
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.SetState(sessionId, SessionStateLeaseSetSent, "CreateLeaseSet2 sent")
+	}
 }
 
 func (c *Client) onMsgHostReply(stream *Stream) {
@@ -1874,11 +1940,31 @@ func (c *Client) msgGetDate(queue bool) {
 
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	var err error
-	Debug(">>> SENDING CreateSessionMessage to router")
+	Info(">>> SENDING CreateSessionMessage to router")
+
+	// Track state - session pending
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		// Use 0 as placeholder until we get the real session ID
+		c.stateTracker.SetState(0, SessionStatePending, "CreateSession being sent")
+	}
 
 	// Build the session config message first (this sets config.date)
 	c.messageStream.Reset()
 	config.writeToMessage(c.messageStream, c.crypto, c)
+
+	// Dump CreateSession message for debugging
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		msgBytes := c.messageStream.Bytes()
+		// Calculate component sizes from the message
+		// Format: Destination(391) + Mapping(variable) + Date(8) + Signature(64 for Ed25519)
+		destSize := 391 // Fixed size for Destination with certificate
+		sigSize := 64   // Ed25519 signature size
+		mappingSize := len(msgBytes) - destSize - 8 - sigSize
+		if mappingSize < 0 {
+			mappingSize = 0
+		}
+		c.protocolDebugger.DumpCreateSessionMessage(msgBytes, destSize, mappingSize, config.date, sigSize)
+	}
 
 	// SPEC COMPLIANCE: Validate session config date per I2CP § CreateSessionMessage
 	// "If the Date in the Session Config is too far (more than +/- 30 seconds) from the
@@ -1909,10 +1995,15 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 		}
 	}
 
+	// Log detailed message info
+	Info("CreateSession message: %d bytes, timestamp: %d (%v)",
+		c.messageStream.Len(), config.date, time.UnixMilli(int64(config.date)).Format(time.RFC3339))
+
 	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateSessionMessage.")
 		return err
 	}
+	Info("<<< CreateSessionMessage sent successfully, awaiting SessionStatus response")
 	Debug("<<< CreateSessionMessage sent successfully, awaiting SessionCreated response")
 	return err
 }
