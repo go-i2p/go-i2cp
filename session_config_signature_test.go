@@ -74,11 +74,12 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	t.Logf("Signature: %x", signature)
 
 	// Verify signature by reconstructing the data that was signed
-	// CRITICAL: Must use WriteForSignature, NOT WriteToMessage!
-	// The signature is over the TRUNCATED format (32-byte signing key for Ed25519),
-	// not the padded wire format (128-byte signing key field)
+	// CRITICAL: Must use WriteToMessage (padded format), NOT WriteForSignature!
+	// Java I2P router reads destination with Destination.create() which extracts padding,
+	// then writeBytes() reconstructs: pubKey + _padding + signingKey.writeTruncatedBytes() + cert
+	// This produces the SAME bytes as our WriteToMessage format.
 	dataToVerify := NewStream(make([]byte, 0, 512))
-	dest.WriteForSignature(dataToVerify)
+	dest.WriteToMessage(dataToVerify)
 
 	// Rebuild properties mapping
 	m := make(map[string]string)

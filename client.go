@@ -2844,13 +2844,19 @@ func (c *Client) destroyAllSessions() {
 		return
 	}
 
+	// Collect sessions to destroy while holding lock
 	c.lock.Lock()
-	defer c.lock.Unlock()
+	sessionsToDestroy := make([]*Session, 0, len(c.sessions))
+	for _, sess := range c.sessions {
+		sessionsToDestroy = append(sessionsToDestroy, sess)
+	}
+	c.lock.Unlock()
 
-	for sessionId, sess := range c.sessions {
-		Debug("Destroying session %d during shutdown", sessionId)
+	// Destroy sessions without holding lock to avoid deadlock with cascadeDestroySubsessions
+	for _, sess := range sessionsToDestroy {
+		Debug("Destroying session %d during shutdown", sess.id)
 		if err := c.msgDestroySession(sess, false); err != nil {
-			Warning("Failed to destroy session %d during shutdown: %v", sessionId, err)
+			Warning("Failed to destroy session %d during shutdown: %v", sess.id, err)
 		}
 	}
 }

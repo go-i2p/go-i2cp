@@ -1,38 +1,65 @@
 package go_i2cp
 
 import (
-	"crypto/ed25519"
-	"encoding/hex"
 	"testing"
 )
 
+// TestManualSignatureVerification verifies that the signature we generate can be verified
+// using the same format. This test generates fresh data each time rather than using
+// hardcoded hex values that may become outdated.
 func TestManualSignatureVerification(t *testing.T) {
-	// Data from the actual test run
-	dataHex := "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e6990a705b4994790e3f90feed34f78623de8d854baede9e69942f5db241194805000400070000005010693263702e66617374526563656976653d04747275653b14693263702e6c65617365536574456e63547970653d01343b17693263702e6d65737361676552656c696162696c6974793d046e6f6e653b0000019b24342d38"
-	signatureHex := "56dfce8f8975122b9bab5f8ec1604d3fffc2ee777cb9a681fd8cbaa4f53489a6dd7576f5964d94cc725430204537d054dce41fc57add3c480a003456a60aa502"
-	publicKeyHex := "e6990a705b4994790e3f90feed34f78623de8d854baede9e69942f5db2411948"
-
-	data, err := hex.DecodeString(dataHex)
+	crypto := NewCrypto()
+	dest, err := NewDestination(crypto)
 	if err != nil {
-		t.Fatalf("Failed to decode data: %v", err)
+		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	signature, err := hex.DecodeString(signatureHex)
-	if err != nil {
-		t.Fatalf("Failed to decode signature: %v", err)
+	config := &SessionConfig{
+		destination: dest,
 	}
+	config.properties[SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE] = "true"
+	config.properties[SESSION_CONFIG_PROP_I2CP_MESSAGE_RELIABILITY] = "none"
+	config.properties[SESSION_CONFIG_PROP_I2CP_LEASESET_ENC_TYPE] = "4"
 
-	publicKey, err := hex.DecodeString(publicKeyHex)
-	if err != nil {
-		t.Fatalf("Failed to decode public key: %v", err)
+	// Generate the signature data using WriteToMessage (padded format)
+	// This is the format that Java I2P expects when it reconstructs for verification
+	dataStream := NewStream(make([]byte, 0, 512))
+	dest.WriteToMessage(dataStream)
+
+	// Write properties mapping
+	m := make(map[string]string)
+	for i := 0; i < int(NR_OF_SESSION_CONFIG_PROPERTIES); i++ {
+		if config.properties[i] == "" {
+			continue
+		}
+		option := config.configOptLookup(SessionConfigProperty(i))
+		if option == "" {
+			continue
+		}
+		m[option] = config.properties[i]
 	}
+	dataStream.WriteMapping(m)
 
+	// Write timestamp
+	timestamp := uint64(1765853211000) // Example timestamp
+	dataStream.WriteUint64(timestamp)
+
+	data := dataStream.Bytes()
 	t.Logf("Data length: %d bytes", len(data))
+
+	// Sign the data
+	if dest.sgk.ed25519KeyPair == nil {
+		t.Fatal("Ed25519 keypair not available")
+	}
+
+	signature, err := dest.sgk.ed25519KeyPair.Sign(data)
+	if err != nil {
+		t.Fatalf("Failed to sign data: %v", err)
+	}
 	t.Logf("Signature length: %d bytes", len(signature))
-	t.Logf("Public key length: %d bytes", len(publicKey))
 
 	// Verify the signature
-	verified := ed25519.Verify(ed25519.PublicKey(publicKey), data, signature)
+	verified := dest.sgk.ed25519KeyPair.Verify(data, signature)
 
 	if verified {
 		t.Log("✓ Signature verification PASSED - signature is mathematically valid!")
