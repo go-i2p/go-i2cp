@@ -151,19 +151,20 @@ func loadUserConfigFile(config *SessionConfig) {
 
 func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, client *Client) {
 	// I2CP CreateSessionMessage format (per Java I2P SessionConfig.java):
-	// 1. Destination bytes
-	// 2. Properties mapping
-	// 3. Creation date (8 bytes - milliseconds since epoch)
-	// 4. Signature over fields 1-3
+	// WIRE FORMAT: Destination(full 384 bytes) + Properties + Date + Signature
+	// SIGNATURE DATA: Destination(truncated) + Properties + Date
+	//
+	// CRITICAL: The wire format and signature data use DIFFERENT Destination serializations!
+	// - Wire format: 256-byte pubKey + 128-byte paddedSignKey + certificate
+	// - Signature format: 256-byte pubKey + 32-byte truncatedSignKey + certificate
+	// This is because Java reads the wire format, extracts keys per certificate, then re-serializes
+	// with extracted key sizes for signature verification.
 
-	// Build data to sign - everything BEFORE the signature
-	// CRITICAL: Must use WriteForSignature, NOT WriteToMessage!
-	// Java reads wire format (128-byte signing key), extracts actual key (32 bytes for Ed25519),
-	// then re-serializes with truncated key (32 bytes) for signature verification.
+	// TEST: Try signing with PADDED format (same as wire) to see if router expects that
 	dataToSign := NewStream(make([]byte, 0, 512))
 	Debug("dataToSign initial length: %d", dataToSign.Len())
 
-	if err := config.destination.WriteForSignature(dataToSign); err != nil {
+	if err := config.destination.WriteToMessage(dataToSign); err != nil {
 		Fatal("Failed to write destination to dataToSign: %v", err)
 		return
 	}
@@ -175,8 +176,7 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	}
 	Debug("dataToSign after mapping: %d bytes", dataToSign.Len())
 
-	// CRITICAL FIX: Use router-synchronized time for session config
-	// Per I2CP spec: timestamp must be within ±30 seconds of router time
+	// Get timestamp
 	var configTimestamp uint64
 	if client != nil {
 		client.routerTimeMu.RLock()
@@ -187,32 +187,72 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 		configTimestamp = uint64(time.Now().Unix() * 1000)
 		Warning("No client provided, using unsynchronized local time")
 	}
-
-	// Store timestamp in config for validation
 	config.date = configTimestamp
-	dataToSign.WriteUint64(configTimestamp)
 
-	Debug("Session config data to sign: %d bytes", dataToSign.Len())
-	if dataToSign.Len() > 0 {
-		Debug("Data to sign (first 64 bytes): %x", dataToSign.Bytes()[:min(64, dataToSign.Len())])
-		Debug("Data to sign (last 64 bytes): %x", dataToSign.Bytes()[max(0, dataToSign.Len()-64):])
-		Debug("FULL data to sign (%d bytes): %x", dataToSign.Len(), dataToSign.Bytes())
+	// Step 2: Add timestamp to signature data and sign it
+	signatureData := NewStream(make([]byte, 0, 512))
+	signatureData.Write(dataToSign.Bytes())
+	signatureData.WriteUint64(configTimestamp)
+
+	Debug("Session config data to sign: %d bytes", signatureData.Len())
+	if signatureData.Len() > 0 {
+		Debug("Data to sign (first 64 bytes): %x", signatureData.Bytes()[:min(64, signatureData.Len())])
+		Debug("Data to sign (last 64 bytes): %x", signatureData.Bytes()[max(0, signatureData.Len()-64):])
+		Debug("FULL data to sign (%d bytes): %x", signatureData.Len(), signatureData.Bytes())
 	}
 
-	// Generate signature over the data
-	signature, err := config.signSessionConfig(dataToSign.Bytes(), crypto)
+	signature, err := config.signSessionConfig(signatureData.Bytes(), crypto)
 	if err != nil {
 		Fatal("Failed to sign session config: %v", err)
 		return
 	}
-
 	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
 
-	// Write the complete message: data + signature
-	// Java I2P reads signature type from Destination certificate, NOT from a prefix
-	// Signature.readBytes() just reads the raw signature bytes based on the type
-	stream.Write(dataToSign.Bytes())
+	// DEBUG: Write signature data and signature to files for manual verification
+	if debugFile, err := os.Create("/tmp/go-i2cp-signature-data.bin"); err == nil {
+		debugFile.Write(signatureData.Bytes())
+		debugFile.Close()
+	}
+	if debugFile, err := os.Create("/tmp/go-i2cp-signature.bin"); err == nil {
+		debugFile.Write(signature)
+		debugFile.Close()
+	}
+	if config.destination.sgk.ed25519KeyPair != nil {
+		if debugFile, err := os.Create("/tmp/go-i2cp-pubkey.bin"); err == nil {
+			pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
+			debugFile.Write(pubKey[:])
+			debugFile.Close()
+		}
+	}
+
+	// DEBUG: Log the public key we're using
+	if config.destination.sgk.ed25519KeyPair != nil {
+		pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
+		Debug("Signing public key (%d bytes): %x", len(pubKey), pubKey[:])
+	}
+
+	// Step 3: Write WIRE MESSAGE with FULL padded Destination format
+	// This is what the router will actually read over I2CP
+	wireMessage := NewStream(make([]byte, 0, 512))
+	if err := config.destination.WriteToMessage(wireMessage); err != nil {
+		Fatal("Failed to write destination to wire message: %v", err)
+		return
+	}
+
+	if err := config.writeMappingToMessage(wireMessage); err != nil {
+		Fatal("Failed to write mapping to wire message: %v", err)
+		return
+	}
+
+	wireMessage.WriteUint64(configTimestamp)
+
+	Debug("Wire message for router (%d bytes): %x", wireMessage.Len(), wireMessage.Bytes())
+	Debug("Wire message first 32 bytes: %x", wireMessage.Bytes()[:min(32, wireMessage.Len())])
+	Debug("Wire message last 32 bytes: %x", wireMessage.Bytes()[max(0, wireMessage.Len()-32):])
+
+	stream.Write(wireMessage.Bytes())
 	stream.Write(signature)
+
 	Debug("Complete CreateSession message: %d bytes", stream.Len())
 }
 
@@ -240,6 +280,8 @@ func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]b
 	}
 
 	Debug("Signing with Ed25519 keypair")
+	pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
+	Debug("[SIGN] Public key in destination.sgk.ed25519KeyPair: %x", pubKey[:])
 	return config.destination.sgk.ed25519KeyPair.Sign(data)
 }
 

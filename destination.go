@@ -323,6 +323,7 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	if dest.sgk.ed25519KeyPair != nil {
 		ed25519PubKey := dest.sgk.ed25519KeyPair.PublicKey()
 		copy(paddedSignKey[96:], ed25519PubKey[:]) // Right-align 32-byte key in 128-byte field
+		Debug("[WriteToMessage] WROTE public key: %x", ed25519PubKey[:])
 	} else {
 		return fmt.Errorf("no Ed25519 keypair available")
 	}
@@ -356,6 +357,7 @@ func (dest *Destination) WriteForSignature(stream *Stream) (err error) {
 		if _, err = stream.Write(ed25519PubKey[:]); err != nil {
 			return fmt.Errorf("failed to write signing public key: %w", err)
 		}
+		Debug("[WriteForSignature] WROTE public key: %x", ed25519PubKey[:])
 	} else {
 		return fmt.Errorf("no Ed25519 keypair available")
 	}

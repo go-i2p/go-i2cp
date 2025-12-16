@@ -74,9 +74,11 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	t.Logf("Signature: %x", signature)
 
 	// Verify signature by reconstructing the data that was signed
-	// Use the original dest, not readDest, to ensure exact match
+	// CRITICAL: Must use WriteForSignature, NOT WriteToMessage!
+	// The signature is over the TRUNCATED format (32-byte signing key for Ed25519),
+	// not the padded wire format (128-byte signing key field)
 	dataToVerify := NewStream(make([]byte, 0, 512))
-	dest.WriteToMessage(dataToVerify)
+	dest.WriteForSignature(dataToVerify)
 
 	// Rebuild properties mapping
 	m := make(map[string]string)

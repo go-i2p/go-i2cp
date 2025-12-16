@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"crypto/ed25519"
+	"crypto/sha512"
 	"fmt"
 
 	cryptoed25519 "github.com/go-i2p/crypto/ed25519"
@@ -185,12 +186,17 @@ func (kp *Ed25519KeyPair) Verify(message, signature []byte) bool {
 		return false
 	}
 
-	// Standard Ed25519 verification - verify against RAW message, not pre-hashed
-	// Ed25519 handles SHA-512 hashing internally as part of the verification algorithm
+	// EdDSA-SHA512-Ed25519: Pre-hash with SHA-512, then verify
+	// I2CP spec requires SHA-512 pre-hashing for type 7 (EdDSA-SHA512-Ed25519)
+	hasher := sha512.New()
+	hasher.Write(message)
+	messageHash := hasher.Sum(nil)
+
 	pubKeyBytes := kp.publicKey.Bytes()
 	Debug("Verifying Ed25519 signature hash")
 
-	verified := ed25519.Verify(ed25519.PublicKey(pubKeyBytes), message, signature)
+	// Verify the signature against the hash (not the raw message)
+	verified := ed25519.Verify(ed25519.PublicKey(pubKeyBytes), messageHash, signature)
 
 	if verified {
 		Debug("Ed25519 signature verified successfully")
