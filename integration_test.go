@@ -1,5 +1,3 @@
-//go:build integration
-
 package go_i2cp
 
 import (
@@ -23,7 +21,7 @@ import (
 //   - Router must support modern I2CP features (version 0.9.11+)
 //   - Recommended: I2P router with established network connections for faster tunnel building
 //
-// Run with: go test -v -tags=integration -timeout=5m
+// Run with: go test -v -timeout=5m
 //
 // IMPORTANT: These tests require a running I2P router and will FAIL if one is not available on localhost:7654.
 //
