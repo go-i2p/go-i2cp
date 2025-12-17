@@ -427,6 +427,9 @@ func (session *Session) dispatchMessage(srcDest *Destination, protocol uint8, sr
 	Debug("Dispatching message to session %d: from=%s, protocol=%d, srcPort=%d, destPort=%d",
 		session.id, srcAddr, protocol, srcPort, destPort)
 
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onMessage := session.callbacks.OnMessage
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -435,7 +438,7 @@ func (session *Session) dispatchMessage(srcDest *Destination, protocol uint8, sr
 			}
 		}()
 
-		session.callbacks.OnMessage(session, srcDest, protocol, srcPort, destPort, payload)
+		onMessage(session, srcDest, protocol, srcPort, destPort, payload)
 	}
 
 	if session.syncCallbacks {
@@ -467,13 +470,17 @@ func (session *Session) dispatchDestinationWithOptions(requestId uint32, address
 		Debug("Dispatching destination with options to client callback: requestId=%d, address=%s, options=%v",
 			requestId, address, options)
 
+		// Capture callback references to prevent race condition
+		client := session.client
+		onHostLookupWithOptions := client.callbacks.OnHostLookupWithOptions
+
 		optionsCallbackFunc := func() {
 			defer func() {
 				if r := recover(); r != nil {
 					Error("Panic in OnHostLookupWithOptions callback for session %d: %v", session.id, r)
 				}
 			}()
-			session.client.callbacks.OnHostLookupWithOptions(session.client, requestId, destination, options)
+			onHostLookupWithOptions(client, requestId, destination, options)
 		}
 
 		if session.syncCallbacks {
@@ -492,6 +499,9 @@ func (session *Session) dispatchDestinationWithOptions(requestId uint32, address
 	Debug("Dispatching destination lookup result to session %d: requestId=%d, address=%s",
 		session.id, requestId, address)
 
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onDestination := session.callbacks.OnDestination
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -500,7 +510,7 @@ func (session *Session) dispatchDestinationWithOptions(requestId uint32, address
 			}
 		}()
 
-		session.callbacks.OnDestination(session, requestId, address, destination)
+		onDestination(session, requestId, address, destination)
 	}
 
 	if session.syncCallbacks {
@@ -543,6 +553,10 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	}
 
 	Debug(">>> Invoking OnStatus callback for session %d with status %s", session.id, getSessionStatusName(status))
+
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onStatus := session.callbacks.OnStatus
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -551,7 +565,7 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 			}
 		}()
 
-		session.callbacks.OnStatus(session, status)
+		onStatus(session, status)
 	}
 
 	if session.syncCallbacks {
@@ -590,6 +604,9 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 	Debug("Dispatching message status to session %d: messageId=%d, status=%d (%s), size=%d, nonce=%d",
 		session.id, messageId, status, statusName, size, nonce)
 
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onMessageStatus := session.callbacks.OnMessageStatus
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -598,7 +615,7 @@ func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMe
 			}
 		}()
 
-		session.callbacks.OnMessageStatus(session, messageId, status, size, nonce)
+		onMessageStatus(session, messageId, status, size, nonce)
 	}
 
 	if session.syncCallbacks {
@@ -629,6 +646,9 @@ func (session *Session) dispatchLeaseSet2(leaseSet *LeaseSet2) {
 		session.id, leaseSet.Type(), leaseSet.LeaseCount(),
 		leaseSet.Expires().Format("2006-01-02 15:04:05"), leaseSet.IsExpired())
 
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onLeaseSet2 := session.callbacks.OnLeaseSet2
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -637,7 +657,7 @@ func (session *Session) dispatchLeaseSet2(leaseSet *LeaseSet2) {
 			}
 		}()
 
-		session.callbacks.OnLeaseSet2(session, leaseSet)
+		onLeaseSet2(session, leaseSet)
 	}
 
 	if session.syncCallbacks {
@@ -667,6 +687,9 @@ func (session *Session) dispatchBlindingInfo(blindingScheme, blindingFlags uint1
 	Debug("Dispatching BlindingInfo to session %d: scheme=%d, flags=%d, params_len=%d",
 		session.id, blindingScheme, blindingFlags, len(blindingParams))
 
+	// Capture callback reference to prevent race condition if session.callbacks is modified
+	onBlindingInfo := session.callbacks.OnBlindingInfo
+
 	// Choose between sync and async callback execution
 	callbackFunc := func() {
 		defer func() {
@@ -675,7 +698,7 @@ func (session *Session) dispatchBlindingInfo(blindingScheme, blindingFlags uint1
 			}
 		}()
 
-		session.callbacks.OnBlindingInfo(session, blindingScheme, blindingFlags, blindingParams)
+		onBlindingInfo(session, blindingScheme, blindingFlags, blindingParams)
 	}
 
 	if session.syncCallbacks {
