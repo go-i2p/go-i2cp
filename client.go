@@ -2578,6 +2578,12 @@ func (c *Client) establishConnection(ctx context.Context) error {
 
 	c.connected = true
 	success = true
+
+	// Invoke OnConnect callback after successful handshake
+	if c.callbacks != nil && c.callbacks.OnConnect != nil {
+		c.callbacks.OnConnect(c)
+	}
+
 	return nil
 }
 
