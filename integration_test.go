@@ -509,7 +509,12 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 			targetMu.Lock()
 			defer targetMu.Unlock()
 			targetMessages++
-			t.Logf("Target: Received message from %s - protocol=%d, size=%d", srcDest.Base32(), protocol, payload.Len())
+			// srcDest may be nil for non-repliable datagram protocols
+			srcAddr := "(no source destination)"
+			if srcDest != nil {
+				srcAddr = srcDest.Base32()
+			}
+			t.Logf("Target: Received message from %s - protocol=%d, size=%d", srcAddr, protocol, payload.Len())
 
 			select {
 			case messageReceived <- struct{}{}:
