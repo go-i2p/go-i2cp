@@ -58,6 +58,14 @@ type Session struct {
 	blindingFlags  uint16 // Blinding flags per I2CP spec (bit 0 = per-client auth required)
 	blindingParams []byte // Scheme-specific blinding parameters (NOT CRYPTOGRAPHICALLY PROCESSED)
 
+	// Encryption key pair for LeaseSet2 (X25519 when i2cp.leaseSetEncType=4)
+	// Generated when creating LeaseSet2 response to RequestVariableLeaseSet
+	encryptionKeyPair *X25519KeyPair
+
+	// Leases from RequestVariableLeaseSet
+	// These are the actual tunnel leases provided by the router
+	leases []*Lease
+
 	// Message tracking (Phase 2.3)
 	// Tracks pending messages from send to status callback
 	pendingMessages map[uint32]*PendingMessage // key: nonce

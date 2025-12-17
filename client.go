@@ -1253,7 +1253,17 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 		}
 	}
 	Debug("Parsed %d leases for session %d", tunnels, sessionId)
-	c.msgCreateLeaseSet(sessionId, sess, tunnels, leases, true)
+
+	// Store leases in session for use in CreateLeaseSet2
+	sess.mu.Lock()
+	sess.leases = leases
+	sess.mu.Unlock()
+
+	// Use CreateLeaseSet2 (type 41) for modern crypto instead of legacy CreateLeaseSet (type 4)
+	if err := c.msgCreateLeaseSet2(sess, int(tunnels), true); err != nil {
+		Error("Failed to send CreateLeaseSet2 for session %d: %v", sessionId, err)
+		return
+	}
 
 	// Update state after sending LeaseSet
 	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
@@ -1646,6 +1656,8 @@ func initializeLeaseSetStream(c *Client, sessionId uint16) *Stream {
 		nullbytes[i] = 0
 	}
 
+	// Reset the message stream before writing to ensure clean state
+	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sessionId)
 	c.messageStream.Write(nullbytes[:20])
 	c.messageStream.Write(nullbytes[:256])
@@ -1707,11 +1719,32 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool) error {
 	Debug("Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
 
-	leaseSet := NewStream(make([]byte, 4096))
+	// Generate X25519 encryption key pair for this session if not already present
+	if session.encryptionKeyPair == nil {
+		keyPair, err := NewX25519KeyPair()
+		if err != nil {
+			return fmt.Errorf("failed to generate X25519 encryption key pair: %w", err)
+		}
+		session.encryptionKeyPair = keyPair
+		Debug("Generated X25519 encryption key pair for session %d", session.id)
+	}
+
+	leaseSet := NewStream(make([]byte, 0, 4096))
 	dest := session.config.destination
 
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(session.id)
+
+	// Write LeaseSet type byte to message stream (per I2CP spec, router reads this BEFORE the LeaseSet)
+	var leaseSetType uint8
+	if session.IsBlindingEnabled() {
+		leaseSetType = LEASESET_TYPE_ENCRYPTED
+		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
+	} else {
+		leaseSetType = LEASESET_TYPE_STANDARD
+		Debug("Creating standard LeaseSet2 for session %d", session.id)
+	}
+	c.messageStream.WriteByte(leaseSetType)
 
 	if err := c.buildLeaseSet2Content(session, leaseSet, dest, leaseCount); err != nil {
 		return err
@@ -1725,7 +1758,7 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 	return nil
 }
 
-// buildLeaseSet2Content constructs the complete LeaseSet2 content including header, timestamps, flags, properties, leases, and blinding parameters.
+// buildLeaseSet2Content constructs the complete LeaseSet2 content including header, timestamps, flags, properties, encryption keys, leases, and blinding parameters.
 func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest *Destination, leaseCount int) error {
 	if err := c.writeLeaseSet2Header(session, leaseSet, dest); err != nil {
 		return err
@@ -1743,33 +1776,39 @@ func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest 
 		return err
 	}
 
-	if err := c.writeLeaseSet2Leases(leaseSet, leaseCount); err != nil {
+	// Write encryption public keys (after properties, before leases)
+	if err := c.writeLeaseSet2EncryptionKeys(session, leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2Leases(session, leaseSet, leaseCount); err != nil {
 		return err
 	}
 
 	return c.writeLeaseSet2BlindingParams(session, leaseSet)
 }
 
-// writeLeaseSet2Header writes the LeaseSet2 type and destination to the stream.
+// writeLeaseSet2Header writes the destination to the LeaseSet stream.
+// Note: The LeaseSet type byte is written to messageStream in msgCreateLeaseSet2,
+// NOT here, per the I2CP CreateLeaseSet2Message format specification.
 func (c *Client) writeLeaseSet2Header(session *Session, leaseSet *Stream, dest *Destination) error {
-	var leaseSetType uint8
-	if session.IsBlindingEnabled() {
-		leaseSetType = LEASESET_TYPE_ENCRYPTED
-		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
-	} else {
-		leaseSetType = LEASESET_TYPE_STANDARD
-		Debug("Creating standard LeaseSet2 for session %d", session.id)
-	}
-	leaseSet.WriteByte(leaseSetType)
 	dest.WriteToMessage(leaseSet)
 	return nil
 }
 
 // writeLeaseSet2Timestamps writes the published and expires timestamps to the stream.
+// Per LeaseSet2 format:
+//
+//	Published: 4 bytes, seconds since epoch
+//	Expires: 2 bytes, offset in seconds from published time
 func (c *Client) writeLeaseSet2Timestamps(leaseSet *Stream) error {
-	leaseSet.WriteUint64(uint64(c.router.date))
-	expires := uint64(c.router.date) + 600000 // 10 minutes in milliseconds
-	leaseSet.WriteUint64(expires)
+	publishedSeconds := uint32(c.router.date / 1000) // Convert ms to seconds
+	leaseSet.WriteUint32(publishedSeconds)
+
+	// Expires is an offset in seconds from the published time
+	// 600 seconds = 10 minutes lease validity
+	expiresOffset := uint16(600)
+	leaseSet.WriteUint16(expiresOffset)
 	return nil
 }
 
@@ -1797,16 +1836,57 @@ func (c *Client) writeLeaseSet2Properties(session *Session, leaseSet *Stream) er
 	return nil
 }
 
-// writeLeaseSet2Leases writes the lease count and placeholder lease data to the stream.
-func (c *Client) writeLeaseSet2Leases(leaseSet *Stream, leaseCount int) error {
+// writeLeaseSet2EncryptionKeys writes the encryption public keys to the LeaseSet2 stream.
+// Per LeaseSet2 format: [numKeys:1][encType:2][pubKey:keyLen]...
+// For X25519 (encType=4): pubKey is 32 bytes (length determined by type, not prefixed)
+func (c *Client) writeLeaseSet2EncryptionKeys(session *Session, leaseSet *Stream) error {
+	if session.encryptionKeyPair == nil {
+		return fmt.Errorf("no encryption key pair available for LeaseSet2")
+	}
+
+	// Write number of encryption keys (1 for now - just X25519)
+	leaseSet.WriteByte(1)
+
+	// Write encryption key: EncType (2 bytes), PublicKey (length determined by type)
+	// X25519 (type 4) keys are 32 bytes - no length prefix needed
+	encType := uint16(X25519) // X25519 = 4
+
+	leaseSet.WriteUint16(encType)
+
+	pubKey := session.encryptionKeyPair.PublicKey()
+	leaseSet.Write(pubKey[:])
+
+	Debug("Wrote X25519 encryption public key to LeaseSet2")
+	return nil
+}
+
+// writeLeaseSet2Leases writes the lease count and actual lease data from the session to the stream.
+// Uses the leases received from RequestVariableLeaseSet instead of placeholder data.
+func (c *Client) writeLeaseSet2Leases(session *Session, leaseSet *Stream, leaseCount int) error {
 	leaseSet.WriteByte(uint8(leaseCount))
 
-	for i := 0; i < leaseCount; i++ {
-		nullGateway := make([]byte, 32)
-		leaseSet.Write(nullGateway)
-		leaseSet.WriteUint32(uint32(i + 1))
-		leaseEndDate := uint64(c.router.date) + 300000 // 5 minutes
-		leaseSet.WriteUint64(leaseEndDate)
+	session.mu.RLock()
+	leases := session.leases
+	session.mu.RUnlock()
+
+	// Use actual leases if available, otherwise fall back to placeholder
+	if len(leases) >= leaseCount {
+		for i := 0; i < leaseCount; i++ {
+			if err := leases[i].WriteToMessage(leaseSet); err != nil {
+				return fmt.Errorf("failed to write lease %d: %w", i, err)
+			}
+		}
+		Debug("Wrote %d actual leases to LeaseSet2", leaseCount)
+	} else {
+		// Fallback to placeholder data (for compatibility with tests)
+		Debug("Warning: No actual leases available, using placeholder data for %d leases", leaseCount)
+		for i := 0; i < leaseCount; i++ {
+			nullGateway := make([]byte, 32)
+			leaseSet.Write(nullGateway)
+			leaseSet.WriteUint32(uint32(i + 1))
+			leaseEndDate := uint64(c.router.date) + 300000 // 5 minutes
+			leaseSet.WriteUint64(leaseEndDate)
+		}
 	}
 	return nil
 }
@@ -1830,14 +1910,60 @@ func (c *Client) writeLeaseSet2BlindingParams(session *Session, leaseSet *Stream
 }
 
 // signAndSendLeaseSet2 signs the LeaseSet2 stream and sends the message to the router.
+// Per I2CP CreateLeaseSet2Message format:
+// [SessionID:2][LeaseSetType:1][LeaseSet2Content:var][Signature:64][NumPrivKeys:1][PrivKeyData...]
+//
+// Per LeaseSet2 spec, the signature covers [LeaseSetType:1][LeaseSet2Content:var]
+// The type byte is NOT part of the LeaseSet2 data structure itself, but IS included in signature
 func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *Destination, queue bool) error {
 	sgk := &dest.sgk
-	if err := sgk.ed25519KeyPair.SignStream(leaseSet); err != nil {
+
+	// Create data to sign: [type:1][leaseSet content]
+	// The type byte must be included in the signature per LeaseSet2 spec
+	var leaseSetType uint8
+	if session.IsBlindingEnabled() {
+		leaseSetType = LEASESET_TYPE_ENCRYPTED
+	} else {
+		leaseSetType = LEASESET_TYPE_STANDARD
+	}
+
+	// Build the signable data: type byte + LeaseSet2 content
+	dataToSign := NewStream(make([]byte, 0, leaseSet.Len()+1))
+	dataToSign.WriteByte(leaseSetType)
+	dataToSign.Write(leaseSet.Bytes())
+
+	// Sign the combined data
+	if err := sgk.ed25519KeyPair.SignStream(dataToSign); err != nil {
 		Error("Failed to sign CreateLeaseSet2: %v", err)
 		return err
 	}
 
+	// Get the signature from the end of dataToSign (SignStream appends it)
+	signedData := dataToSign.Bytes()
+	// The signature is the last 64 bytes (Ed25519 signature size)
+	signature := signedData[len(signedData)-64:]
+
+	// Write LeaseSet2 content (without type) + signature to message stream
 	c.messageStream.Write(leaseSet.Bytes())
+	c.messageStream.Write(signature)
+
+	// Write private keys after the signed LeaseSet2
+	// Format: [numKeys:1][encType:2][privKey:keyLen]...
+	// Key length is determined by encType (no length prefix needed)
+	if session.encryptionKeyPair != nil {
+		c.messageStream.WriteByte(1) // Number of private keys
+
+		// X25519 (type 4) private keys are 32 bytes - no length prefix
+		encType := uint16(X25519) // X25519 = 4
+		c.messageStream.WriteUint16(encType)
+
+		privKey := session.encryptionKeyPair.PrivateKey()
+		c.messageStream.Write(privKey[:])
+
+		Debug("Wrote X25519 encryption private key to CreateLeaseSet2Message, total: %d bytes", c.messageStream.Len())
+	} else {
+		c.messageStream.WriteByte(0) // No private keys
+	}
 
 	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateLeaseSet2Message: %v", err)

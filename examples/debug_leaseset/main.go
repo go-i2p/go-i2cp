@@ -32,7 +32,7 @@ func main() {
 	// Session callbacks to track session lifecycle
 	sessionCallbacks := i2cp.SessionCallbacks{
 		OnStatus: func(sess *i2cp.Session, status i2cp.SessionStatus) {
-			fmt.Printf("\n>>> CALLBACK: Session status changed to: %s\n", status)
+			fmt.Printf("\n>>> CALLBACK: Session status changed to: %v\n", status)
 
 			if status == i2cp.I2CP_SESSION_STATUS_CREATED {
 				fmt.Println(">>> Session CREATED - now waiting for RequestVariableLeaseSet (type 37)...")
