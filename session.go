@@ -450,12 +450,40 @@ func (session *Session) dispatchMessage(srcDest *Destination, protocol uint8, sr
 // dispatchDestination dispatches destination lookup results to registered callbacks
 // per I2CP specification - handles HostReplyMessage (type 39) responses
 func (session *Session) dispatchDestination(requestId uint32, address string, destination *Destination) {
+	session.dispatchDestinationWithOptions(requestId, address, destination, nil)
+}
+
+// dispatchDestinationWithOptions dispatches destination lookup results with optional service record options
+// per I2CP specification - handles HostReplyMessage (type 39) responses including Proposal 167 service records
+func (session *Session) dispatchDestinationWithOptions(requestId uint32, address string, destination *Destination, options map[string]string) {
 	// Check if session is closed
 	if session.IsClosed() {
 		Warning("Ignoring destination dispatch to closed session %d", session.id)
 		return
 	}
 
+	// Check if we have service record options and client callback
+	if options != nil && session.client != nil && session.client.callbacks != nil && session.client.callbacks.OnHostLookupWithOptions != nil {
+		Debug("Dispatching destination with options to client callback: requestId=%d, address=%s, options=%v",
+			requestId, address, options)
+
+		optionsCallbackFunc := func() {
+			defer func() {
+				if r := recover(); r != nil {
+					Error("Panic in OnHostLookupWithOptions callback for session %d: %v", session.id, r)
+				}
+			}()
+			session.client.callbacks.OnHostLookupWithOptions(session.client, requestId, destination, options)
+		}
+
+		if session.syncCallbacks {
+			optionsCallbackFunc()
+		} else {
+			go optionsCallbackFunc()
+		}
+	}
+
+	// Also dispatch to session's OnDestination callback (if registered)
 	if session.callbacks == nil || session.callbacks.OnDestination == nil {
 		Debug("No destination callback registered for session %d", session.id)
 		return

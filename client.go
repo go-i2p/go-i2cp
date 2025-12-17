@@ -1483,8 +1483,8 @@ func (c *Client) dispatchHostReplyResult(sessionId uint16, requestId uint32, des
 		return
 	}
 
-	// Dispatch destination (may be nil if lookup failed)
-	sess.dispatchDestination(requestId, lup.address, dest)
+	// Dispatch destination with options (options may be nil for basic lookups)
+	sess.dispatchDestinationWithOptions(requestId, lup.address, dest, lup.options)
 }
 
 // validateReconfigureProperties validates reconfiguration property values per I2CP specification.
