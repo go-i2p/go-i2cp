@@ -208,24 +208,7 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	}
 	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
 
-	// DEBUG: Write signature data and signature to files for manual verification
-	if debugFile, err := os.Create("/tmp/go-i2cp-signature-data.bin"); err == nil {
-		debugFile.Write(signatureData.Bytes())
-		debugFile.Close()
-	}
-	if debugFile, err := os.Create("/tmp/go-i2cp-signature.bin"); err == nil {
-		debugFile.Write(signature)
-		debugFile.Close()
-	}
-	if config.destination.sgk.ed25519KeyPair != nil {
-		if debugFile, err := os.Create("/tmp/go-i2cp-pubkey.bin"); err == nil {
-			pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
-			debugFile.Write(pubKey[:])
-			debugFile.Close()
-		}
-	}
-
-	// DEBUG: Log the public key we're using
+	// Log the public key for debugging (signature data available via Debug logging above)
 	if config.destination.sgk.ed25519KeyPair != nil {
 		pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
 		Debug("Signing public key (%d bytes): %x", len(pubKey), pubKey[:])
