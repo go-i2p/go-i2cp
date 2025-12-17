@@ -906,16 +906,28 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 		b32 = b32Encoded + ".b32.i2p"
 		Debug("Could not resolve destination")
 	}
-	requestId = c.lookup[b32]
-	delete(c.lookup, b32)
-	lup = c.lookupReq[requestId]
-	delete(c.lookupReq, requestId)
-	// MINOR FIX: Cannot use struct comparison since LookupEntry now contains map (service records support)
-	if lup.address == "" {
-		Warning("No sesssion for destination lookup of address '%s'", b32)
-	} else {
-		lup.session.dispatchDestination(requestId, b32, destination)
+
+	// Use two-value map access to verify lookup exists before using result
+	requestId, found := c.lookup[b32]
+	if !found {
+		Warning("No pending lookup found for address '%s'", b32)
+		return
 	}
+	delete(c.lookup, b32)
+
+	lup, lupFound := c.lookupReq[requestId]
+	if !lupFound {
+		Warning("No lookup entry found for request ID %d (address '%s')", requestId, b32)
+		return
+	}
+	delete(c.lookupReq, requestId)
+
+	if lup.session == nil {
+		Warning("Lookup entry for '%s' has nil session", b32)
+		return
+	}
+
+	lup.session.dispatchDestination(requestId, b32, destination)
 }
 
 // onMsgReceiveMessageBegin handles deprecated ReceiveMessageBeginMessage (type 6)
