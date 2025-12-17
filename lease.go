@@ -110,10 +110,30 @@ func (l *Lease) writeLegacyLeaseFields(stream *Stream) error {
 	return stream.WriteUint64(l.endDate)
 }
 
-// WriteToMessage writes the Lease to an I2CP Stream
+// WriteToMessage writes the Lease to an I2CP Stream (44-byte format)
 func (l *Lease) WriteToMessage(stream *Stream) (err error) {
 	if l.lease != nil {
 		return l.writeCommonLease(stream)
 	}
 	return l.writeLegacyLeaseFields(stream)
+}
+
+// WriteToLeaseSet2 writes the Lease in Lease2 format (40 bytes) for LeaseSet2.
+// Lease2 format: gateway (32 bytes) + tunnel_id (4 bytes) + end_date (4 bytes, seconds)
+// This differs from the I2CP Lease format which uses 8-byte millisecond timestamps.
+func (l *Lease) WriteToLeaseSet2(stream *Stream) error {
+	// Write tunnel gateway (32 bytes)
+	if _, err := stream.Write(l.tunnelGateway[:]); err != nil {
+		return err
+	}
+
+	// Write tunnel ID (4 bytes)
+	if err := stream.WriteUint32(l.tunnelId); err != nil {
+		return err
+	}
+
+	// Write end date as 4 bytes (seconds since epoch, not milliseconds)
+	// Convert from milliseconds to seconds
+	endDateSeconds := uint32(l.endDate / 1000)
+	return stream.WriteUint32(endDateSeconds)
 }

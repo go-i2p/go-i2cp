@@ -680,28 +680,61 @@ func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort, destPort uint1
 func (c *Client) onMsgPayload(stream *Stream) {
 	Debug("Received PayloadMessage message")
 
-	session, srcDest, err := c.parsePayloadHeader(stream)
+	// Step 1: Read MessagePayloadMessage header (session ID, message ID)
+	session, err := c.readPayloadMessageHeader(stream)
 	if err != nil {
+		Error("Failed to read payload message header: %v", err)
 		return
 	}
 
-	payload, err := c.processPayloadData(stream)
+	// Step 2: Read payload size and extract gzip header info (protocol, ports)
+	protocol, srcPort, destPort, gzipData, err := c.readPayloadWithGzipHeader(stream)
 	if err != nil {
+		Error("Failed to read payload with gzip header: %v", err)
 		return
 	}
 
-	c.dispatchPayload(session, srcDest, payload, stream)
+	// Step 3: Decompress the gzip payload
+	payload, err := c.decompressGzipPayload(gzipData)
+	if err != nil {
+		Error("Failed to decompress payload: %v", err)
+		return
+	}
+
+	// Step 4: For repliable datagrams (protocol 17), parse source Destination from decompressed payload
+	// For other protocols (streaming=6, raw=18, etc.), source destination is not available at this layer
+	var srcDest *Destination
+	if protocol == 17 { // Repliable datagram - source destination is in payload
+		srcDest, payload, err = c.parseRepliableDatagramPayload(payload)
+		if err != nil {
+			Error("Failed to parse repliable datagram: %v", err)
+			return
+		}
+		Debug("Message from source: %s", srcDest.Base32())
+	} else {
+		// For streaming (6), raw datagrams (18), and custom protocols,
+		// source destination is not embedded in payload at I2CP layer
+		Debug("Received payload with protocol %d (no embedded source destination)", protocol)
+	}
+
+	// Step 5: Dispatch to session
+	Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
+	session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
 }
 
-// parsePayloadHeader reads session, message, and destination information from payload stream.
-func (c *Client) parsePayloadHeader(stream *Stream) (*Session, *Destination, error) {
+// readPayloadMessageHeader reads session ID and message ID from MessagePayloadMessage.
+// Per I2CP spec: MessagePayloadMessage contains Session ID (2), Message ID (4), Payload.
+func (c *Client) readPayloadMessageHeader(stream *Stream) (*Session, error) {
 	sessionId, err := stream.ReadUint16()
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("failed to read session ID: %w", err)
 	}
 
-	messageId, _ := stream.ReadUint32()
-	_ = messageId // currently unused
+	messageId, err := stream.ReadUint32()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read message ID: %w", err)
+	}
+	_ = messageId // Message ID is router-generated, currently unused
 
 	c.lock.Lock()
 	session, ok := c.sessions[sessionId]
@@ -709,54 +742,91 @@ func (c *Client) parsePayloadHeader(stream *Stream) (*Session, *Destination, err
 
 	if !ok {
 		Fatal("Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
-		return nil, nil, fmt.Errorf("session %d not found", sessionId)
+		return nil, fmt.Errorf("session %d not found", sessionId)
 	}
 
-	payloadSize, _ := stream.ReadUint32()
-	_ = payloadSize // currently unused
-
-	srcDest, err := NewDestinationFromMessage(stream, c.crypto)
-	if err != nil {
-		Error("Failed to parse source destination from MessagePayload: %v", err)
-		return nil, nil, err
-	}
-
-	Debug("Message from source: %s", srcDest.Base32())
-	return session, srcDest, nil
+	return session, nil
 }
 
-// processPayloadData validates and decompresses the payload data.
-func (c *Client) processPayloadData(stream *Stream) (*bytes.Buffer, error) {
-	if err := validateGzipHeader(stream); err != nil {
-		Warning("Payload validation failed, skipping payload")
-		return nil, err
+// readPayloadWithGzipHeader reads the payload and extracts protocol/port info from gzip header.
+// Per I2CP spec: Payload = 4-byte length + gzip data (with ports in gzip mtime, protocol in gzip OS field)
+func (c *Client) readPayloadWithGzipHeader(stream *Stream) (protocol uint8, srcPort, destPort uint16, gzipData []byte, err error) {
+	payloadSize, err := stream.ReadUint32()
+	if err != nil {
+		return 0, 0, 0, nil, fmt.Errorf("failed to read payload size: %w", err)
 	}
 
-	msgStream := bytes.NewBuffer(stream.Bytes())
-	payload, err := decompressPayload(msgStream)
+	if payloadSize == 0 {
+		return 0, 0, 0, nil, fmt.Errorf("empty payload")
+	}
+
+	// Read entire gzip payload
+	gzipData = make([]byte, payloadSize)
+	n, err := stream.Read(gzipData)
 	if err != nil {
-		Error("Failed to decompress message payload: %v", err)
-		return nil, err
+		return 0, 0, 0, nil, fmt.Errorf("failed to read gzip payload: %w", err)
+	}
+	if uint32(n) != payloadSize {
+		return 0, 0, 0, nil, fmt.Errorf("incomplete payload read: got %d, expected %d", n, payloadSize)
+	}
+
+	// Validate gzip header (bytes 0-2: 0x1F 0x8B 0x08)
+	if len(gzipData) < 10 {
+		return 0, 0, 0, nil, fmt.Errorf("gzip data too short: %d bytes", len(gzipData))
+	}
+	if gzipData[0] != 0x1f || gzipData[1] != 0x8b || gzipData[2] != 0x08 {
+		return 0, 0, 0, nil, fmt.Errorf("invalid gzip header: %x %x %x", gzipData[0], gzipData[1], gzipData[2])
+	}
+
+	// Extract I2CP fields from gzip header:
+	// Bytes 4-5: Source port (little-endian, in gzip mtime field)
+	// Bytes 6-7: Dest port (little-endian, in gzip mtime field)
+	// Byte 9: Protocol (in gzip OS field)
+	srcPort = binary.LittleEndian.Uint16(gzipData[4:6])
+	destPort = binary.LittleEndian.Uint16(gzipData[6:8])
+	protocol = gzipData[9]
+
+	return protocol, srcPort, destPort, gzipData, nil
+}
+
+// decompressGzipPayload decompresses gzip data and returns the payload.
+func (c *Client) decompressGzipPayload(gzipData []byte) (*bytes.Buffer, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(gzipData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer reader.Close()
+
+	payload := bytes.NewBuffer(make([]byte, 0, 0xffff))
+	if _, err := io.Copy(payload, reader); err != nil {
+		return nil, fmt.Errorf("failed to decompress: %w", err)
 	}
 
 	return payload, nil
 }
 
-// dispatchPayload parses payload header and dispatches the message to the session.
-func (c *Client) dispatchPayload(session *Session, srcDest *Destination, payload *bytes.Buffer, stream *Stream) {
-	if payload.Len() == 0 {
-		Debug("Empty payload received for session %d", session.id)
-		return
-	}
+// parseRepliableDatagramPayload parses source Destination from repliable datagram (protocol 17).
+// Per datagram spec: Datagram1 = Destination (387+ bytes) + Signature (64 bytes for Ed25519) + payload
+func (c *Client) parseRepliableDatagramPayload(payload *bytes.Buffer) (*Destination, *bytes.Buffer, error) {
+	payloadStream := NewStream(payload.Bytes())
 
-	protocol, srcPort, destPort, err := parsePayloadHeader(stream)
+	// Parse source Destination from decompressed payload
+	srcDest, err := NewDestinationFromMessage(payloadStream, c.crypto)
 	if err != nil {
-		Error("Failed to parse payload header: %v", err)
-		return
+		return nil, nil, fmt.Errorf("failed to parse source destination from datagram: %w", err)
 	}
 
-	Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
-	session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
+	// Skip Ed25519 signature (64 bytes)
+	const ed25519SignatureSize = 64
+	sig := make([]byte, ed25519SignatureSize)
+	if _, err := payloadStream.Read(sig); err != nil {
+		return nil, nil, fmt.Errorf("failed to read signature: %w", err)
+	}
+
+	// Remaining bytes are the actual payload
+	remainingPayload := bytes.NewBuffer(payloadStream.Bytes())
+
+	return srcDest, remainingPayload, nil
 }
 
 // readMessageStatusFields reads all fields from a MessageStatus message.
@@ -1763,23 +1833,30 @@ func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest 
 	if err := c.writeLeaseSet2Header(session, leaseSet, dest); err != nil {
 		return err
 	}
+	Debug("LeaseSet2 after destination: %d bytes", leaseSet.Len())
 
 	if err := c.writeLeaseSet2Timestamps(leaseSet); err != nil {
 		return err
 	}
+	Debug("LeaseSet2 after timestamps: %d bytes", leaseSet.Len())
 
 	if err := c.writeLeaseSet2Flags(session, leaseSet); err != nil {
 		return err
 	}
+	Debug("LeaseSet2 after flags: %d bytes", leaseSet.Len())
 
 	if err := c.writeLeaseSet2Properties(session, leaseSet); err != nil {
 		return err
 	}
+	Debug("LeaseSet2 after properties: %d bytes", leaseSet.Len())
+	Debug("LeaseSet2 bytes 391-401: %x", leaseSet.Bytes()[391:401])
 
 	// Write encryption public keys (after properties, before leases)
 	if err := c.writeLeaseSet2EncryptionKeys(session, leaseSet); err != nil {
 		return err
 	}
+	Debug("LeaseSet2 after enc keys: %d bytes", leaseSet.Len())
+	Debug("LeaseSet2 bytes 401-436: %x", leaseSet.Bytes()[401:436])
 
 	if err := c.writeLeaseSet2Leases(session, leaseSet, leaseCount); err != nil {
 		return err
@@ -1838,7 +1915,8 @@ func (c *Client) writeLeaseSet2Properties(session *Session, leaseSet *Stream) er
 
 // writeLeaseSet2EncryptionKeys writes the encryption public keys to the LeaseSet2 stream.
 // Per LeaseSet2 format: [numKeys:1][encType:2][pubKey:keyLen]...
-// For X25519 (encType=4): pubKey is 32 bytes (length determined by type, not prefixed)
+// For X25519 (encType=4): pubKey is 32 bytes
+// LeaseSet2 format: [numk:1][keytype:2][keylen:2][key:keylen]...
 func (c *Client) writeLeaseSet2EncryptionKeys(session *Session, leaseSet *Stream) error {
 	if session.encryptionKeyPair == nil {
 		return fmt.Errorf("no encryption key pair available for LeaseSet2")
@@ -1847,21 +1925,24 @@ func (c *Client) writeLeaseSet2EncryptionKeys(session *Session, leaseSet *Stream
 	// Write number of encryption keys (1 for now - just X25519)
 	leaseSet.WriteByte(1)
 
-	// Write encryption key: EncType (2 bytes), PublicKey (length determined by type)
-	// X25519 (type 4) keys are 32 bytes - no length prefix needed
+	// Write encryption key per LeaseSet2 spec:
+	// [keytype:2][keylen:2][key:keylen]
 	encType := uint16(X25519) // X25519 = 4
+	keyLen := uint16(32)      // X25519 keys are 32 bytes
 
 	leaseSet.WriteUint16(encType)
+	leaseSet.WriteUint16(keyLen)
 
 	pubKey := session.encryptionKeyPair.PublicKey()
 	leaseSet.Write(pubKey[:])
 
-	Debug("Wrote X25519 encryption public key to LeaseSet2")
+	Debug("Wrote X25519 encryption public key to LeaseSet2 (type=%d, len=%d)", encType, keyLen)
 	return nil
 }
 
 // writeLeaseSet2Leases writes the lease count and actual lease data from the session to the stream.
-// Uses the leases received from RequestVariableLeaseSet instead of placeholder data.
+// Uses the leases received from RequestVariableLeaseSet.
+// Writes in Lease2 format (40 bytes per lease) for LeaseSet2 compatibility.
 func (c *Client) writeLeaseSet2Leases(session *Session, leaseSet *Stream, leaseCount int) error {
 	leaseSet.WriteByte(uint8(leaseCount))
 
@@ -1872,20 +1953,22 @@ func (c *Client) writeLeaseSet2Leases(session *Session, leaseSet *Stream, leaseC
 	// Use actual leases if available, otherwise fall back to placeholder
 	if len(leases) >= leaseCount {
 		for i := 0; i < leaseCount; i++ {
-			if err := leases[i].WriteToMessage(leaseSet); err != nil {
+			// Use WriteToLeaseSet2 for Lease2 format (40 bytes with 4-byte timestamp)
+			if err := leases[i].WriteToLeaseSet2(leaseSet); err != nil {
 				return fmt.Errorf("failed to write lease %d: %w", i, err)
 			}
 		}
-		Debug("Wrote %d actual leases to LeaseSet2", leaseCount)
+		Debug("Wrote %d actual leases to LeaseSet2 (Lease2 format, 40 bytes each)", leaseCount)
 	} else {
-		// Fallback to placeholder data (for compatibility with tests)
+		// Fallback to placeholder data in Lease2 format (40 bytes per lease)
 		Debug("Warning: No actual leases available, using placeholder data for %d leases", leaseCount)
 		for i := 0; i < leaseCount; i++ {
 			nullGateway := make([]byte, 32)
 			leaseSet.Write(nullGateway)
 			leaseSet.WriteUint32(uint32(i + 1))
-			leaseEndDate := uint64(c.router.date) + 300000 // 5 minutes
-			leaseSet.WriteUint64(leaseEndDate)
+			// End date in seconds (not milliseconds) for Lease2 format
+			leaseEndDateSeconds := uint32(c.router.date/1000) + 300 // 5 minutes
+			leaseSet.WriteUint32(leaseEndDateSeconds)
 		}
 	}
 	return nil
@@ -1948,19 +2031,22 @@ func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *
 	c.messageStream.Write(signature)
 
 	// Write private keys after the signed LeaseSet2
-	// Format: [numKeys:1][encType:2][privKey:keyLen]...
-	// Key length is determined by encType (no length prefix needed)
+	// I2CP CreateLeaseSet2Message format: [numKeys:1][encType:2][keyLen:2][privKey:keyLen]...
 	if session.encryptionKeyPair != nil {
 		c.messageStream.WriteByte(1) // Number of private keys
 
-		// X25519 (type 4) private keys are 32 bytes - no length prefix
+		// Write per I2CP spec: [encType:2][keyLen:2][privKey:keyLen]
 		encType := uint16(X25519) // X25519 = 4
+		keyLen := uint16(32)      // X25519 private keys are 32 bytes
+
 		c.messageStream.WriteUint16(encType)
+		c.messageStream.WriteUint16(keyLen)
 
 		privKey := session.encryptionKeyPair.PrivateKey()
 		c.messageStream.Write(privKey[:])
 
-		Debug("Wrote X25519 encryption private key to CreateLeaseSet2Message, total: %d bytes", c.messageStream.Len())
+		Debug("Wrote X25519 encryption private key to CreateLeaseSet2Message (type=%d, len=%d), total: %d bytes",
+			encType, keyLen, c.messageStream.Len())
 	} else {
 		c.messageStream.WriteByte(0) // No private keys
 	}

@@ -286,8 +286,13 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 			receivedPayload = make([]byte, payload.Len())
 			payload.Read(receivedPayload)
 
+			// srcDest may be nil for non-repliable datagram protocols
+			srcAddr := "(no source destination)"
+			if srcDest != nil {
+				srcAddr = srcDest.Base32()
+			}
 			t.Logf("Receiver: Got message from %s - protocol=%d, srcPort=%d, destPort=%d, size=%d",
-				srcDest.Base32(), protocol, srcPort, destPort, len(receivedPayload))
+				srcAddr, protocol, srcPort, destPort, len(receivedPayload))
 
 			// Signal message received
 			select {
