@@ -55,7 +55,7 @@ func TestOnMsgBandwidthLimits(t *testing.T) {
 		stream.WriteUint32(uint32((i + 1) * 1000))
 	}
 	stream.Seek(0, 0)
-	client.onMsgBandwithLimit(stream)
+	client.onMsgBandwidthLimit(stream)
 }
 
 // TestOnMessage_DeprecatedHandlers tests message routing

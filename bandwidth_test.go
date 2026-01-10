@@ -107,7 +107,7 @@ func TestOnMsgBandwidthLimitCallback(t *testing.T) {
 	}
 
 	wg.Add(1)
-	client.onMsgBandwithLimit(stream)
+	client.onMsgBandwidthLimit(stream)
 	wg.Wait()
 
 	if !callbackInvoked {
@@ -168,7 +168,7 @@ func TestOnMsgBandwidthLimitNoCallback(t *testing.T) {
 	}
 
 	// Should not panic when callback is nil
-	client.onMsgBandwithLimit(stream)
+	client.onMsgBandwidthLimit(stream)
 }
 
 // TestOnMsgBandwidthLimitNilCallbacks tests behavior when callbacks struct is nil
@@ -189,7 +189,7 @@ func TestOnMsgBandwidthLimitNilCallbacks(t *testing.T) {
 	}
 
 	// Should not panic when callbacks is nil
-	client.onMsgBandwithLimit(stream)
+	client.onMsgBandwidthLimit(stream)
 }
 
 // TestOnMsgBandwidthLimitTruncatedMessage tests error handling for incomplete messages
@@ -223,7 +223,7 @@ func TestOnMsgBandwidthLimitTruncatedMessage(t *testing.T) {
 			}
 
 			// Should handle error gracefully without invoking callback
-			client.onMsgBandwithLimit(stream)
+			client.onMsgBandwidthLimit(stream)
 
 			if callbackInvoked {
 				t.Error("Callback should not be invoked for truncated message")
@@ -298,7 +298,7 @@ func TestBandwidthLimitsConcurrentCallback(t *testing.T) {
 			for j := 0; j < 9; j++ {
 				stream.WriteUint32(0)
 			}
-			client.onMsgBandwithLimit(stream)
+			client.onMsgBandwidthLimit(stream)
 		}()
 	}
 

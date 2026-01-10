@@ -441,7 +441,7 @@ func (c *Client) onMessage(msgType uint8, stream *Stream) {
 		Warning("Received deprecated REQUEST_LEASESET (type 21) - router should send REQUEST_VARIABLE_LEASESET (type 37)")
 		c.onMsgRequestLeaseSet(stream)
 	case I2CP_MSG_BANDWIDTH_LIMITS:
-		c.onMsgBandwithLimit(stream)
+		c.onMsgBandwidthLimit(stream)
 	case I2CP_MSG_SESSION_STATUS:
 		c.onMsgSessionStatus(stream)
 	case I2CP_MSG_REPORT_ABUSE:
@@ -1029,10 +1029,10 @@ func (c *Client) onMsgReportAbuse(stream *Stream) {
 	// This should never be called since the dispatcher doesn't route this message type
 }
 
-// onMsgBandwithLimit handles BandwidthLimitsMessage (type 23) from router
+// onMsgBandwidthLimit handles BandwidthLimitsMessage (type 23) from router
 // per I2CP specification - reports bandwidth limits and burst parameters
 // Note: 9 fields are undefined in the spec and reserved for future use
-func (c *Client) onMsgBandwithLimit(stream *Stream) {
+func (c *Client) onMsgBandwidthLimit(stream *Stream) {
 	Debug("Received BandwidthLimits message.")
 
 	clientInbound, clientOutbound, err := readClientBandwidthLimits(stream)
