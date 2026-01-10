@@ -95,3 +95,43 @@ func compareComponent(a, b uint16) int {
 	}
 	return -1
 }
+
+// Predefined router version requirements for I2CP features.
+// These match the I2CP spec version notes and can be used with SupportsVersion().
+var (
+	// VersionFastReceive is the minimum version for fast receive mode (deprecates ReceiveMessageBegin/End)
+	VersionFastReceive = Version{major: 0, minor: 9, micro: 4}
+
+	// VersionHostLookup is the minimum version for HostLookup/HostReply (deprecates DestLookup/DestReply)
+	VersionHostLookup = Version{major: 0, minor: 9, micro: 11}
+
+	// VersionMultiSession is the minimum version for multi-session support
+	VersionMultiSession = Version{major: 0, minor: 9, micro: 21}
+
+	// VersionCreateLeaseSet2 is the minimum version for CreateLeaseSet2Message (type 41)
+	VersionCreateLeaseSet2 = Version{major: 0, minor: 9, micro: 39}
+
+	// VersionBlindingInfo is the minimum version for BlindingInfoMessage (type 42)
+	VersionBlindingInfo = Version{major: 0, minor: 9, micro: 43}
+
+	// VersionProposal167 is the minimum version for Proposal 167 (HostReply options mapping)
+	VersionProposal167 = Version{major: 0, minor: 9, micro: 66}
+)
+
+// AtLeast returns true if v >= other.
+// This is a convenience method for version comparison.
+func (v *Version) AtLeast(other Version) bool {
+	return v.compare(other) >= 0
+}
+
+// String returns the version as a string (e.g., "0.9.67").
+func (v *Version) String() string {
+	if v.version != "" {
+		return v.version
+	}
+	if v.qualifier > 0 {
+		return strconv.Itoa(int(v.major)) + "." + strconv.Itoa(int(v.minor)) + "." +
+			strconv.Itoa(int(v.micro)) + "." + strconv.Itoa(int(v.qualifier))
+	}
+	return strconv.Itoa(int(v.major)) + "." + strconv.Itoa(int(v.minor)) + "." + strconv.Itoa(int(v.micro))
+}

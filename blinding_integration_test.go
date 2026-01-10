@@ -31,8 +31,9 @@ func TestCreateLeaseSet2WithBlinding(t *testing.T) {
 	}
 	session.config.destination = dest
 
-	// Initialize client with router date
+	// Initialize client with router date and version (simulating connected state)
 	client.router.date = 1000000
+	client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router
 
 	// Call msgCreateLeaseSet2 - should use encrypted LeaseSet type
 	// Use queue=true since we're not connected to a router
@@ -65,8 +66,9 @@ func TestCreateLeaseSet2WithoutBlinding(t *testing.T) {
 	}
 	session.config.destination = dest
 
-	// Initialize client with router date
+	// Initialize client with router date and version (simulating connected state)
 	client.router.date = 1000000
+	client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router
 
 	// Call msgCreateLeaseSet2 - should use standard LeaseSet type
 	// Use queue=true since we're not connected to a router
@@ -103,6 +105,7 @@ func TestCreateLeaseSet2BlindingFlagsIncluded(t *testing.T) {
 	}
 	session.config.destination = dest
 	client.router.date = 1000000
+	client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router
 
 	// Create LeaseSet2 with queue=true
 	err = client.msgCreateLeaseSet2(session, 2, true)
@@ -141,6 +144,7 @@ func TestCreateLeaseSet2EmptyBlindingParams(t *testing.T) {
 	}
 	session.config.destination = dest
 	client.router.date = 1000000
+	client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router
 
 	// Create LeaseSet2 - should handle empty params gracefully
 	// Use queue=true since we're not connected
@@ -319,6 +323,7 @@ func TestCreateLeaseSet2MultipleLeases(t *testing.T) {
 			}
 			session.config.destination = dest
 			client.router.date = 1000000
+			client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router
 
 			// Use queue=true since we're not connected
 			err = client.msgCreateLeaseSet2(session, leaseCount, true)

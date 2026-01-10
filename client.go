@@ -1814,6 +1814,12 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 // msgCreateLeaseSet2 sends CreateLeaseSet2Message (type 41) for modern LeaseSet creation
 // per I2CP specification 0.9.39+ - supports LS2/EncryptedLS/MetaLS with modern crypto
 func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool) error {
+	// Version check: CreateLeaseSet2 requires router 0.9.39+
+	if !c.SupportsVersion(VersionCreateLeaseSet2) {
+		return fmt.Errorf("router version %s does not support CreateLeaseSet2 (requires %s+)",
+			c.router.version.String(), VersionCreateLeaseSet2.String())
+	}
+
 	Debug("Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
 
 	// Generate X25519 encryption key pair for this session if not already present
@@ -2257,6 +2263,12 @@ func (c *Client) msgDestLookup(hash []byte, queue bool) {
 }
 
 func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uint8, data []byte, queue bool) error {
+	// Version check: HostLookup requires router 0.9.11+
+	if !c.SupportsVersion(VersionHostLookup) {
+		return fmt.Errorf("router version %s does not support HostLookup (requires %s+), use DestLookup instead",
+			c.router.version.String(), VersionHostLookup.String())
+	}
+
 	var sessionId uint16
 	Debug("Sending HostLookupMessage.")
 	c.messageStream.Reset()
@@ -2365,6 +2377,12 @@ type BlindingInfo struct {
 //
 // Returns error if validation fails or message cannot be sent.
 func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) error {
+	// Version check: BlindingInfo requires router 0.9.43+
+	if !c.SupportsVersion(VersionBlindingInfo) {
+		return fmt.Errorf("router version %s does not support BlindingInfo (requires %s+)",
+			c.router.version.String(), VersionBlindingInfo.String())
+	}
+
 	if err := c.validateBlindingInfo(sess, info); err != nil {
 		return err
 	}
@@ -3725,6 +3743,38 @@ func (c *Client) RouterVersion() Version {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	return c.router.version
+}
+
+// SupportsVersion returns true if the connected router version is at least minVersion.
+// Returns false if the client is not initialized or not connected.
+//
+// This method should be used to check feature availability before sending
+// version-specific messages. Per I2CP spec § Version Notes:
+// "Clients and routers should not send messages that are unsupported by the other side"
+//
+// Common version checks (use predefined Version* constants):
+//   - VersionFastReceive (0.9.4+): Fast receive mode
+//   - VersionHostLookup (0.9.11+): HostLookup/HostReply messages
+//   - VersionMultiSession (0.9.21+): Multi-session support
+//   - VersionCreateLeaseSet2 (0.9.39+): CreateLeaseSet2Message
+//   - VersionBlindingInfo (0.9.43+): BlindingInfoMessage
+//   - VersionProposal167 (0.9.66+): HostReply options mapping
+//
+// Example:
+//
+//	if client.SupportsVersion(VersionBlindingInfo) {
+//	    client.msgBlindingInfo(session, info, true)
+//	} else {
+//	    return errors.New("router does not support blinding (requires 0.9.43+)")
+//	}
+func (c *Client) SupportsVersion(minVersion Version) bool {
+	if err := c.ensureInitialized(); err != nil {
+		return false
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.router.version.AtLeast(minVersion)
 }
 
 // RouterCapabilities returns the router's capability flags as a bitmask.

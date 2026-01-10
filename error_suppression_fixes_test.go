@@ -257,7 +257,8 @@ func TestDestinationLookupDecodeErrorHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewClient(&ClientCallBacks{})
-			client.router.capabilities = ROUTER_CAN_HOST_LOOKUP // Enable host lookup
+			client.router.capabilities = ROUTER_CAN_HOST_LOOKUP            // Enable host lookup
+			client.router.version = Version{major: 0, minor: 9, micro: 67} // Modern router for HostLookup support
 
 			// Create a mock session
 			session := &Session{
