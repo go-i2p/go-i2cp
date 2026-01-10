@@ -2587,6 +2587,12 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 		return c.Close()
 	}
 
+	// MAJOR-2 FIX: Proper subsession cleanup when destroying individual subsessions
+	// Per I2CP § Destroying Subsessions: "A subsession may be destroyed with the DestroySession
+	// message as usual. This will not destroy the primary session or stop the I2CP connection."
+	// We must clean up the subsession's local state and remove it from the sessions map.
+	cleanupDestroyedSubsession(c, sess)
+
 	return nil
 }
 
@@ -2614,6 +2620,79 @@ func cascadeDestroySubsessions(c *Client, sess *Session) {
 		}
 	}
 	c.primarySessionID = nil
+}
+
+// cleanupDestroyedSubsession performs complete cleanup of a destroyed subsession.
+// Per I2CP § Destroying Subsessions: Individual subsession destruction should not
+// destroy the primary session or stop the I2CP connection, but must properly clean
+// up the subsession's local state to prevent resource leaks.
+//
+// This function handles:
+// - Removing the session from the client's sessions map
+// - Clearing pending messages to prevent memory leaks
+// - Cancelling the session's context
+// - Removing the reference to the primary session
+// - Clearing encryption key pairs and blinding parameters
+func cleanupDestroyedSubsession(c *Client, sess *Session) {
+	if sess.isPrimary {
+		// Primary sessions are cleaned up via Close(), not here
+		return
+	}
+
+	Debug("Cleaning up destroyed subsession %d", sess.id)
+
+	// Remove from client's sessions map
+	c.lock.Lock()
+	delete(c.sessions, sess.id)
+	c.lock.Unlock()
+
+	// Clean up the session's internal state
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+
+	// Clear pending messages to prevent memory leaks
+	if sess.pendingMessages != nil {
+		pendingCount := len(sess.pendingMessages)
+		if pendingCount > 0 {
+			Debug("Clearing %d pending messages from destroyed subsession %d", pendingCount, sess.id)
+		}
+		sess.pendingMessages = nil
+	}
+
+	// Cancel the session's context to signal any waiting goroutines
+	if sess.cancel != nil {
+		sess.cancel()
+	}
+
+	// Clear the reference to primary session to allow GC
+	sess.primarySession = nil
+
+	// Clear encryption key pair (subsessions share with primary, but clear reference)
+	sess.encryptionKeyPair = nil
+
+	// Clear blinding parameters
+	sess.blindingScheme = 0
+	sess.blindingFlags = 0
+	sess.blindingParams = nil
+
+	// Clear leases
+	sess.leases = nil
+
+	// Mark session as closed
+	sess.closed = true
+	sess.closedAt = time.Now()
+
+	// Close destroyConfirmed channel if it exists and is open
+	if sess.destroyConfirmed != nil {
+		select {
+		case <-sess.destroyConfirmed:
+			// Already closed
+		default:
+			close(sess.destroyConfirmed)
+		}
+	}
+
+	Debug("Subsession %d cleanup complete", sess.id)
 }
 
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.
