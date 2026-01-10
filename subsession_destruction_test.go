@@ -170,14 +170,6 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 	subsessionID := subsession.ID()
 	t.Logf("Primary ID: %d, Subsession ID: %d", primaryID, subsessionID)
 
-	// Debug: check sessions map before destruction
-	client.lock.Lock()
-	t.Logf("Before destruction - sessions in map: %v", len(client.sessions))
-	for id := range client.sessions {
-		t.Logf("  Session ID in map: %d", id)
-	}
-	client.lock.Unlock()
-
 	// Destroy the subsession
 	t.Log("Destroying subsession...")
 	err = subsession.Close()
@@ -187,14 +179,6 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 
 	// Give router time to process
 	time.Sleep(500 * time.Millisecond)
-
-	// Debug: check sessions map after destruction
-	client.lock.Lock()
-	t.Logf("After destruction - sessions in map: %v", len(client.sessions))
-	for id := range client.sessions {
-		t.Logf("  Session ID in map: %d", id)
-	}
-	client.lock.Unlock()
 
 	// Verify subsession is marked as closed
 	if !subsession.IsClosed() {
