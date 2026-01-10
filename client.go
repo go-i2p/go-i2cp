@@ -1615,10 +1615,25 @@ func (c *Client) applyReconfigurationProperties(sess *Session, properties map[st
 	return nil
 }
 
-// onMsgBlindingInfo handles BlindingInfoMessage (type 42) from router
-// per I2CP specification 0.9.43+ - encrypted LeaseSet blinding parameters
+// onMsgBlindingInfo handles BlindingInfoMessage (type 42) received from router.
+//
+// IMPORTANT: Per I2CP specification, BlindingInfoMessage is CLIENT→ROUTER ONLY.
+// The router NEVER sends this message to clients. This handler exists only for:
+//  1. Testing purposes (simulating message parsing)
+//  2. Future-proofing if spec changes
+//  3. Graceful handling of unexpected messages
+//
+// In production, receiving this message indicates either:
+//   - A router bug
+//   - Protocol version mismatch
+//   - Test/development environment
+//
+// The handler logs a warning but processes the message to avoid disconnection.
 func (c *Client) onMsgBlindingInfo(stream *Stream) {
-	Debug("Received BlindingInfoMessage")
+	// SPEC NOTE: Router should NEVER send this message - log warning
+	Warning("Received BlindingInfoMessage (type 42) from router - this is unexpected per I2CP spec")
+	Warning("BlindingInfoMessage is CLIENT→ROUTER only; router should not send this")
+	Debug("Processing unexpected BlindingInfoMessage for diagnostic purposes")
 
 	sessionId, authScheme, flags, blindingParams, err := c.readBlindingInfoFields(stream)
 	if err != nil {
@@ -2294,6 +2309,232 @@ func (c *Client) msgReconfigureSession(session *Session, properties map[string]s
 
 	Debug("Successfully sent ReconfigureSessionMessage for session %d", session.id)
 	return nil
+}
+
+// BlindingInfo represents the parameters for a BlindingInfoMessage.
+// This structure encapsulates all the fields needed to advise the router
+// about a blinded destination per I2CP specification 0.9.43+.
+type BlindingInfo struct {
+	// EndpointType specifies how the destination is identified (0-3)
+	// Use BLINDING_ENDPOINT_* constants
+	EndpointType uint8
+
+	// Endpoint is the destination identifier, format depends on EndpointType:
+	//   Type 0: 32-byte hash
+	//   Type 1: hostname string (will be length-prefixed)
+	//   Type 2: full Destination bytes
+	//   Type 3: 2-byte sig type + SigningPublicKey bytes
+	Endpoint []byte
+
+	// BlindedSigType is the signature type used for blinding (2 bytes)
+	BlindedSigType uint16
+
+	// Expiration is the expiration time in seconds since epoch
+	Expiration uint32
+
+	// PerClientAuth indicates if per-client authentication is required
+	// When true, DecryptionKey must be provided
+	PerClientAuth bool
+
+	// AuthScheme specifies the authentication scheme when PerClientAuth is true
+	// Use BLINDING_AUTH_SCHEME_DH (0) or BLINDING_AUTH_SCHEME_PSK (1)
+	AuthScheme uint8
+
+	// DecryptionKey is the 32-byte ECIES_X25519 private key (little-endian)
+	// Only required when PerClientAuth is true
+	DecryptionKey []byte
+
+	// LookupPassword is the optional password for encrypted LeaseSet lookup
+	// Only include if the destination requires a secret
+	LookupPassword string
+}
+
+// msgBlindingInfo sends BlindingInfoMessage (type 42) to advise the router about a blinded destination.
+// per I2CP specification 0.9.43+ - used before messaging blinded destinations (b33 addresses)
+//
+// The router does not send a reply to this message.
+//
+// Per SPEC.md § BlindingInfoMessage:
+// "Before a client sends a message to a blinded destination, it must either lookup
+// the 'b33' in a Host Lookup message, or send a Blinding Info message."
+//
+// Parameters:
+//   - sess: The session to associate this blinding info with
+//   - info: BlindingInfo struct containing all blinding parameters
+//   - queue: If true, queue the message; if false, send immediately
+//
+// Returns error if validation fails or message cannot be sent.
+func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) error {
+	if err := c.validateBlindingInfo(sess, info); err != nil {
+		return err
+	}
+
+	Debug("Sending BlindingInfoMessage for session %d, endpoint type %d", sess.id, info.EndpointType)
+
+	c.messageStream.Reset()
+
+	// Write Session ID (2 bytes)
+	c.messageStream.WriteUint16(sess.id)
+
+	// Build and write flags byte
+	flags := c.buildBlindingFlags(info)
+	c.messageStream.WriteByte(flags)
+
+	// Write endpoint type (1 byte)
+	c.messageStream.WriteByte(info.EndpointType)
+
+	// Write blinded signature type (2 bytes)
+	c.messageStream.WriteUint16(info.BlindedSigType)
+
+	// Write expiration (4 bytes, seconds since epoch)
+	c.messageStream.WriteUint32(info.Expiration)
+
+	// Write endpoint data based on type
+	if err := c.writeBlindingEndpoint(info); err != nil {
+		return fmt.Errorf("failed to write endpoint: %w", err)
+	}
+
+	// Write optional decryption key (only if per-client auth)
+	if info.PerClientAuth {
+		c.messageStream.Write(info.DecryptionKey)
+	}
+
+	// Write optional lookup password (only if provided)
+	if info.LookupPassword != "" {
+		if err := c.messageStream.WriteLenPrefixedString(info.LookupPassword); err != nil {
+			return fmt.Errorf("failed to write lookup password: %w", err)
+		}
+	}
+
+	if err := c.sendMessage(I2CP_MSG_BLINDING_INFO, c.messageStream, queue); err != nil {
+		Error("Error while sending BlindingInfoMessage: %v", err)
+		return fmt.Errorf("failed to send BlindingInfoMessage: %w", err)
+	}
+
+	Debug("Successfully sent BlindingInfoMessage for session %d", sess.id)
+	return nil
+}
+
+// validateBlindingInfo validates the BlindingInfo parameters before sending.
+func (c *Client) validateBlindingInfo(sess *Session, info *BlindingInfo) error {
+	if sess == nil {
+		return fmt.Errorf("session cannot be nil")
+	}
+	if info == nil {
+		return fmt.Errorf("blinding info cannot be nil")
+	}
+
+	// Validate endpoint type
+	if info.EndpointType > BLINDING_ENDPOINT_SIGKEY {
+		return fmt.Errorf("invalid endpoint type %d (must be 0-3)", info.EndpointType)
+	}
+
+	// Validate endpoint data based on type
+	switch info.EndpointType {
+	case BLINDING_ENDPOINT_HASH:
+		if len(info.Endpoint) != 32 {
+			return fmt.Errorf("hash endpoint must be exactly 32 bytes, got %d", len(info.Endpoint))
+		}
+	case BLINDING_ENDPOINT_HOSTNAME:
+		if len(info.Endpoint) == 0 {
+			return fmt.Errorf("hostname endpoint cannot be empty")
+		}
+		if len(info.Endpoint) > 255 {
+			return fmt.Errorf("hostname too long: %d bytes (max 255)", len(info.Endpoint))
+		}
+	case BLINDING_ENDPOINT_DESTINATION:
+		if len(info.Endpoint) < 387 { // Minimum destination size
+			return fmt.Errorf("destination endpoint too short: %d bytes", len(info.Endpoint))
+		}
+	case BLINDING_ENDPOINT_SIGKEY:
+		if len(info.Endpoint) < 3 { // At minimum: 2-byte sig type + 1 byte key
+			return fmt.Errorf("sigkey endpoint too short: %d bytes", len(info.Endpoint))
+		}
+	}
+
+	// Validate auth scheme
+	if info.AuthScheme > BLINDING_AUTH_SCHEME_PSK {
+		return fmt.Errorf("invalid auth scheme %d (must be 0 or 1)", info.AuthScheme)
+	}
+
+	// Validate decryption key when per-client auth is enabled
+	if info.PerClientAuth {
+		if len(info.DecryptionKey) != 32 {
+			return fmt.Errorf("decryption key must be exactly 32 bytes for per-client auth, got %d", len(info.DecryptionKey))
+		}
+	}
+
+	return nil
+}
+
+// buildBlindingFlags constructs the flags byte for BlindingInfoMessage.
+// Bit layout: 76543210
+//   - Bit 0: 0=everybody, 1=per-client
+//   - Bits 3-1: Auth scheme (if bit 0 is 1)
+//   - Bit 4: 1=secret required
+//   - Bits 7-5: Reserved (0)
+func (c *Client) buildBlindingFlags(info *BlindingInfo) uint8 {
+	var flags uint8 = 0
+
+	if info.PerClientAuth {
+		flags |= BLINDING_FLAG_PER_CLIENT
+		// Set auth scheme in bits 3-1 (shift left by 1)
+		flags |= (info.AuthScheme & 0x07) << 1
+	}
+
+	if info.LookupPassword != "" {
+		flags |= BLINDING_FLAG_SECRET
+	}
+
+	return flags
+}
+
+// writeBlindingEndpoint writes the endpoint data to the message stream.
+func (c *Client) writeBlindingEndpoint(info *BlindingInfo) error {
+	switch info.EndpointType {
+	case BLINDING_ENDPOINT_HASH:
+		// Type 0: 32-byte hash
+		c.messageStream.Write(info.Endpoint)
+
+	case BLINDING_ENDPOINT_HOSTNAME:
+		// Type 1: length-prefixed hostname string
+		if err := c.messageStream.WriteLenPrefixedString(string(info.Endpoint)); err != nil {
+			return err
+		}
+
+	case BLINDING_ENDPOINT_DESTINATION:
+		// Type 2: full destination bytes
+		c.messageStream.Write(info.Endpoint)
+
+	case BLINDING_ENDPOINT_SIGKEY:
+		// Type 3: sig type (2 bytes) + SigningPublicKey
+		c.messageStream.Write(info.Endpoint)
+
+	default:
+		return fmt.Errorf("unknown endpoint type: %d", info.EndpointType)
+	}
+
+	return nil
+}
+
+// SendBlindingInfo is a convenience method on Session to send blinding info for a destination.
+// This is the primary API for applications to use when messaging blinded destinations.
+//
+// Example usage:
+//
+//	info := &go_i2cp.BlindingInfo{
+//	    EndpointType:   go_i2cp.BLINDING_ENDPOINT_HASH,
+//	    Endpoint:       destHash[:],
+//	    BlindedSigType: 11, // Ed25519-SHA512
+//	    Expiration:     uint32(time.Now().Add(24*time.Hour).Unix()),
+//	    LookupPassword: "optional-secret",
+//	}
+//	err := session.SendBlindingInfo(info)
+func (session *Session) SendBlindingInfo(info *BlindingInfo) error {
+	if err := session.ensureInitialized(); err != nil {
+		return err
+	}
+	return session.client.msgBlindingInfo(session, info, false)
 }
 
 func (c *Client) msgGetBandwidthLimits(queue bool) {

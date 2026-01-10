@@ -100,21 +100,53 @@ const (
 // per I2CP specification for BlindingInfoMessage authentication
 //
 // Blinding is used for encrypted LeaseSet access (I2CP 0.9.43+).
-// When a router sends BlindingInfo to a client, it indicates the authentication
-// scheme and parameters required to access an encrypted LeaseSet.
+// The client sends BlindingInfoMessage to advise the router about blinded destinations
+// with optional lookup passwords and/or private keys for decryption.
 //
 // Support Status in go-i2cp:
-//   - BLINDING_AUTH_SCHEME_DH (0):  ⚠️  Partial (storage only, crypto pending Phase 4)
-//   - BLINDING_AUTH_SCHEME_PSK (1): ⚠️  Partial (storage only, crypto pending Phase 4)
+//   - BLINDING_AUTH_SCHEME_DH (0):  ✅ Supported via msgBlindingInfo()
+//   - BLINDING_AUTH_SCHEME_PSK (1): ✅ Supported via msgBlindingInfo()
 //
 // Blinding workflow:
-//  1. Router sends BlindingInfoMessage with scheme, flags, and parameters
-//  2. Client stores blinding info in session (via SetBlindingInfo)
-//  3. Client uses blinding parameters when creating encrypted LeaseSet2
-//  4. Encrypted LeaseSet2 requires password or key for access
+//  1. Client sends BlindingInfoMessage to router before messaging a blinded destination
+//  2. Router uses the info to look up and decrypt the destination's LeaseSet
+//  3. Router does NOT reply to this message
+//
+// Per SPEC.md § BlindingInfoMessage:
+// "Before a client sends a message to a blinded destination, it must either lookup
+// the 'b33' in a Host Lookup message, or send a Blinding Info message."
 const (
-	BLINDING_AUTH_SCHEME_DH  uint8 = 0 // Diffie-Hellman authentication
-	BLINDING_AUTH_SCHEME_PSK uint8 = 1 // Pre-Shared Key authentication
+	BLINDING_AUTH_SCHEME_DH  uint8 = 0 // Diffie-Hellman client authentication (or no per-client auth)
+	BLINDING_AUTH_SCHEME_PSK uint8 = 1 // Pre-Shared Key client authentication
+)
+
+// Blinding Endpoint Type Constants
+// per I2CP specification for BlindingInfoMessage endpoint identification
+//
+// The endpoint identifies which blinded destination the blinding info applies to.
+// Different types allow specifying the destination by hash, hostname, full destination, or signing key.
+const (
+	BLINDING_ENDPOINT_HASH        uint8 = 0 // 32-byte SHA-256 hash of destination
+	BLINDING_ENDPOINT_HOSTNAME    uint8 = 1 // hostname String (address book lookup)
+	BLINDING_ENDPOINT_DESTINATION uint8 = 2 // full binary Destination
+	BLINDING_ENDPOINT_SIGKEY      uint8 = 3 // 2-byte sig type + SigningPublicKey
+)
+
+// Blinding Flag Constants
+// per I2CP specification for BlindingInfoMessage flags field
+//
+// Flags field is 1 byte with bit layout: 76543210
+//   - Bit 0: 0=everybody, 1=per-client authentication
+//   - Bits 3-1: Auth scheme (if bit 0 is 1), otherwise 000
+//   - Bit 4: 1=secret (lookup password) required
+//   - Bits 7-5: Reserved, must be 0
+const (
+	BLINDING_FLAG_PER_CLIENT    uint8 = 0x01 // Bit 0: per-client authentication enabled
+	BLINDING_FLAG_SECRET        uint8 = 0x10 // Bit 4: lookup password required
+	BLINDING_FLAG_AUTH_DH       uint8 = 0x00 // Bits 3-1: DH authentication (000)
+	BLINDING_FLAG_AUTH_PSK      uint8 = 0x02 // Bits 3-1: PSK authentication (001)
+	BLINDING_FLAG_AUTH_MASK     uint8 = 0x0E // Bits 3-1: authentication scheme mask
+	BLINDING_FLAG_RESERVED_MASK uint8 = 0xE0 // Bits 7-5: reserved, must be 0
 )
 
 // Router Capabilities Constants
