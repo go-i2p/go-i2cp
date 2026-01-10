@@ -2572,6 +2572,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 	// DisconnectMessage. If there are subsessions or primary remains, it does not reply."
 
 	wasPrimary := sess.isPrimary
+	Debug("msgDestroySession called for session %d (isPrimary: %v)", sess.id, wasPrimary)
 	cascadeDestroySubsessions(c, sess)
 
 	if err := sendDestroySessionMessage(c, sess, queue); err != nil {
@@ -2591,6 +2592,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 	// Per I2CP § Destroying Subsessions: "A subsession may be destroyed with the DestroySession
 	// message as usual. This will not destroy the primary session or stop the I2CP connection."
 	// We must clean up the subsession's local state and remove it from the sessions map.
+	Debug("Calling cleanupDestroyedSubsession for session %d", sess.id)
 	cleanupDestroyedSubsession(c, sess)
 
 	return nil
@@ -2636,13 +2638,15 @@ func cascadeDestroySubsessions(c *Client, sess *Session) {
 func cleanupDestroyedSubsession(c *Client, sess *Session) {
 	if sess.isPrimary {
 		// Primary sessions are cleaned up via Close(), not here
+		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sess.id)
 		return
 	}
 
-	Debug("Cleaning up destroyed subsession %d", sess.id)
+	Debug("cleanupDestroyedSubsession: Cleaning up destroyed subsession %d", sess.id)
 
 	// Remove from client's sessions map
 	c.lock.Lock()
+	Debug("cleanupDestroyedSubsession: Deleting session %d from sessions map", sess.id)
 	delete(c.sessions, sess.id)
 	c.lock.Unlock()
 
@@ -2693,6 +2697,59 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 	}
 
 	Debug("Subsession %d cleanup complete", sess.id)
+}
+
+// cleanupSubsessionFromMap removes a subsession from the client's sessions map.
+// This is called when Session.Close() couldn't send the destroy message
+// (e.g., because IsConnected() returned false) but still needs to clean up.
+// Per I2CP § Destroying Subsessions: cleanup must happen regardless of router communication.
+func (c *Client) cleanupSubsessionFromMap(sessionID uint16) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if _, exists := c.sessions[sessionID]; exists {
+		Debug("cleanupSubsessionFromMap: Removing session %d from sessions map", sessionID)
+		delete(c.sessions, sessionID)
+	}
+}
+
+// cascadeCloseSubsessions closes all subsessions when a primary session is closed
+// but the destroy message couldn't be sent (e.g., connection already closed).
+// Per I2CP § Destroying Subsessions: "Destroying the primary session will,
+// however, destroy all subsessions and stop the I2CP connection."
+func (c *Client) cascadeCloseSubsessions(primaryID uint16) {
+	c.lock.Lock()
+	// Collect subsessions to close
+	var subsessions []*Session
+	for id, sess := range c.sessions {
+		if id != primaryID && !sess.isPrimary {
+			subsessions = append(subsessions, sess)
+		}
+	}
+	c.lock.Unlock()
+
+	// Close each subsession (this will remove them from the map)
+	for _, sess := range subsessions {
+		Debug("cascadeCloseSubsessions: closing subsession %d", sess.id)
+		sess.mu.Lock()
+		if !sess.closed {
+			sess.closed = true
+			sess.closedAt = time.Now()
+		}
+		sess.mu.Unlock()
+		sess.dispatchStatus(I2CP_SESSION_STATUS_DESTROYED)
+	}
+
+	// Remove all subsessions from the map
+	c.lock.Lock()
+	for id := range c.sessions {
+		if id != primaryID {
+			delete(c.sessions, id)
+		}
+	}
+	// Clear primarySessionID since we're destroying the primary
+	c.primarySessionID = nil
+	c.lock.Unlock()
 }
 
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.

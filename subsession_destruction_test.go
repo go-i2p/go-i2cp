@@ -115,11 +115,17 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 	// Create subsession
 	subsessionCreated := make(chan struct{})
 	var subsessionCreatedOnce sync.Once
+	var subsessionIDCached uint16
 	subsession := NewSession(client, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
-			t.Logf("Subsession status: %d (ID: %d)", status, s.ID())
+			// Avoid calling s.ID() during Close() - it can deadlock
+			// due to dispatchStatusLocked being called while holding the session lock
 			if status == I2CP_SESSION_STATUS_CREATED {
+				subsessionIDCached = s.ID() // Safe here, lock not held
+				t.Logf("Subsession status: %d (ID: %d)", status, subsessionIDCached)
 				subsessionCreatedOnce.Do(func() { close(subsessionCreated) })
+			} else {
+				t.Logf("Subsession status: %d", status)
 			}
 		},
 	})
@@ -164,6 +170,14 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 	subsessionID := subsession.ID()
 	t.Logf("Primary ID: %d, Subsession ID: %d", primaryID, subsessionID)
 
+	// Debug: check sessions map before destruction
+	client.lock.Lock()
+	t.Logf("Before destruction - sessions in map: %v", len(client.sessions))
+	for id := range client.sessions {
+		t.Logf("  Session ID in map: %d", id)
+	}
+	client.lock.Unlock()
+
 	// Destroy the subsession
 	t.Log("Destroying subsession...")
 	err = subsession.Close()
@@ -173,6 +187,14 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 
 	// Give router time to process
 	time.Sleep(500 * time.Millisecond)
+
+	// Debug: check sessions map after destruction
+	client.lock.Lock()
+	t.Logf("After destruction - sessions in map: %v", len(client.sessions))
+	for id := range client.sessions {
+		t.Logf("  Session ID in map: %d", id)
+	}
+	client.lock.Unlock()
 
 	// Verify subsession is marked as closed
 	if !subsession.IsClosed() {
@@ -192,9 +214,11 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 		t.Error("Primary session should still exist in client's sessions map")
 	}
 
-	// Verify client is still connected (primary not destroyed)
-	if !client.IsConnected() {
-		t.Error("Client should still be connected after subsession destruction")
+	// Verify client TCP connection is still open (primary not destroyed)
+	// Note: client.IsConnected() checks for data availability, not connection state
+	// We check tcp.conn != nil instead for actual connection state
+	if client.tcp.conn == nil {
+		t.Error("Client TCP connection should still be open after subsession destruction")
 	}
 
 	// Verify primary session is still functional (not closed)
@@ -507,11 +531,11 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 			t.Errorf("Expected 1 session (primary only), got %d", sessionCount)
 		}
 
-		// Verify primary is still connected
-		if !client.IsConnected() {
+		// Verify primary is still connected (check TCP connection, not data availability)
+		if client.tcp.conn == nil {
 			cancel()
 			<-ioCanceled
-			t.Fatalf("Client disconnected after subsession %d destruction", i+1)
+			t.Fatalf("Client TCP connection closed after subsession %d destruction", i+1)
 		}
 		if primary.IsClosed() {
 			cancel()
@@ -672,8 +696,8 @@ func TestSubsessionCleanup_ResourceVerification(t *testing.T) {
 	if primary.IsClosed() {
 		t.Error("Primary session should not be affected by subsession cleanup")
 	}
-	if !client.IsConnected() {
-		t.Error("Client should still be connected after subsession cleanup")
+	if client.tcp.conn == nil {
+		t.Error("Client TCP connection should still be open after subsession cleanup")
 	}
 
 	t.Log("Subsession resource cleanup verified successfully")

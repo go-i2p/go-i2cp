@@ -327,29 +327,69 @@ func (session *Session) Close() error {
 	}
 
 	session.mu.Lock()
-	defer session.mu.Unlock()
 
 	if session.closed {
+		session.mu.Unlock()
 		return fmt.Errorf("session already closed")
 	}
 
 	Debug("Closing session %d", session.id)
 
-	session.sendDestroyMessage()
+	// Try to send destroy message to router (may fail if not connected)
+	messageSent := session.sendDestroyMessage()
 	session.cleanupResources()
-	session.finalizeClose()
+
+	// Mark as closed while holding lock
+	session.closed = true
+	session.closedAt = time.Now()
+
+	// Cache values before releasing lock
+	client := session.client
+	sessionID := session.id
+	isPrimary := session.isPrimary
+
+	// Release lock BEFORE dispatching callback to avoid deadlock
+	// (callback may try to access session fields which acquire the lock)
+	session.mu.Unlock()
+
+	// Handle cleanup when message couldn't be sent
+	if client != nil && !messageSent {
+		if isPrimary {
+			// MAJOR-2 FIX: Cascade destruction to subsessions even if message not sent
+			// Per I2CP § Destroying Subsessions: "Destroying the primary session will,
+			// however, destroy all subsessions and stop the I2CP connection."
+			Debug("Close: cascading to subsessions for primary %d (message not sent)", sessionID)
+			client.cascadeCloseSubsessions(sessionID)
+		} else {
+			// MAJOR-2 FIX: Ensure subsession is removed from client's sessions map
+			// even if the destroy message couldn't be sent (e.g., connection closed)
+			// Per I2CP § Destroying Subsessions: cleanup must happen regardless of router communication
+			Debug("Close: cleanup subsession %d (message not sent)", sessionID)
+			client.cleanupSubsessionFromMap(sessionID)
+		}
+	}
+
+	// Dispatch status callback outside the lock
+	session.dispatchStatus(I2CP_SESSION_STATUS_DESTROYED)
 
 	return nil
 }
 
 // sendDestroyMessage sends DestroySession message to router if connected.
-func (session *Session) sendDestroyMessage() {
+// Returns true if the message was sent (and cleanup will be handled by msgDestroySession),
+// false if the message couldn't be sent (caller should handle cleanup).
+func (session *Session) sendDestroyMessage() bool {
+	Debug("sendDestroyMessage called for session %d (client=%v, connected=%v)",
+		session.id, session.client != nil, session.client != nil && session.client.IsConnected())
 	if session.client != nil && session.client.IsConnected() {
 		if session.id != 0 {
+			Debug("sendDestroyMessage: calling msgDestroySession for session %d", session.id)
 			session.client.msgDestroySession(session, false)
 			Debug("Sent DestroySession message for session %d", session.id)
+			return true
 		}
 	}
+	return false
 }
 
 // cleanupResources cancels context and clears pending messages.
