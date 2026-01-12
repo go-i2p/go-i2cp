@@ -2227,12 +2227,17 @@ func (c *Client) msgGetDate(queue bool) {
 
 	case AUTH_METHOD_NONE:
 		// Method 0: No authentication required
-		// Send empty mapping (no authentication info)
-		Debug("Using no authentication (method 0)")
+		// SPEC COMPLIANCE (I2CP 0.9.11+): Send empty mapping for consistency
+		// Per spec: "Authentication [Mapping] (optional, as of release 0.9.11)"
+		// Sending 2-byte empty mapping (0x00 0x00) ensures compatibility with
+		// strict spec-compliant routers that expect the mapping field to be present.
+		c.messageStream.WriteMapping(map[string]string{})
+		Debug("Using no authentication (method 0) - sending empty mapping for 0.9.11+ compliance")
 
 	default:
-		// Should never happen, but handle gracefully
-		Warning("Unknown authentication method %d, using no authentication", authMethod)
+		// Should never happen, but handle gracefully with empty mapping for spec compliance
+		Warning("Unknown authentication method %d, using no authentication with empty mapping", authMethod)
+		c.messageStream.WriteMapping(map[string]string{})
 	}
 
 	if err = c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
