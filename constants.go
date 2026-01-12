@@ -373,30 +373,30 @@ const (
 // Complete status codes 0-23 per I2CP specification
 // Used in MessageStatusMessage (type 22) to report delivery status
 const (
-	MSG_STATUS_AVAILABLE                uint8 = 0  // DEPRECATED: Message available for pickup
-	MSG_STATUS_ACCEPTED                 uint8 = 1  // Message accepted by router
-	MSG_STATUS_BEST_EFFORT_SUCCESS      uint8 = 2  // Best-effort delivery succeeded
-	MSG_STATUS_BEST_EFFORT_FAILURE      uint8 = 3  // Best-effort delivery failed
-	MSG_STATUS_GUARANTEED_SUCCESS       uint8 = 4  // Guaranteed delivery succeeded
-	MSG_STATUS_GUARANTEED_FAILURE       uint8 = 5  // Guaranteed delivery failed
-	MSG_STATUS_LOCAL_SUCCESS            uint8 = 6  // Local delivery succeeded
-	MSG_STATUS_LOCAL_FAILURE            uint8 = 7  // Local delivery failed
-	MSG_STATUS_ROUTER_FAILURE           uint8 = 8  // Router error
-	MSG_STATUS_NETWORK_FAILURE          uint8 = 9  // Network error
-	MSG_STATUS_BAD_SESSION              uint8 = 10 // Invalid session ID
-	MSG_STATUS_BAD_MESSAGE              uint8 = 11 // Malformed message
-	MSG_STATUS_OVERFLOW_FAILURE         uint8 = 12 // Queue overflow
-	MSG_STATUS_MESSAGE_EXPIRED          uint8 = 13 // Message expired
-	MSG_STATUS_BAD_LOCAL_LEASESET       uint8 = 14 // Local LeaseSet invalid
-	MSG_STATUS_NO_LOCAL_TUNNELS         uint8 = 15 // No local tunnels available
-	MSG_STATUS_UNSUPPORTED_ENCRYPTION   uint8 = 16 // Encryption type unsupported
-	MSG_STATUS_BAD_DESTINATION          uint8 = 17 // Destination invalid
-	MSG_STATUS_BAD_LEASESET             uint8 = 18 // Remote LeaseSet invalid
-	MSG_STATUS_EXPIRED_LEASESET         uint8 = 19 // Remote LeaseSet expired
-	MSG_STATUS_NO_LEASESET              uint8 = 20 // Remote LeaseSet not found
-	MSG_STATUS_SEND_BEST_EFFORT_FAILURE uint8 = 21 // Send best-effort failed (since 0.9.37)
-	MSG_STATUS_META_LEASESET            uint8 = 22 // MetaLeaseSet received (since 0.9.41)
-	MSG_STATUS_LOOPBACK_DENIED          uint8 = 23 // Loopback message denied (since 0.9.62)
+	MSG_STATUS_AVAILABLE              uint8 = 0  // DEPRECATED: Message available for pickup
+	MSG_STATUS_ACCEPTED               uint8 = 1  // Message accepted by router
+	MSG_STATUS_BEST_EFFORT_SUCCESS    uint8 = 2  // Best-effort delivery succeeded
+	MSG_STATUS_BEST_EFFORT_FAILURE    uint8 = 3  // Best-effort delivery failed
+	MSG_STATUS_GUARANTEED_SUCCESS     uint8 = 4  // Guaranteed delivery succeeded
+	MSG_STATUS_GUARANTEED_FAILURE     uint8 = 5  // Guaranteed delivery failed
+	MSG_STATUS_LOCAL_SUCCESS          uint8 = 6  // Local delivery succeeded
+	MSG_STATUS_LOCAL_FAILURE          uint8 = 7  // Local delivery failed
+	MSG_STATUS_ROUTER_FAILURE         uint8 = 8  // Router error
+	MSG_STATUS_NETWORK_FAILURE        uint8 = 9  // Network error
+	MSG_STATUS_BAD_SESSION            uint8 = 10 // Invalid session ID
+	MSG_STATUS_BAD_MESSAGE            uint8 = 11 // Malformed message
+	MSG_STATUS_BAD_OPTIONS            uint8 = 12 // Invalid message options or expiration (I2CP 0.9.5+)
+	MSG_STATUS_OVERFLOW_FAILURE       uint8 = 13 // Queue overflow
+	MSG_STATUS_MESSAGE_EXPIRED        uint8 = 14 // Message expired
+	MSG_STATUS_BAD_LOCAL_LEASESET     uint8 = 15 // Local LeaseSet invalid
+	MSG_STATUS_NO_LOCAL_TUNNELS       uint8 = 16 // No local tunnels available
+	MSG_STATUS_UNSUPPORTED_ENCRYPTION uint8 = 17 // Encryption type unsupported
+	MSG_STATUS_BAD_DESTINATION        uint8 = 18 // Destination invalid
+	MSG_STATUS_BAD_LEASESET           uint8 = 19 // Remote LeaseSet invalid
+	MSG_STATUS_EXPIRED_LEASESET       uint8 = 20 // Remote LeaseSet expired
+	MSG_STATUS_NO_LEASESET            uint8 = 21 // Remote LeaseSet not found
+	MSG_STATUS_META_LEASESET          uint8 = 22 // MetaLeaseSet received (since 0.9.41)
+	MSG_STATUS_LOOPBACK_DENIED        uint8 = 23 // Loopback message denied (since 0.9.62)
 )
 
 // Legacy type alias for backward compatibility
@@ -426,6 +426,7 @@ func IsMessageStatusFailure(status SessionMessageStatus) bool {
 		MSG_STATUS_ROUTER_FAILURE,
 		MSG_STATUS_BAD_SESSION,
 		MSG_STATUS_BAD_MESSAGE,
+		MSG_STATUS_BAD_OPTIONS,
 		MSG_STATUS_MESSAGE_EXPIRED,
 		MSG_STATUS_BAD_LOCAL_LEASESET,
 		MSG_STATUS_UNSUPPORTED_ENCRYPTION,
@@ -433,7 +434,6 @@ func IsMessageStatusFailure(status SessionMessageStatus) bool {
 		MSG_STATUS_BAD_LEASESET,
 		MSG_STATUS_EXPIRED_LEASESET,
 		MSG_STATUS_NO_LEASESET,
-		MSG_STATUS_SEND_BEST_EFFORT_FAILURE,
 		MSG_STATUS_LOOPBACK_DENIED:
 		return true
 	}

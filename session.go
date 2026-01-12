@@ -964,6 +964,8 @@ func getMessageFailureStatusName(status uint8) string {
 		return "RouterFailure"
 	case 9:
 		return "NetworkFailure"
+	case 12:
+		return "BadOptions"
 	case 13:
 		return "OverflowFailure"
 	case 14:
@@ -979,9 +981,7 @@ func getMessageErrorStatusName(status uint8) string {
 	case 10:
 		return "BadSession"
 	case 11:
-		return "BadProtocol"
-	case 12:
-		return "BadOptions"
+		return "BadMessage"
 	case 15:
 		return "BadLocalLeaseset"
 	case 16:
@@ -997,7 +997,9 @@ func getMessageErrorStatusName(status uint8) string {
 	case 21:
 		return "NoLeaseset"
 	case 22:
-		return "InsufficientTags"
+		return "MetaLeaseset"
+	case 23:
+		return "LoopbackDenied"
 	default:
 		return ""
 	}
