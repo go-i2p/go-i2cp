@@ -102,10 +102,12 @@ err := session.SendMessageExpires(dest, protocol, srcPort, destPort, payload, fl
 ```
 
 **Available Flags:**
+
 - `SEND_MSG_FLAG_NO_LEASESET` - Don't bundle LeaseSet with message (bit 8)
 - Tag threshold/count flags (bits 7-0) - Obsolete for modern ECIES-Ratchet encryption
 
 **Helper Functions:**
+
 - `BuildSendMessageFlags(threshold, count)` - Construct flags (tag params ignored with ECIES-Ratchet)
 - `ParseSendMessageFlags(flags)` - Extract flag components
 - `ValidateSendMessageFlags(flags)` - Validate flags per I2CP spec
