@@ -931,8 +931,18 @@ func (c *Client) onMsgDestReply(stream *Stream) {
 }
 
 // onMsgReceiveMessageBegin handles deprecated ReceiveMessageBeginMessage (type 6)
-// DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
-// per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
+//
+// DEPRECATED: This message type is not used in fastReceive mode, which has been
+// the default since I2CP 0.9.4. Modern routers and clients exclusively use
+// MessagePayloadMessage (type 31) for message delivery.
+//
+// Protocol History:
+//   - I2CP 0.6.x - 0.9.3: Used slow-receive mode requiring BEGIN/END handshake
+//   - I2CP 0.9.4+: fastReceive mode became default, this message deprecated
+//
+// This handler is retained for backward compatibility with legacy routers
+// running versions prior to 0.9.4, though such routers are extremely rare.
+// When received, a warning is logged but the message is still processed.
 func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
 	Warning("Received deprecated ReceiveMessageBeginMessage - fastReceive mode should be used")
 
@@ -959,8 +969,21 @@ func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
 }
 
 // onMsgReceiveMessageEnd handles deprecated ReceiveMessageEndMessage (type 7)
-// DEPRECATED: Not used in fastReceive mode (default since 0.9.4)
-// per I2CP specification 0.6.x - 0.9.3 - legacy slow-receive mode
+//
+// DEPRECATED: This message type is not used in fastReceive mode, which has been
+// the default since I2CP 0.9.4. Modern routers and clients exclusively use
+// MessagePayloadMessage (type 31) for message delivery.
+//
+// Protocol History:
+//   - I2CP 0.6.x - 0.9.3: Used slow-receive mode requiring BEGIN/END handshake
+//   - I2CP 0.9.4+: fastReceive mode became default, this message deprecated
+//
+// In the legacy slow-receive protocol flow:
+//  1. Router sends ReceiveMessageBegin with message ID
+//  2. Client sends ReceiveMessageEnd to acknowledge
+//  3. Router sends actual message payload
+//
+// This handler is retained for backward compatibility with legacy routers.
 func (c *Client) onMsgReceiveMessageEnd(stream *Stream) {
 	Warning("Received deprecated ReceiveMessageEndMessage - fastReceive mode should be used")
 
@@ -1016,8 +1039,23 @@ func (c *Client) onMsgRequestLeaseSet(stream *Stream) {
 }
 
 // onMsgReportAbuse handles deprecated ReportAbuseMessage (type 29)
-// DEPRECATED: Never fully implemented in I2P, unsupported
-// per I2CP specification - reserved for abuse reporting (unused)
+//
+// DEPRECATED AND INTENTIONALLY A NO-OP: This message type was defined in the
+// original I2CP specification for abuse reporting but was NEVER actually
+// implemented in the Java I2P reference implementation.
+//
+// Per I2CP SPEC.md:
+//
+//	"DEPRECATED, UNUSED, UNSUPPORTED... Neither router nor client has a handler"
+//
+// Protocol Status:
+//   - Message type 29 is reserved in the I2CP spec
+//   - No known router implementation sends this message
+//   - No client implementation is expected to handle it meaningfully
+//
+// This handler exists solely for protocol completeness and logs a warning if
+// such a message is ever received (which would indicate a non-conforming router).
+// The handler intentionally performs no action beyond logging.
 // onMsgReportAbuse is NOT dispatched from onMessage() - reserved but never implemented.
 // This handler exists for protocol documentation but should never be called.
 // I2CP message type 29 was reserved in the spec but never implemented in Java I2P router.
@@ -1412,6 +1450,25 @@ func (c *Client) processHostReplyResult(stream *Stream, result uint8, requestId 
 
 // parseSuccessfulLookup parses the destination and optional service record options from a successful lookup.
 // Returns the destination, options map, and lookup entry retrieved for type checking.
+//
+// I2CP 0.9.66+ Service Record Support (Proposal 167):
+//
+// Lookup types 2-4 (HOST_LOOKUP_TYPE_*_WITH_OPTIONS) request that the options
+// mapping from the LeaseSet be returned along with the destination:
+//
+//   - Type 2: Hash lookup with options
+//   - Type 3: Hostname lookup with options
+//   - Type 4: Destination lookup with options
+//
+// The options Mapping contains service-specific metadata stored in the LeaseSet,
+// such as protocol information, alternate addresses, or application-defined data.
+//
+// Router Version Requirements:
+//   - Types 0-1: Supported since I2CP 0.9.11
+//   - Types 2-4: Require I2CP 0.9.66+ router (Proposal 167)
+//
+// If the connected router does not support types 2-4, it may return
+// HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED (code 7).
 func (c *Client) parseSuccessfulLookup(stream *Stream, requestId uint32) (*Destination, map[string]string, LookupEntry) {
 	dest, err := NewDestinationFromMessage(stream, c.crypto)
 	if err != nil {

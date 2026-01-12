@@ -241,7 +241,19 @@ const (
 const ROUTER_CAN_HOST_LOOKUP uint32 = 1
 
 // Host Lookup Type Constants (I2CP § HostLookupMessage)
-// Per I2CP 0.9.11+, extended in 0.9.66 with options mappings (Proposal 167 - Service Records)
+//
+// Per I2CP 0.9.11+, extended in 0.9.66 with options mappings (Proposal 167 - Service Records).
+//
+// Basic lookups (types 0-1) resolve an I2P destination from either a hash or hostname.
+// Service record lookups (types 2-4) additionally return the LeaseSet's options Mapping,
+// which can contain service-specific metadata like protocol information.
+//
+// Router Version Requirements:
+//   - Types 0-1: Require I2CP 0.9.11+ router
+//   - Types 2-4: Require I2CP 0.9.66+ router (Proposal 167)
+//
+// Note: If the router does not support the requested lookup type, it returns
+// HOST_REPLY_LOOKUP_TYPE_UNSUPPORTED (code 7).
 const (
 	HOST_LOOKUP_TYPE_HASH                  = 0 // Basic hash lookup (since 0.9.11)
 	HOST_LOOKUP_TYPE_HOSTNAME              = 1 // Basic hostname lookup (since 0.9.11)

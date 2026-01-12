@@ -43,8 +43,21 @@ type BandwidthLimits struct {
 	// burst up to 100 KBps over any 10-second window before throttling.
 	BurstTime uint32
 
-	// Undefined contains 9 reserved fields for future protocol extensions.
-	// Per I2CP spec, these are currently unused but must be parsed for forward compatibility.
+	// Undefined contains 9 reserved 32-bit fields for future protocol extensions.
+	//
+	// Per I2CP BandwidthLimitsMessage specification, these fields are currently
+	// undefined and reserved for future protocol versions. They must be:
+	//   - Parsed by clients for forward compatibility
+	//   - Set to 0 by routers in current protocol versions
+	//   - Ignored by clients until a future I2CP version defines their meaning
+	//
+	// Possible future uses (speculative, not in current spec):
+	//   - Per-destination bandwidth limits
+	//   - Quality of service parameters
+	//   - Tunnel-specific bandwidth allocation
+	//   - Congestion control hints
+	//
+	// Applications should NOT rely on these fields until officially specified.
 	Undefined [9]uint32
 }
 
