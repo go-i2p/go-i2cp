@@ -58,20 +58,29 @@ const (
 )
 
 // Authentication Method Constants
-// per I2CP specification for protocol initialization and authentication
+// per I2CP specification for GetDateMessage protocol initialization authentication
+//
+// IMPORTANT: Methods 0-2 are I2CP session authentication methods for GetDateMessage.
+// Methods 3-4 are NOT I2CP session auth methods - they are for encrypted LeaseSet
+// per-client authentication via BlindingInfoMessage (see per_client_auth.go).
 //
 // Support Status in go-i2cp:
 //   - AUTH_METHOD_NONE (0):           ✅ Fully supported
 //   - AUTH_METHOD_USERNAME_PWD (1):   ✅ Fully supported (via i2cp.username, i2cp.password)
 //   - AUTH_METHOD_SSL_TLS (2):        ✅ Fully supported (via i2cp.SSL configuration)
-//   - AUTH_METHOD_PER_CLIENT_DH (3):  ❌ Not yet implemented (planned for Phase 4)
-//   - AUTH_METHOD_PER_CLIENT_PSK (4): ❌ Not yet implemented (planned for Phase 4)
+//   - AUTH_METHOD_PER_CLIENT_DH (3):  ✅ Supported via BlindingInfoMessage (see per_client_auth.go)
+//   - AUTH_METHOD_PER_CLIENT_PSK (4): ✅ Supported via BlindingInfoMessage (see per_client_auth.go)
+//
+// For per-client authentication to encrypted LeaseSets, use:
+//   - NewPerClientAuthDH() for DH authentication
+//   - NewPerClientAuthPSK() for PSK authentication
+//   - BlindingInfo.SetPerClientAuth() to configure
 const (
 	AUTH_METHOD_NONE           uint8 = 0 // No authentication required
 	AUTH_METHOD_USERNAME_PWD   uint8 = 1 // Username/password authentication (0.9.11+)
 	AUTH_METHOD_SSL_TLS        uint8 = 2 // SSL/TLS certificate authentication (0.8.3+)
-	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH authentication (0.9.41+) - NOT IMPLEMENTED
-	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK authentication (0.9.41+) - NOT IMPLEMENTED
+	AUTH_METHOD_PER_CLIENT_DH  uint8 = 3 // Per-client DH for BlindingInfo (0.9.43+) - NOT for session auth
+	AUTH_METHOD_PER_CLIENT_PSK uint8 = 4 // Per-client PSK for BlindingInfo (0.9.43+) - NOT for session auth
 )
 
 // HostReply Error Codes (I2CP Proposal 167)

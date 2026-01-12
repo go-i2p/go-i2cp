@@ -2149,20 +2149,26 @@ func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *
 }
 
 // getAuthenticationMethod determines which authentication method is being used
-// based on the client's configuration properties.
+// for I2CP session authentication based on the client's configuration properties.
+//
+// NOTE: This is for I2CP session authentication (GetDateMessage), NOT for
+// per-client authentication to encrypted LeaseSets. For per-client auth,
+// use BlindingInfoMessage via SendBlindingInfo() - see per_client_auth.go.
+//
 // Returns one of: AUTH_METHOD_NONE, AUTH_METHOD_USERNAME_PWD, or AUTH_METHOD_SSL_TLS
-// Returns error code for unsupported authentication methods (AUTH_METHOD_PER_CLIENT_DH, AUTH_METHOD_PER_CLIENT_PSK)
 func (c *Client) getAuthenticationMethod() uint8 {
-	// Check for unsupported per-client authentication methods (3-4)
-	// SPEC COMPLIANCE: I2CP § BlindingInfoMessage defines DH (3) and PSK (4) auth
-	// These are not yet implemented in go-i2cp
+	// Note: AUTH_METHOD_PER_CLIENT_DH (3) and AUTH_METHOD_PER_CLIENT_PSK (4) are NOT
+	// I2CP session authentication methods. They are for encrypted LeaseSet access
+	// via BlindingInfoMessage. If someone tries to use them here, it's a misconfiguration.
 	if c.properties["i2cp.auth.method"] == "3" {
-		Warning("Per-client DH authentication (method 3) requested but not implemented")
-		return AUTH_METHOD_PER_CLIENT_DH
+		Warning("i2cp.auth.method=3 is invalid: DH is for BlindingInfo, not session auth. Using no auth.")
+		Debug("Use SendBlindingInfo() with NewPerClientAuthDH() for DH encrypted LeaseSet access")
+		return AUTH_METHOD_NONE
 	}
 	if c.properties["i2cp.auth.method"] == "4" {
-		Warning("Per-client PSK authentication (method 4) requested but not implemented")
-		return AUTH_METHOD_PER_CLIENT_PSK
+		Warning("i2cp.auth.method=4 is invalid: PSK is for BlindingInfo, not session auth. Using no auth.")
+		Debug("Use SendBlindingInfo() with NewPerClientAuthPSK() for PSK encrypted LeaseSet access")
+		return AUTH_METHOD_NONE
 	}
 
 	// Check TLS authentication first (method 2)
@@ -2183,26 +2189,21 @@ func (c *Client) getAuthenticationMethod() uint8 {
 // This message includes the client version and authentication information.
 // Per I2CP specification, authentication method is communicated via the properties mapping.
 //
-// Supported authentication methods:
+// Supported I2CP session authentication methods:
 //   - Method 0 (none): No authentication
 //   - Method 1 (username/password): I2CP 0.9.11+ username/password auth
 //   - Method 2 (TLS): I2CP 0.8.3+ TLS certificate auth
+//
+// NOTE: Per-client DH/PSK (methods 3-4) are NOT session auth methods.
+// They are for encrypted LeaseSet access via BlindingInfoMessage.
 func (c *Client) msgGetDate(queue bool) {
 	var err error
 	Debug("Sending GetDateMessage")
 	c.messageStream.Reset()
 	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
 
-	// Determine authentication method
+	// Determine authentication method (will only return 0, 1, or 2)
 	authMethod := c.getAuthenticationMethod()
-
-	// SPEC COMPLIANCE: Validate authentication method is supported
-	if authMethod >= AUTH_METHOD_PER_CLIENT_DH {
-		Error("Authentication method %d (per-client DH/PSK) not yet implemented in go-i2cp", authMethod)
-		Warning("Router requires unsupported authentication - connection will likely fail")
-		Warning("Supported methods: 0 (none), 1 (username/password), 2 (TLS)")
-		// Continue anyway to let router reject with proper error message
-	}
 
 	// Build authentication info mapping based on method
 	switch authMethod {
