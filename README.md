@@ -77,6 +77,39 @@ session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{
 })
 ```
 
+## Message Sending
+
+### Basic Message
+
+```go
+payload := go_i2cp.NewStream()
+payload.WriteString("Hello I2P")
+
+err := session.SendMessage(dest, protocol, srcPort, destPort, payload)
+```
+
+### Message with Expiration and Flags
+
+```go
+// Build flags (modern I2P uses ECIES-Ratchet, tag flags are obsolete)
+flags := go_i2cp.BuildSendMessageFlags(0, 0) // Use defaults
+
+// Optionally prevent LeaseSet bundling
+flags |= go_i2cp.SEND_MSG_FLAG_NO_LEASESET
+
+// Send with 60 second expiration
+err := session.SendMessageExpires(dest, protocol, srcPort, destPort, payload, flags, 60)
+```
+
+**Available Flags:**
+- `SEND_MSG_FLAG_NO_LEASESET` - Don't bundle LeaseSet with message (bit 8)
+- Tag threshold/count flags (bits 7-0) - Obsolete for modern ECIES-Ratchet encryption
+
+**Helper Functions:**
+- `BuildSendMessageFlags(threshold, count)` - Construct flags (tag params ignored with ECIES-Ratchet)
+- `ParseSendMessageFlags(flags)` - Extract flag components
+- `ValidateSendMessageFlags(flags)` - Validate flags per I2CP spec
+
 ## Error Recovery
 
 ```go

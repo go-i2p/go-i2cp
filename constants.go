@@ -149,6 +149,93 @@ const (
 	BLINDING_FLAG_RESERVED_MASK uint8 = 0xE0 // Bits 7-5: reserved, must be 0
 )
 
+// SendMessageExpires Flag Constants
+// per I2CP specification § SendMessageExpiresMessage (I2CP 0.8.4+)
+//
+// These flags control message delivery options for SendMessageExpiresMessage (type 36).
+// The flags field is 2 bytes (16 bits) with the following layout (bit order 15...0):
+//
+//	Bits 15-11: Reserved, must be 0
+//	Bits 10-9:  Message Reliability Override (DEPRECATED - unimplemented, to be removed)
+//	Bit 8:      Don't bundle LeaseSet (SEND_MSG_FLAG_NO_LEASESET)
+//	Bits 7-4:   Low tag threshold (ElGamal only, ignored for ECIES-Ratchet)
+//	Bits 3-0:   Tags to send (ElGamal only, ignored for ECIES-Ratchet)
+//
+// IMPORTANT: ElGamal-specific flags (bits 7-0) are obsolete in modern I2P.
+// As of I2CP 0.9.39+, all encryption uses ECIES-Ratchet, which does not use session tags.
+// These flags are kept for backward compatibility but have no effect with ECIES-Ratchet.
+//
+// Usage Example:
+//
+//	flags := SEND_MSG_FLAG_NO_LEASESET | BuildSendMessageFlags(0, 0)
+//	session.SendMessageExpires(dest, protocol, srcPort, destPort, payload, flags, expiration)
+const (
+	// Bit masks for validation
+	SEND_MSG_FLAGS_RESERVED_MASK    uint16 = 0xF800 // Bits 15-11: reserved, must be 0
+	SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600 // Bits 10-9: deprecated reliability override
+	SEND_MSG_FLAGS_TAG_THRESHOLD    uint16 = 0x00F0 // Bits 7-4: low tag threshold (ElGamal only)
+	SEND_MSG_FLAGS_TAG_COUNT        uint16 = 0x000F // Bits 3-0: tags to send (ElGamal only)
+
+	// Bit 8: LeaseSet bundling control (the only modern flag still used)
+	SEND_MSG_FLAG_NO_LEASESET uint16 = 0x0100 // Don't bundle LeaseSet with message
+)
+
+// SendMessageExpires Tag Threshold Values (ElGamal Only - OBSOLETE)
+// per I2CP specification § SendMessageExpiresMessage Flags Field
+//
+// NOTE: These are only relevant for ElGamal encryption, which is deprecated.
+// Modern ECIES-Ratchet encryption ignores these values. These constants are
+// provided for completeness but should not be used in new code.
+//
+// Tag threshold: if there are fewer than this many tags available, send more.
+// This is advisory and does not force tags to be delivered.
+const (
+	SEND_MSG_TAG_THRESHOLD_DEFAULT uint8 = 0  // Use session key manager settings
+	SEND_MSG_TAG_THRESHOLD_2       uint8 = 1  // Threshold: 2 tags
+	SEND_MSG_TAG_THRESHOLD_3       uint8 = 2  // Threshold: 3 tags
+	SEND_MSG_TAG_THRESHOLD_6       uint8 = 3  // Threshold: 6 tags
+	SEND_MSG_TAG_THRESHOLD_9       uint8 = 4  // Threshold: 9 tags
+	SEND_MSG_TAG_THRESHOLD_14      uint8 = 5  // Threshold: 14 tags
+	SEND_MSG_TAG_THRESHOLD_20      uint8 = 6  // Threshold: 20 tags
+	SEND_MSG_TAG_THRESHOLD_27      uint8 = 7  // Threshold: 27 tags
+	SEND_MSG_TAG_THRESHOLD_35      uint8 = 8  // Threshold: 35 tags
+	SEND_MSG_TAG_THRESHOLD_45      uint8 = 9  // Threshold: 45 tags
+	SEND_MSG_TAG_THRESHOLD_57      uint8 = 10 // Threshold: 57 tags
+	SEND_MSG_TAG_THRESHOLD_72      uint8 = 11 // Threshold: 72 tags
+	SEND_MSG_TAG_THRESHOLD_92      uint8 = 12 // Threshold: 92 tags
+	SEND_MSG_TAG_THRESHOLD_117     uint8 = 13 // Threshold: 117 tags
+	SEND_MSG_TAG_THRESHOLD_147     uint8 = 14 // Threshold: 147 tags
+	SEND_MSG_TAG_THRESHOLD_192     uint8 = 15 // Threshold: 192 tags
+)
+
+// SendMessageExpires Tags to Send Values (ElGamal Only - OBSOLETE)
+// per I2CP specification § SendMessageExpiresMessage Flags Field
+//
+// NOTE: These are only relevant for ElGamal encryption, which is deprecated.
+// Modern ECIES-Ratchet encryption ignores these values. These constants are
+// provided for completeness but should not be used in new code.
+//
+// Number of tags to send if required. This is advisory and does not force
+// tags to be delivered.
+const (
+	SEND_MSG_TAG_COUNT_DEFAULT uint8 = 0  // Use session key manager settings
+	SEND_MSG_TAG_COUNT_2       uint8 = 1  // Send 2 tags
+	SEND_MSG_TAG_COUNT_4       uint8 = 2  // Send 4 tags
+	SEND_MSG_TAG_COUNT_6       uint8 = 3  // Send 6 tags
+	SEND_MSG_TAG_COUNT_8       uint8 = 4  // Send 8 tags
+	SEND_MSG_TAG_COUNT_12      uint8 = 5  // Send 12 tags
+	SEND_MSG_TAG_COUNT_16      uint8 = 6  // Send 16 tags
+	SEND_MSG_TAG_COUNT_24      uint8 = 7  // Send 24 tags
+	SEND_MSG_TAG_COUNT_32      uint8 = 8  // Send 32 tags
+	SEND_MSG_TAG_COUNT_40      uint8 = 9  // Send 40 tags
+	SEND_MSG_TAG_COUNT_51      uint8 = 10 // Send 51 tags
+	SEND_MSG_TAG_COUNT_64      uint8 = 11 // Send 64 tags
+	SEND_MSG_TAG_COUNT_80      uint8 = 12 // Send 80 tags
+	SEND_MSG_TAG_COUNT_100     uint8 = 13 // Send 100 tags
+	SEND_MSG_TAG_COUNT_125     uint8 = 14 // Send 125 tags
+	SEND_MSG_TAG_COUNT_160     uint8 = 15 // Send 160 tags
+)
+
 // Router Capabilities Constants
 // Moved from: client.go
 const ROUTER_CAN_HOST_LOOKUP uint32 = 1

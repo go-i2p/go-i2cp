@@ -2832,7 +2832,8 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, flags uint16, expirationSeconds uint64, queue bool) error {
 	Debug("Sending SendMessageExpiresMessage")
 
-	if err := c.validateSendMessageFlags(flags); err != nil {
+	// Validate flags using public API
+	if err := ValidateSendMessageFlags(flags); err != nil {
 		return err
 	}
 
@@ -2851,35 +2852,6 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 		Error("Error while sending SendMessageExpiresMessage: %v", err)
 		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
 	}
-	return nil
-}
-
-// validateSendMessageFlags validates SendMessageExpires flags per I2CP specification.
-func (c *Client) validateSendMessageFlags(flags uint16) error {
-	const SEND_MSG_FLAGS_RESERVED_MASK uint16 = 0xF800
-	if flags&SEND_MSG_FLAGS_RESERVED_MASK != 0 {
-		return fmt.Errorf("invalid SendMessageExpires flags: reserved bits set (0x%04x)", flags)
-	}
-
-	const SEND_MSG_FLAGS_RELIABILITY_MASK uint16 = 0x0600
-	if flags&SEND_MSG_FLAGS_RELIABILITY_MASK != 0 {
-		return fmt.Errorf("deprecated reliability override flags (bits 10-9) no longer supported per I2CP spec")
-	}
-
-	tagThreshold := (flags >> 4) & 0x0F
-	if tagThreshold > 15 {
-		return fmt.Errorf("invalid tag threshold: %d (max 15)", tagThreshold)
-	}
-
-	tagCount := flags & 0x0F
-	if tagCount > 15 {
-		return fmt.Errorf("invalid tag count: %d (max 15)", tagCount)
-	}
-
-	noLeaseSet := (flags & 0x0100) != 0
-	Debug("SendMessageExpires flags: noLeaseSet=%v, tagThreshold=%d, tagCount=%d",
-		noLeaseSet, tagThreshold, tagCount)
-
 	return nil
 }
 
