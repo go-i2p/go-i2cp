@@ -573,10 +573,6 @@ func TestValidateGzipHeader_EmptyStream(t *testing.T) {
 
 // =============================================================================
 // Tests for decompressPayload function
-// NOTE: The decompressPayload function has a bug where it creates a buffer with
-// 65535 pre-allocated bytes using bytes.NewBuffer(make([]byte, 0xffff)), then
-// io.Copy appends data to it instead of replacing. This should use make([]byte, 0, 0xffff)
-// to allocate capacity without length. These tests document the current behavior.
 // =============================================================================
 
 func TestDecompressPayload_Success(t *testing.T) {
@@ -593,19 +589,12 @@ func TestDecompressPayload_Success(t *testing.T) {
 		t.Fatalf("Failed to decompress: %v", err)
 	}
 
-	// NOTE: Due to the bug in decompressPayload, the result buffer contains
-	// 65535 zero bytes followed by the actual decompressed data.
-	// The actual data starts at offset 65535.
+	// Verify decompressed data matches original
 	resultBytes := result.Bytes()
-	if len(resultBytes) < 0xffff+len(testData) {
-		t.Fatalf("Result buffer too short: got %d bytes", len(resultBytes))
+	if !bytes.Equal(resultBytes, testData) {
+		t.Errorf("Decompressed data mismatch: got %q, want %q", resultBytes, testData)
 	}
-
-	actualData := resultBytes[0xffff:]
-	if !bytes.Equal(actualData, testData) {
-		t.Errorf("Decompressed data mismatch: got %q, want %q", actualData, testData)
-	}
-	t.Logf("Successfully decompressed (with 65535 byte prefix due to buffer bug): actual data=%q", actualData)
+	t.Logf("Successfully decompressed: %q", resultBytes)
 }
 
 func TestDecompressPayload_InvalidGzip(t *testing.T) {

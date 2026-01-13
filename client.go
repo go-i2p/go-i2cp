@@ -629,7 +629,7 @@ func validateGzipHeader(stream *Stream) error {
 // decompressPayload decompresses a gzip-compressed payload from the stream.
 // Returns the decompressed payload buffer or an error.
 func decompressPayload(msgStream *bytes.Buffer) (*bytes.Buffer, error) {
-	payload := bytes.NewBuffer(make([]byte, 0xffff))
+	payload := bytes.NewBuffer(make([]byte, 0, 0xffff))
 
 	decompress, err := gzip.NewReader(msgStream)
 	if err != nil {
