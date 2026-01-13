@@ -208,8 +208,10 @@ if go_i2cp.IsTemporary(err) {
 - ✅ Authentication (TLS certificates, username/password, none)
 - ✅ Modern Features:
   - LeaseSet2 support (standard, encrypted, meta types)
-  - Blinding support for encrypted LeaseSets
+  - Blinding support (message parsing; crypto operations require application implementation)
   - Offline signing support
+  - Message batching for improved throughput
+  - Buffer pooling for reduced allocations
   - Automatic reconnection with circuit breaker
   - Message tracking and delivery confirmation
   - Bandwidth management callbacks
@@ -222,8 +224,8 @@ if go_i2cp.IsTemporary(err) {
 
 **📊 Test Coverage:**
 
-- **215+ passing tests** covering all major features
-- **63% code coverage** across core library
+- **530+ passing tests** covering all major features
+- **75% code coverage** across core library
 - Integration tests with real I2P router
 - 40+ benchmarks for performance validation
 - Error path coverage >96%
@@ -231,8 +233,8 @@ if go_i2cp.IsTemporary(err) {
 **🔄 Future Enhancements (Phase 4):**
 
 - DH/PSK authentication (methods 3-4) - Low priority
-- Performance optimizations (message batching, buffer pooling)
-- Observability (Prometheus metrics, OpenTelemetry tracing)
+- Blinding key derivation and encrypted LeaseSet decryption
+- Observability (Prometheus metrics export, OpenTelemetry tracing)
 - MetaLeaseSet support (preliminary spec)
 
 **❌ Excluded by Design:**
