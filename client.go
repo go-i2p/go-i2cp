@@ -2498,53 +2498,110 @@ func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) 
 
 // validateBlindingInfo validates the BlindingInfo parameters before sending.
 func (c *Client) validateBlindingInfo(sess *Session, info *BlindingInfo) error {
+	if err := validateBlindingInfoParams(sess, info); err != nil {
+		return err
+	}
+
+	if err := validateBlindingEndpoint(info); err != nil {
+		return err
+	}
+
+	if err := validateBlindingAuthScheme(info); err != nil {
+		return err
+	}
+
+	if err := validateBlindingDecryptionKey(info); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateBlindingInfoParams checks if session and blinding info parameters are not nil.
+func validateBlindingInfoParams(sess *Session, info *BlindingInfo) error {
 	if sess == nil {
 		return fmt.Errorf("session cannot be nil")
 	}
 	if info == nil {
 		return fmt.Errorf("blinding info cannot be nil")
 	}
+	return nil
+}
 
-	// Validate endpoint type
+// validateBlindingEndpoint validates endpoint type and endpoint data for all supported types.
+func validateBlindingEndpoint(info *BlindingInfo) error {
 	if info.EndpointType > BLINDING_ENDPOINT_SIGKEY {
 		return fmt.Errorf("invalid endpoint type %d (must be 0-3)", info.EndpointType)
 	}
 
-	// Validate endpoint data based on type
+	return validateEndpointData(info)
+}
+
+// validateEndpointData validates the endpoint data based on the endpoint type.
+func validateEndpointData(info *BlindingInfo) error {
 	switch info.EndpointType {
 	case BLINDING_ENDPOINT_HASH:
-		if len(info.Endpoint) != 32 {
-			return fmt.Errorf("hash endpoint must be exactly 32 bytes, got %d", len(info.Endpoint))
-		}
+		return validateHashEndpoint(info.Endpoint)
 	case BLINDING_ENDPOINT_HOSTNAME:
-		if len(info.Endpoint) == 0 {
-			return fmt.Errorf("hostname endpoint cannot be empty")
-		}
-		if len(info.Endpoint) > 255 {
-			return fmt.Errorf("hostname too long: %d bytes (max 255)", len(info.Endpoint))
-		}
+		return validateHostnameEndpoint(info.Endpoint)
 	case BLINDING_ENDPOINT_DESTINATION:
-		if len(info.Endpoint) < 387 { // Minimum destination size
-			return fmt.Errorf("destination endpoint too short: %d bytes", len(info.Endpoint))
-		}
+		return validateDestinationEndpoint(info.Endpoint)
 	case BLINDING_ENDPOINT_SIGKEY:
-		if len(info.Endpoint) < 3 { // At minimum: 2-byte sig type + 1 byte key
-			return fmt.Errorf("sigkey endpoint too short: %d bytes", len(info.Endpoint))
-		}
+		return validateSigkeyEndpoint(info.Endpoint)
 	}
+	return nil
+}
 
-	// Validate auth scheme
+// validateHashEndpoint checks if hash endpoint is exactly 32 bytes.
+func validateHashEndpoint(endpoint []byte) error {
+	if len(endpoint) != 32 {
+		return fmt.Errorf("hash endpoint must be exactly 32 bytes, got %d", len(endpoint))
+	}
+	return nil
+}
+
+// validateHostnameEndpoint checks if hostname endpoint is non-empty and within 255 bytes.
+func validateHostnameEndpoint(endpoint []byte) error {
+	if len(endpoint) == 0 {
+		return fmt.Errorf("hostname endpoint cannot be empty")
+	}
+	if len(endpoint) > 255 {
+		return fmt.Errorf("hostname too long: %d bytes (max 255)", len(endpoint))
+	}
+	return nil
+}
+
+// validateDestinationEndpoint checks if destination endpoint meets minimum size requirement.
+func validateDestinationEndpoint(endpoint []byte) error {
+	if len(endpoint) < 387 { // Minimum destination size
+		return fmt.Errorf("destination endpoint too short: %d bytes", len(endpoint))
+	}
+	return nil
+}
+
+// validateSigkeyEndpoint checks if sigkey endpoint meets minimum size requirement.
+func validateSigkeyEndpoint(endpoint []byte) error {
+	if len(endpoint) < 3 { // At minimum: 2-byte sig type + 1 byte key
+		return fmt.Errorf("sigkey endpoint too short: %d bytes", len(endpoint))
+	}
+	return nil
+}
+
+// validateBlindingAuthScheme checks if the auth scheme is within valid bounds.
+func validateBlindingAuthScheme(info *BlindingInfo) error {
 	if info.AuthScheme > BLINDING_AUTH_SCHEME_PSK {
 		return fmt.Errorf("invalid auth scheme %d (must be 0 or 1)", info.AuthScheme)
 	}
+	return nil
+}
 
-	// Validate decryption key when per-client auth is enabled
+// validateBlindingDecryptionKey validates the decryption key when per-client auth is enabled.
+func validateBlindingDecryptionKey(info *BlindingInfo) error {
 	if info.PerClientAuth {
 		if len(info.DecryptionKey) != 32 {
 			return fmt.Errorf("decryption key must be exactly 32 bytes for per-client auth, got %d", len(info.DecryptionKey))
 		}
 	}
-
 	return nil
 }
 
