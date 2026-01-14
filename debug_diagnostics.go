@@ -581,12 +581,25 @@ func (pd *ProtocolDebugger) DiagnosticReport() string {
 		return "Protocol debugging is disabled"
 	}
 
+	report := pd.buildReportHeader()
+	report += pd.buildRecentMessagesSection()
+	report += pd.buildCreateSessionSection()
+	report += pd.buildDisconnectSection()
+
+	return report
+}
+
+// buildReportHeader constructs the header section of the diagnostic report.
+func (pd *ProtocolDebugger) buildReportHeader() string {
 	report := "=== Protocol Debug Report ===\n"
 	report += fmt.Sprintf("Dump directory: %s\n", pd.dumpDir)
 	report += fmt.Sprintf("Messages logged: %d\n\n", len(pd.messageLog))
+	return report
+}
 
-	// Recent messages summary
-	report += "Recent Messages (last 20):\n"
+// buildRecentMessagesSection constructs the recent messages summary section.
+func (pd *ProtocolDebugger) buildRecentMessagesSection() string {
+	report := "Recent Messages (last 20):\n"
 	start := len(pd.messageLog) - 20
 	if start < 0 {
 		start = 0
@@ -599,28 +612,35 @@ func (pd *ProtocolDebugger) DiagnosticReport() string {
 			msg.Size,
 		)
 	}
+	return report
+}
 
-	// CreateSession dumps
-	if len(pd.createSessionDumps) > 0 {
-		report += "\nCreateSession Dumps:\n"
-		for i, dump := range pd.createSessionDumps {
-			report += fmt.Sprintf("  %d. %v - %d bytes (dest:%d, map:%d, sig:%d)\n",
-				i+1, dump.Timestamp.Format(time.RFC3339),
-				dump.TotalSize, dump.DestinationSize, dump.MappingSize, dump.SignatureSize)
-			report += fmt.Sprintf("     File: %s\n", dump.FilePath)
-		}
+// buildCreateSessionSection constructs the CreateSession dumps section.
+func (pd *ProtocolDebugger) buildCreateSessionSection() string {
+	if len(pd.createSessionDumps) == 0 {
+		return ""
 	}
-
-	// Disconnect info
-	if pd.disconnectInfo != nil {
-		report += fmt.Sprintf("\nLast Disconnect:\n")
-		report += fmt.Sprintf("  Time: %v\n", pd.disconnectInfo.Timestamp.Format(time.RFC3339))
-		report += fmt.Sprintf("  Reason: %s\n", pd.disconnectInfo.Reason)
-		if len(pd.disconnectInfo.RawBytes) > 0 {
-			report += fmt.Sprintf("  Raw: %x\n", pd.disconnectInfo.RawBytes)
-		}
+	report := "\nCreateSession Dumps:\n"
+	for i, dump := range pd.createSessionDumps {
+		report += fmt.Sprintf("  %d. %v - %d bytes (dest:%d, map:%d, sig:%d)\n",
+			i+1, dump.Timestamp.Format(time.RFC3339),
+			dump.TotalSize, dump.DestinationSize, dump.MappingSize, dump.SignatureSize)
+		report += fmt.Sprintf("     File: %s\n", dump.FilePath)
 	}
+	return report
+}
 
+// buildDisconnectSection constructs the disconnect information section.
+func (pd *ProtocolDebugger) buildDisconnectSection() string {
+	if pd.disconnectInfo == nil {
+		return ""
+	}
+	report := fmt.Sprintf("\nLast Disconnect:\n")
+	report += fmt.Sprintf("  Time: %v\n", pd.disconnectInfo.Timestamp.Format(time.RFC3339))
+	report += fmt.Sprintf("  Reason: %s\n", pd.disconnectInfo.Reason)
+	if len(pd.disconnectInfo.RawBytes) > 0 {
+		report += fmt.Sprintf("  Raw: %x\n", pd.disconnectInfo.RawBytes)
+	}
 	return report
 }
 

@@ -499,38 +499,45 @@ func (session *Session) dispatchDestination(requestId uint32, address string, de
 // dispatchDestinationWithOptions dispatches destination lookup results with optional service record options
 // per I2CP specification - handles HostReplyMessage (type 39) responses including Proposal 167 service records
 func (session *Session) dispatchDestinationWithOptions(requestId uint32, address string, destination *Destination, options map[string]string) {
-	// Check if session is closed
 	if session.IsClosed() {
 		Warning("Ignoring destination dispatch to closed session %d", session.id)
 		return
 	}
 
-	// Check if we have service record options and client callback
-	if options != nil && session.client != nil && session.client.callbacks != nil && session.client.callbacks.OnHostLookupWithOptions != nil {
-		Debug("Dispatching destination with options to client callback: requestId=%d, address=%s, options=%v",
-			requestId, address, options)
+	session.dispatchOptionsCallback(requestId, address, destination, options)
+	session.dispatchDestinationCallback(requestId, address, destination)
+}
 
-		// Capture callback references to prevent race condition
-		client := session.client
-		onHostLookupWithOptions := client.callbacks.OnHostLookupWithOptions
+// hasOptionsCallback checks if the session has a valid options callback registered.
+// Returns true if client, callbacks, and OnHostLookupWithOptions are all non-nil.
+func (session *Session) hasOptionsCallback(options map[string]string) bool {
+	return options != nil &&
+		session.client != nil &&
+		session.client.callbacks != nil &&
+		session.client.callbacks.OnHostLookupWithOptions != nil
+}
 
-		optionsCallbackFunc := func() {
-			defer func() {
-				if r := recover(); r != nil {
-					Error("Panic in OnHostLookupWithOptions callback for session %d: %v", session.id, r)
-				}
-			}()
-			onHostLookupWithOptions(client, requestId, destination, options)
-		}
-
-		if session.syncCallbacks {
-			optionsCallbackFunc()
-		} else {
-			go optionsCallbackFunc()
-		}
+// dispatchOptionsCallback dispatches destination lookup results with service record options to the client callback.
+// Handles Proposal 167 service records for HostReplyMessage responses.
+func (session *Session) dispatchOptionsCallback(requestId uint32, address string, destination *Destination, options map[string]string) {
+	if !session.hasOptionsCallback(options) {
+		return
 	}
 
-	// Also dispatch to session's OnDestination callback (if registered)
+	Debug("Dispatching destination with options to client callback: requestId=%d, address=%s, options=%v",
+		requestId, address, options)
+
+	client := session.client
+	onHostLookupWithOptions := client.callbacks.OnHostLookupWithOptions
+
+	session.executeCallback(func() {
+		onHostLookupWithOptions(client, requestId, destination, options)
+	}, "OnHostLookupWithOptions")
+}
+
+// dispatchDestinationCallback dispatches destination lookup results to the session's OnDestination callback.
+// Executes synchronously or asynchronously based on syncCallbacks setting.
+func (session *Session) dispatchDestinationCallback(requestId uint32, address string, destination *Destination) {
 	if session.callbacks == nil || session.callbacks.OnDestination == nil {
 		Debug("No destination callback registered for session %d", session.id)
 		return
@@ -539,26 +546,29 @@ func (session *Session) dispatchDestinationWithOptions(requestId uint32, address
 	Debug("Dispatching destination lookup result to session %d: requestId=%d, address=%s",
 		session.id, requestId, address)
 
-	// Capture callback reference to prevent race condition if session.callbacks is modified
 	onDestination := session.callbacks.OnDestination
 
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
+	session.executeCallback(func() {
+		onDestination(session, requestId, address, destination)
+	}, "destination")
+}
+
+// executeCallback runs the provided callback function with panic recovery.
+// Executes synchronously or asynchronously based on the session's syncCallbacks setting.
+func (session *Session) executeCallback(callback func(), callbackName string) {
+	wrappedCallback := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				Error("Panic in destination callback for session %d: %v", session.id, r)
+				Error("Panic in %s callback for session %d: %v", callbackName, session.id, r)
 			}
 		}()
-
-		onDestination(session, requestId, address, destination)
+		callback()
 	}
 
 	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
+		wrappedCallback()
 	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
+		go wrappedCallback()
 	}
 }
 

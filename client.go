@@ -204,57 +204,66 @@ func (c *Client) ensureInitialized() error {
 	return nil
 }
 
+// sendMessage sends an I2CP message either immediately or queued for batching.
 func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) {
-	send := NewStream(make([]byte, 0, stream.Len()+4+1))
-	err = send.WriteUint32(uint32(stream.Len()))
-	err = send.WriteByte(typ)
-	lenb := stream.Len()
-	_ = lenb
-	_, err = send.Write(stream.Bytes())
-	lenc := send.Len()
-	_ = lenc
-
-	// Track message being sent (if stats enabled)
-	if c.messageStats != nil && c.messageStats.IsEnabled() {
-		c.messageStats.RecordSent(typ, uint64(lenc))
-	}
-
-	// Protocol debugging - log all sent messages
-	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
-		c.protocolDebugger.LogMessage("SEND", typ, uint32(stream.Len()), stream.Bytes(), 0)
-	}
+	send := c.buildMessageFrame(typ, stream)
+	c.recordSentMessageStats(typ, send.Len())
 
 	if queue {
-		Debug("Putting %d bytes message on the output queue.", send.Len())
-		c.lock.Lock()
-		c.outputQueue = append(c.outputQueue, send)
-
-		// Check if batching is enabled and size threshold exceeded
-		if c.batchEnabled && c.getTotalQueueSize() >= c.batchSizeThreshold {
-			c.lock.Unlock()
-			// Flush immediately when threshold exceeded
-			Debug("Batch size threshold exceeded (%d bytes), flushing immediately", c.getTotalQueueSize())
-			return c.flushOutputQueue()
-		}
-		c.lock.Unlock()
-	} else {
-		// Track bandwidth and message sent
-		if c.metrics != nil {
-			c.metrics.AddBytesSent(uint64(send.Len()))
-			c.metrics.IncrementMessageSent(typ)
-		}
-
-		// Use circuit breaker if available to protect against router failures
-		if c.circuitBreaker != nil {
-			err = c.circuitBreaker.Execute(func() error {
-				_, sendErr := c.tcp.Send(send)
-				return sendErr
-			})
-		} else {
-			_, err = c.tcp.Send(send)
-		}
+		return c.queueMessage(send)
 	}
-	return
+	return c.sendMessageDirect(typ, send)
+}
+
+// buildMessageFrame constructs the wire-format message frame with length prefix and type.
+func (c *Client) buildMessageFrame(typ uint8, stream *Stream) *Stream {
+	send := NewStream(make([]byte, 0, stream.Len()+4+1))
+	send.WriteUint32(uint32(stream.Len()))
+	send.WriteByte(typ)
+	send.Write(stream.Bytes())
+	return send
+}
+
+// recordSentMessageStats records message statistics for debugging and monitoring.
+func (c *Client) recordSentMessageStats(typ uint8, frameLen int) {
+	if c.messageStats != nil && c.messageStats.IsEnabled() {
+		c.messageStats.RecordSent(typ, uint64(frameLen))
+	}
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		c.protocolDebugger.LogMessage("SEND", typ, uint32(frameLen), nil, 0)
+	}
+}
+
+// queueMessage adds a message to the output queue for batched sending.
+func (c *Client) queueMessage(send *Stream) error {
+	Debug("Putting %d bytes message on the output queue.", send.Len())
+	c.lock.Lock()
+	c.outputQueue = append(c.outputQueue, send)
+
+	if c.batchEnabled && c.getTotalQueueSize() >= c.batchSizeThreshold {
+		c.lock.Unlock()
+		Debug("Batch size threshold exceeded (%d bytes), flushing immediately", c.getTotalQueueSize())
+		return c.flushOutputQueue()
+	}
+	c.lock.Unlock()
+	return nil
+}
+
+// sendMessageDirect sends a message immediately without queuing.
+func (c *Client) sendMessageDirect(typ uint8, send *Stream) error {
+	if c.metrics != nil {
+		c.metrics.AddBytesSent(uint64(send.Len()))
+		c.metrics.IncrementMessageSent(typ)
+	}
+
+	if c.circuitBreaker != nil {
+		return c.circuitBreaker.Execute(func() error {
+			_, sendErr := c.tcp.Send(send)
+			return sendErr
+		})
+	}
+	_, err := c.tcp.Send(send)
+	return err
 }
 
 func (c *Client) recvMessage(typ uint8, stream *Stream, dispatch bool) (err error) {
@@ -552,60 +561,76 @@ func (c *Client) synchronizeRouterTime(routerDate uint64) {
 	}
 }
 
+// onMsgDisconnect handles disconnect messages from the router per I2CP specification.
 func (c *Client) onMsgDisconnect(stream *Stream) {
-	var err error
-	Debug("Received Disconnect message")
-	// size, err = stream.ReadByte()
-	strbuf := make([]byte, stream.Len())
-	lens := stream.Len()
-	_ = lens
-	_, err = stream.Read(strbuf)
-
-	reason := string(strbuf)
-	Debug("Received Disconnect message with reason %s", reason)
-
-	// Record disconnect for debugging
-	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
-		c.protocolDebugger.RecordDisconnect(reason, strbuf)
-	}
-
-	// Update session states
-	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-		c.lock.Lock()
-		for sessionID := range c.sessions {
-			c.stateTracker.SetState(sessionID, SessionStateDisconnected, fmt.Sprintf("disconnect: %s", reason))
-		}
-		c.lock.Unlock()
-	}
-
+	reason, err := c.readDisconnectReason(stream)
 	if err != nil {
 		Error("Could not read msgDisconnect correctly data")
 	}
 
-	// Invoke disconnect callback if registered
+	c.recordDisconnectDebugInfo(reason, []byte(reason))
+	c.updateSessionStatesOnDisconnect(reason)
+	c.invokeDisconnectCallback(reason)
+
+	c.connected = false
+	c.attemptAutoReconnect()
+}
+
+// readDisconnectReason extracts the disconnect reason string from the message stream.
+func (c *Client) readDisconnectReason(stream *Stream) (string, error) {
+	Debug("Received Disconnect message")
+	strbuf := make([]byte, stream.Len())
+	_, err := stream.Read(strbuf)
+	reason := string(strbuf)
+	Debug("Received Disconnect message with reason %s", reason)
+	return reason, err
+}
+
+// recordDisconnectDebugInfo records disconnect events for protocol debugging.
+func (c *Client) recordDisconnectDebugInfo(reason string, rawData []byte) {
+	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
+		c.protocolDebugger.RecordDisconnect(reason, rawData)
+	}
+}
+
+// updateSessionStatesOnDisconnect marks all sessions as disconnected in the state tracker.
+func (c *Client) updateSessionStatesOnDisconnect(reason string) {
+	if c.stateTracker == nil || !c.stateTracker.IsEnabled() {
+		return
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	for sessionID := range c.sessions {
+		c.stateTracker.SetState(sessionID, SessionStateDisconnected, fmt.Sprintf("disconnect: %s", reason))
+	}
+}
+
+// invokeDisconnectCallback calls the registered disconnect callback if present.
+func (c *Client) invokeDisconnectCallback(reason string) {
 	if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
 		c.callbacks.OnDisconnect(c, reason, nil)
 	}
+}
 
-	// Mark as disconnected
-	c.connected = false
-
-	// Attempt auto-reconnect if enabled (don't block the message handler)
+// attemptAutoReconnect initiates auto-reconnection if enabled.
+func (c *Client) attemptAutoReconnect() {
 	c.reconnectMu.Lock()
 	shouldReconnect := c.reconnectEnabled
 	c.reconnectMu.Unlock()
 
-	if shouldReconnect {
-		go func() {
-			Info("Connection lost, attempting auto-reconnect...")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			if err := c.autoReconnect(ctx); err != nil {
-				Error("Auto-reconnect failed: %v", err)
-			}
-		}()
+	if !shouldReconnect {
+		return
 	}
+
+	go func() {
+		Info("Connection lost, attempting auto-reconnect...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := c.autoReconnect(ctx); err != nil {
+			Error("Auto-reconnect failed: %v", err)
+		}
+	}()
 }
 
 // validateGzipHeader checks if the payload starts with valid gzip header bytes.
@@ -1279,36 +1304,54 @@ func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
 	sess := c.sessions[sessionID]
 
 	if sess == nil {
-		// CRITICAL FIX: Handle router rejecting session creation
-		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
-			Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
-			// Track rejection state
-			if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-				c.stateTracker.SetState(sessionID, SessionStateRejected, "session rejected by router")
-			}
-			Error("❌ Session %d REJECTED by router (SessionStatus=DESTROYED without CREATED)", sessionID)
-			sess = c.currentSession
-			sess.id = sessionID
-			c.currentSession = nil
-			c.lock.Unlock()
-			sess.dispatchStatus(SessionStatus(sessionStatus))
-		} else {
-			c.lock.Unlock()
-			Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
-		}
-	} else {
-		// I2CP SPEC COMPLIANCE: Signal destroyConfirmed when DESTROYED status received
-		if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
-			if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-				c.stateTracker.SetState(sessionID, SessionStateDestroyed, "SessionStatus DESTROYED received")
-			}
-			if sess.destroyConfirmed != nil {
-				close(sess.destroyConfirmed)
-				sess.destroyConfirmed = nil
-			}
-		}
-		c.lock.Unlock()
-		sess.dispatchStatus(SessionStatus(sessionStatus))
+		c.handleMissingSession(sessionID, sessionStatus)
+		return
+	}
+
+	c.handleExistingSessionStatus(sess, sessionID, sessionStatus)
+}
+
+// handleMissingSession processes status for a session that doesn't exist in the sessions map.
+func (c *Client) handleMissingSession(sessionID uint16, sessionStatus uint8) {
+	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
+		c.handleRejectedSession(sessionID, sessionStatus)
+		return
+	}
+	c.lock.Unlock()
+	Fatal("Session with id %d doesn't exists in client instance %p.", sessionID, c)
+}
+
+// handleRejectedSession handles the case when the router rejects session creation.
+func (c *Client) handleRejectedSession(sessionID uint16, sessionStatus uint8) {
+	Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.SetState(sessionID, SessionStateRejected, "session rejected by router")
+	}
+	Error("❌ Session %d REJECTED by router (SessionStatus=DESTROYED without CREATED)", sessionID)
+	sess := c.currentSession
+	sess.id = sessionID
+	c.currentSession = nil
+	c.lock.Unlock()
+	sess.dispatchStatus(SessionStatus(sessionStatus))
+}
+
+// handleExistingSessionStatus processes status updates for an existing session.
+func (c *Client) handleExistingSessionStatus(sess *Session, sessionID uint16, sessionStatus uint8) {
+	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED {
+		c.processDestroyedStatus(sess, sessionID)
+	}
+	c.lock.Unlock()
+	sess.dispatchStatus(SessionStatus(sessionStatus))
+}
+
+// processDestroyedStatus handles DESTROYED status for an existing session.
+func (c *Client) processDestroyedStatus(sess *Session, sessionID uint16) {
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.SetState(sessionID, SessionStateDestroyed, "SessionStatus DESTROYED received")
+	}
+	if sess.destroyConfirmed != nil {
+		close(sess.destroyConfirmed)
+		sess.destroyConfirmed = nil
 	}
 }
 
@@ -2482,10 +2525,8 @@ type BlindingInfo struct {
 //
 // Returns error if validation fails or message cannot be sent.
 func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) error {
-	// Version check: BlindingInfo requires router 0.9.43+
-	if !c.SupportsVersion(VersionBlindingInfo) {
-		return fmt.Errorf("router version %s does not support BlindingInfo (requires %s+)",
-			c.router.version.String(), VersionBlindingInfo.String())
+	if err := c.checkBlindingInfoSupport(); err != nil {
+		return err
 	}
 
 	if err := c.validateBlindingInfo(sess, info); err != nil {
@@ -2494,47 +2535,61 @@ func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) 
 
 	Debug("Sending BlindingInfoMessage for session %d, endpoint type %d", sess.id, info.EndpointType)
 
+	if err := c.buildBlindingInfoMessage(sess, info); err != nil {
+		return err
+	}
+
+	return c.sendBlindingInfoMessage(sess.id, queue)
+}
+
+// checkBlindingInfoSupport verifies the router supports BlindingInfo messages.
+func (c *Client) checkBlindingInfoSupport() error {
+	if !c.SupportsVersion(VersionBlindingInfo) {
+		return fmt.Errorf("router version %s does not support BlindingInfo (requires %s+)",
+			c.router.version.String(), VersionBlindingInfo.String())
+	}
+	return nil
+}
+
+// buildBlindingInfoMessage constructs the BlindingInfoMessage in the message stream.
+func (c *Client) buildBlindingInfoMessage(sess *Session, info *BlindingInfo) error {
 	c.messageStream.Reset()
 
-	// Write Session ID (2 bytes)
 	c.messageStream.WriteUint16(sess.id)
-
-	// Build and write flags byte
-	flags := c.buildBlindingFlags(info)
-	c.messageStream.WriteByte(flags)
-
-	// Write endpoint type (1 byte)
+	c.messageStream.WriteByte(c.buildBlindingFlags(info))
 	c.messageStream.WriteByte(info.EndpointType)
-
-	// Write blinded signature type (2 bytes)
 	c.messageStream.WriteUint16(info.BlindedSigType)
-
-	// Write expiration (4 bytes, seconds since epoch)
 	c.messageStream.WriteUint32(info.Expiration)
 
-	// Write endpoint data based on type
 	if err := c.writeBlindingEndpoint(info); err != nil {
 		return fmt.Errorf("failed to write endpoint: %w", err)
 	}
 
-	// Write optional decryption key (only if per-client auth)
+	return c.writeBlindingOptionalFields(info)
+}
+
+// writeBlindingOptionalFields writes optional decryption key and lookup password.
+func (c *Client) writeBlindingOptionalFields(info *BlindingInfo) error {
 	if info.PerClientAuth {
 		c.messageStream.Write(info.DecryptionKey)
 	}
 
-	// Write optional lookup password (only if provided)
 	if info.LookupPassword != "" {
 		if err := c.messageStream.WriteLenPrefixedString(info.LookupPassword); err != nil {
 			return fmt.Errorf("failed to write lookup password: %w", err)
 		}
 	}
+	return nil
+}
 
+// sendBlindingInfoMessage sends the constructed BlindingInfoMessage.
+func (c *Client) sendBlindingInfoMessage(sessionID uint16, queue bool) error {
 	if err := c.sendMessage(I2CP_MSG_BLINDING_INFO, c.messageStream, queue); err != nil {
 		Error("Error while sending BlindingInfoMessage: %v", err)
 		return fmt.Errorf("failed to send BlindingInfoMessage: %w", err)
 	}
 
-	Debug("Successfully sent BlindingInfoMessage for session %d", sess.id)
+	Debug("Successfully sent BlindingInfoMessage for session %d", sessionID)
 	return nil
 }
 
