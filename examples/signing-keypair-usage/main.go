@@ -13,75 +13,98 @@ import (
 // to sign packets for the I2P Streaming Protocol, as required by the spec.
 
 func main() {
-	// Create a new session (in real usage, you'd connect to an I2P router)
-	client := i2cp.NewClient(nil)
-	session := i2cp.NewSession(client, i2cp.SessionCallbacks{})
-
 	fmt.Println("=== Session Signing Key Pair Usage Example ===")
 
-	// Get the session's signing key pair
+	session := createExampleSession()
+	keyPair := getSigningKeyPair(session)
+
+	packetData := createExamplePacket()
+	signature := demonstrateSigning(keyPair, packetData)
+	demonstratVerification(keyPair, packetData, signature)
+	demonstrateTamperedVerification(keyPair, packetData, signature)
+
+	showKeyRelationships(session)
+	printUseCaseGuide()
+}
+
+// createExampleSession creates a session for the example.
+func createExampleSession() *i2cp.Session {
+	client := i2cp.NewClient(nil)
+	return i2cp.NewSession(client, i2cp.SessionCallbacks{})
+}
+
+// getSigningKeyPair retrieves and displays the signing key pair.
+func getSigningKeyPair(session *i2cp.Session) *i2cp.Ed25519KeyPair {
 	keyPair, err := session.SigningKeyPair()
 	if err != nil {
 		log.Fatalf("Failed to get signing key pair: %v", err)
 	}
-
 	fmt.Printf("✓ Retrieved signing key pair from session\n")
 	fmt.Printf("  Algorithm: Ed25519-SHA512\n")
 	fmt.Printf("  Public key length: %d bytes\n", len(keyPair.PublicKey()))
 	fmt.Printf("  Private key length: %d bytes\n\n", len(keyPair.PrivateKey()))
+	return keyPair
+}
 
-	// Example: Signing an I2P Streaming Protocol packet
-	// In real usage, this would be a marshaled packet structure
-	packetData := []byte{
-		// Simulated packet header
+// createExamplePacket creates an example packet for signing.
+func createExamplePacket() []byte {
+	return []byte{
 		0x01,                   // Protocol version
 		0x06,                   // Flags: SYN | SignatureIncluded | FromIncluded
 		0x00, 0x01, 0x23, 0x45, // Send stream ID
 		0x00, 0x00, 0x00, 0x00, // Receive stream ID
-		// ... more packet fields ...
 	}
+}
 
+// demonstrateSigning demonstrates packet signing.
+func demonstrateSigning(keyPair *i2cp.Ed25519KeyPair, packetData []byte) []byte {
 	fmt.Println("Example: Signing I2P Streaming Protocol packet")
 	fmt.Printf("  Packet data: %d bytes\n", len(packetData))
 
-	// Sign the packet data
 	signature, err := keyPair.Sign(packetData)
 	if err != nil {
 		log.Fatalf("Failed to sign packet: %v", err)
 	}
-
 	fmt.Printf("✓ Generated signature: %d bytes\n", len(signature))
 	fmt.Printf("  Signature (first 32 bytes): %x...\n\n", signature[:32])
+	return signature
+}
 
-	// Verify the signature (receiver would do this)
+// demonstratVerification demonstrates signature verification.
+func demonstratVerification(keyPair *i2cp.Ed25519KeyPair, packetData, signature []byte) {
 	fmt.Println("Example: Verifying packet signature")
-	valid := keyPair.Verify(packetData, signature)
-	if valid {
+	if keyPair.Verify(packetData, signature) {
 		fmt.Println("✓ Signature verified successfully")
 	} else {
 		fmt.Println("✗ Signature verification failed")
 	}
+}
 
-	// Demonstrate signature verification failure with tampered data
+// demonstrateTamperedVerification demonstrates verification with tampered data.
+func demonstrateTamperedVerification(keyPair *i2cp.Ed25519KeyPair, packetData, signature []byte) {
 	fmt.Println("\nExample: Signature verification with tampered data")
 	tamperedData := make([]byte, len(packetData))
 	copy(tamperedData, packetData)
-	tamperedData[0] = 0xFF // Tamper with first byte
+	tamperedData[0] = 0xFF
 
-	valid = keyPair.Verify(tamperedData, signature)
-	if !valid {
+	if !keyPair.Verify(tamperedData, signature) {
 		fmt.Println("✓ Signature verification correctly failed for tampered data")
 	} else {
 		fmt.Println("✗ ERROR: Signature should not verify for tampered data")
 	}
+}
 
-	// Show relationship between session, destination, and key pair
+// showKeyRelationships displays the relationship between session, destination, and key pair.
+func showKeyRelationships(session *i2cp.Session) {
 	fmt.Println("\n=== Key Relationships ===")
 	dest := session.Destination()
 	fmt.Printf("Session destination: %s\n", dest.Base32())
 	fmt.Println("✓ SigningKeyPair() returns the same key pair used by the destination")
 	fmt.Println("✓ This enables proper packet authentication in I2P Streaming Protocol")
+}
 
+// printUseCaseGuide prints the usage guide for I2P Streaming Protocol.
+func printUseCaseGuide() {
 	fmt.Println("\n=== Use Case: I2P Streaming Protocol ===")
 	fmt.Println("When implementing streaming protocol packet sending:")
 	fmt.Println("  1. Create packet with flags FlagSignatureIncluded")

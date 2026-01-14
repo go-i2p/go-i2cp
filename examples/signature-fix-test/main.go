@@ -16,8 +16,21 @@ func main() {
 	fmt.Println("This test verifies the fix for 'Invalid signature on CreateSessionMessage' bug")
 	fmt.Println()
 
-	// Create client with callbacks to track connection status
-	client := i2cp.NewClient(&i2cp.ClientCallBacks{
+	client := createTestClient()
+	defer client.Close()
+
+	connectTestClient(client)
+
+	session := createTestSession(client)
+	runSignatureTest(client, session)
+
+	printTestResults(session)
+	cleanup()
+}
+
+// createTestClient creates the test client with disconnect callback.
+func createTestClient() *i2cp.Client {
+	return i2cp.NewClient(&i2cp.ClientCallBacks{
 		OnDisconnect: func(c *i2cp.Client, reason string, opaque *interface{}) {
 			log.Printf("❌ Disconnected: %s", reason)
 			if reason == "Invalid signature on CreateSessionMessage" {
@@ -25,29 +38,28 @@ func main() {
 			}
 		},
 	})
+}
 
-	// Connect to router
+// connectTestClient connects to the I2P router.
+func connectTestClient(client *i2cp.Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	fmt.Println("Connecting to I2P router...")
-	err := client.Connect(ctx)
-	if err != nil {
+	if err := client.Connect(ctx); err != nil {
 		log.Fatalf("Failed to connect to router: %v", err)
 	}
-	defer client.Close()
-
 	fmt.Println("✅ Connected to I2P router")
 	fmt.Println()
+}
 
-	// Create session with callbacks
-	sessionCreated := make(chan bool, 1)
-	session := i2cp.NewSession(client, i2cp.SessionCallbacks{
+// createTestSession creates a session with status callback.
+func createTestSession(client *i2cp.Client) *i2cp.Session {
+	return i2cp.NewSession(client, i2cp.SessionCallbacks{
 		OnStatus: func(s *i2cp.Session, status i2cp.SessionStatus) {
 			switch status {
 			case i2cp.I2CP_SESSION_STATUS_CREATED:
 				fmt.Printf("✅ Session %d created successfully\n", s.ID())
-				sessionCreated <- true
 			case i2cp.I2CP_SESSION_STATUS_DESTROYED:
 				fmt.Printf("Session %d destroyed\n", s.ID())
 			default:
@@ -55,18 +67,22 @@ func main() {
 			}
 		},
 	})
+}
 
-	// Use CreateSessionSync (recommended method)
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+// runSignatureTest runs the signature validation test.
+func runSignatureTest(client *i2cp.Client, session *i2cp.Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	fmt.Println("Creating session...")
 	fmt.Println("(This is where the signature is validated by the router)")
-	err = client.CreateSessionSync(ctx, session)
-	if err != nil {
+	if err := client.CreateSessionSync(ctx, session); err != nil {
 		log.Fatalf("❌ CreateSessionSync failed: %v", err)
 	}
+}
 
+// printTestResults prints the test results.
+func printTestResults(session *i2cp.Session) {
 	fmt.Println()
 	fmt.Printf("✅ SUCCESS! Session %d created without signature error\n", session.ID())
 	fmt.Println()
@@ -76,11 +92,11 @@ func main() {
 	fmt.Println("✓ Session created successfully")
 	fmt.Println()
 	fmt.Println("The 'Invalid signature on CreateSessionMessage' bug is FIXED!")
+}
 
-	// Clean up
+// cleanup performs cleanup after the test.
+func cleanup() {
 	fmt.Println()
 	fmt.Println("Cleaning up...")
-	// Session will be cleaned up when client closes
-
-	time.Sleep(1 * time.Second) // Give time for cleanup
+	time.Sleep(1 * time.Second)
 }

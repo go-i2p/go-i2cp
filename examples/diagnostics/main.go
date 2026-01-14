@@ -23,138 +23,161 @@ func main() {
 	fmt.Println("=== go-i2cp Diagnostics Example ===")
 	fmt.Println("This example demonstrates diagnostic tools for troubleshooting I2CP issues")
 
-	// STEP 1: Enable debug logging for detailed protocol tracing
+	client := setupClient()
+	defer client.Close()
+
+	ctx := connectToRouter(client)
+
+	fmt.Println("Step 4: Inspecting connection state...")
+	printConnectionState(client)
+
+	sessionCreated := make(chan bool, 1)
+	session := createDiagnosticSession(client, sessionCreated)
+
+	cancelProcessIO := startProcessIOLoop(client, ctx)
+	defer cancelProcessIO()
+
+	sendCreateSession(client, ctx, session)
+	waitForSessionCreation(client, session, sessionCreated)
+
+	fmt.Println("\n=== Step 10: Message Statistics Details ===")
+	demonstrateMessageStats(client)
+
+	printKeyTakeaways()
+}
+
+// setupClient creates and configures the I2CP client with diagnostics.
+func setupClient() *i2cp.Client {
 	fmt.Println("Step 1: Enabling debug logging...")
 	i2cp.LogInit(i2cp.DEBUG)
 	fmt.Println("✓ Debug logging enabled - all I2CP messages will be traced")
 
-	// STEP 2: Create client with diagnostics enabled
 	fmt.Println("Step 2: Creating I2CP client with diagnostics enabled...")
 	client := i2cp.NewClient(&i2cp.ClientCallBacks{
 		OnDisconnect: func(c *i2cp.Client, reason string, opaque *interface{}) {
 			log.Printf("Disconnected from router: %s", reason)
 		},
 	})
-
-	// Enable message statistics tracking BEFORE connecting
 	client.EnableMessageStats()
 	fmt.Println("✓ Message statistics tracking enabled")
+	return client
+}
 
-	// STEP 3: Connect to I2P router
+// connectToRouter connects to the I2P router.
+func connectToRouter(client *i2cp.Client) context.Context {
 	fmt.Println("Step 3: Connecting to I2P router...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err := client.Connect(ctx)
-	if err != nil {
+	if err := client.Connect(ctx); err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer client.Close()
-
 	fmt.Println("✓ Connected to I2P router")
+	return ctx
+}
 
-	// STEP 4: Print connection state
-	fmt.Println("Step 4: Inspecting connection state...")
-	printConnectionState(client)
-
-	// STEP 5: Create session with detailed callback logging
+// createDiagnosticSession creates a session with diagnostic callbacks.
+func createDiagnosticSession(client *i2cp.Client, sessionCreated chan bool) *i2cp.Session {
 	fmt.Println("\nStep 5: Creating I2CP session with diagnostic callbacks...")
-	sessionCreated := make(chan bool, 1)
-	session := i2cp.NewSession(client, i2cp.SessionCallbacks{
+	return i2cp.NewSession(client, i2cp.SessionCallbacks{
 		OnStatus: func(s *i2cp.Session, status i2cp.SessionStatus) {
-			log.Printf(">>> OnStatus callback invoked: session=%d, status=%s",
-				s.ID(), getStatusName(status))
-
+			log.Printf(">>> OnStatus callback invoked: session=%d, status=%s", s.ID(), getStatusName(status))
 			if status == i2cp.I2CP_SESSION_STATUS_CREATED {
 				sessionCreated <- true
 			}
 		},
-		OnMessage: func(s *i2cp.Session, srcDest *i2cp.Destination, protocol uint8,
-			srcPort, destPort uint16, payload *i2cp.Stream) {
-			log.Printf(">>> OnMessage callback invoked: protocol=%d, size=%d",
-				protocol, payload.Len())
+		OnMessage: func(s *i2cp.Session, srcDest *i2cp.Destination, protocol uint8, srcPort, destPort uint16, payload *i2cp.Stream) {
+			log.Printf(">>> OnMessage callback invoked: protocol=%d, size=%d", protocol, payload.Len())
 		},
 	})
+}
 
-	// STEP 6: Start ProcessIO in background (CRITICAL for receiving responses)
+// startProcessIOLoop starts the ProcessIO loop in the background.
+func startProcessIOLoop(client *i2cp.Client, ctx context.Context) context.CancelFunc {
 	fmt.Println("\nStep 6: Starting ProcessIO loop...")
 	processIOCtx, cancelProcessIO := context.WithCancel(ctx)
-	defer cancelProcessIO()
 
-	go func() {
-		for {
-			select {
-			case <-processIOCtx.Done():
-				return
-			default:
-				if err := client.ProcessIO(processIOCtx); err != nil {
-					if err != context.Canceled {
-						log.Printf("ProcessIO error: %v", err)
-					}
-					return
-				}
-			}
-		}
-	}()
+	go runProcessIOLoop(client, processIOCtx)
 
 	fmt.Println("✓ ProcessIO loop running in background")
-
-	// Give ProcessIO time to start
 	time.Sleep(100 * time.Millisecond)
+	return cancelProcessIO
+}
 
-	// STEP 7: Send CreateSession message
+// runProcessIOLoop runs the ProcessIO loop.
+func runProcessIOLoop(client *i2cp.Client, ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if err := client.ProcessIO(ctx); err != nil {
+				if err != context.Canceled {
+					log.Printf("ProcessIO error: %v", err)
+				}
+				return
+			}
+		}
+	}
+}
+
+// sendCreateSession sends the CreateSession message.
+func sendCreateSession(client *i2cp.Client, ctx context.Context, session *i2cp.Session) {
 	fmt.Println("Step 7: Sending CreateSession message to router...")
 	fmt.Println("(Watch for debug logs showing message flow)")
-
 	if err := client.CreateSession(ctx, session); err != nil {
 		log.Fatalf("CreateSession failed: %v", err)
 	}
+}
 
-	// STEP 8: Wait for session creation confirmation
+// waitForSessionCreation waits for session creation or timeout.
+func waitForSessionCreation(client *i2cp.Client, session *i2cp.Session, sessionCreated chan bool) {
 	fmt.Println("Step 8: Waiting for SessionCreated response...")
 	fmt.Println("(This is where timeouts typically occur if there are issues)")
 
 	select {
 	case <-sessionCreated:
-		fmt.Println("✓✓✓ Session created successfully! ✓✓✓")
-		fmt.Printf("    Session ID: %d\n\n", session.ID())
-
-		// STEP 9: Print comprehensive diagnostics
-		fmt.Println("Step 9: Printing diagnostic report...")
-		client.PrintDiagnostics()
-
-		// Show message statistics
-		fmt.Println("\n=== Message Statistics ===")
-		stats := client.GetMessageStats()
-		if stats != nil {
-			fmt.Println(stats.Summary())
-		}
-
+		handleSessionSuccess(client, session)
 	case <-time.After(30 * time.Second):
-		fmt.Println("\n❌❌❌ Session creation TIMEOUT ❌❌❌")
-		fmt.Println("This indicates an issue with the I2CP handshake")
+		handleSessionTimeout(client)
+	}
+}
 
-		// Print diagnostics to help identify the problem
-		fmt.Println("=== DIAGNOSTIC REPORT ===")
-		client.PrintDiagnostics()
+// handleSessionSuccess handles successful session creation.
+func handleSessionSuccess(client *i2cp.Client, session *i2cp.Session) {
+	fmt.Println("✓✓✓ Session created successfully! ✓✓✓")
+	fmt.Printf("    Session ID: %d\n\n", session.ID())
 
-		fmt.Println("\n=== Message Flow Analysis ===")
-		stats := client.GetMessageStats()
-		if stats != nil {
-			fmt.Println(stats.DiagnosticReport())
-		}
+	fmt.Println("Step 9: Printing diagnostic report...")
+	client.PrintDiagnostics()
 
-		// Print connection state
-		fmt.Println("\n=== Connection State ===")
-		printConnectionState(client)
+	fmt.Println("\n=== Message Statistics ===")
+	if stats := client.GetMessageStats(); stats != nil {
+		fmt.Println(stats.Summary())
+	}
+}
 
-		log.Fatal("\nSession creation failed - see diagnostic output above")
+// handleSessionTimeout handles session creation timeout.
+func handleSessionTimeout(client *i2cp.Client) {
+	fmt.Println("\n❌❌❌ Session creation TIMEOUT ❌❌❌")
+	fmt.Println("This indicates an issue with the I2CP handshake")
+
+	fmt.Println("=== DIAGNOSTIC REPORT ===")
+	client.PrintDiagnostics()
+
+	fmt.Println("\n=== Message Flow Analysis ===")
+	if stats := client.GetMessageStats(); stats != nil {
+		fmt.Println(stats.DiagnosticReport())
 	}
 
-	// STEP 10: Demonstrate message statistics inspection
-	fmt.Println("\n=== Step 10: Message Statistics Details ===")
-	demonstrateMessageStats(client)
+	fmt.Println("\n=== Connection State ===")
+	printConnectionState(client)
 
+	log.Fatal("\nSession creation failed - see diagnostic output above")
+}
+
+// printKeyTakeaways prints the key lessons learned.
+func printKeyTakeaways() {
 	fmt.Println("\n=== Diagnostics Example Complete ===")
 	fmt.Println("Key takeaways:")
 	fmt.Println("1. Enable message stats BEFORE connecting")
