@@ -1330,49 +1330,25 @@ func (c *Client) onMsgSessionStatus(stream *Stream) {
 }
 
 func (c *Client) onMsgReqVariableLease(stream *Stream) {
-	var sessionId uint16
-	var tunnels uint8
-	var sess *Session
-	var leases []*Lease
-	var err error
-
 	// This is the critical message we're debugging - log prominently
 	Info(">>> RECEIVED RequestVariableLeaseSet (type 37) - router is requesting LeaseSet publication!")
 
-	Debug("Received RequestVariableLeaseSet message.")
-	sessionId, err = stream.ReadUint16()
+	sessionId, tunnels, err := readVariableLeaseHeader(stream)
 	if err != nil {
-		Error("Failed to read session ID from RequestVariableLeaseSet: %v", err)
-		return
-	}
-	tunnels, err = stream.ReadByte()
-	if err != nil {
-		Error("Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
 		return
 	}
 
-	// Record that we received the LeaseSet request
-	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-		c.stateTracker.RecordLeaseSetReceived(sessionId, tunnels)
-		c.stateTracker.SetState(sessionId, SessionStateLeaseSetRequested, fmt.Sprintf("tunnels=%d", tunnels))
-	}
+	c.recordLeaseSetRequest(sessionId, tunnels)
 
-	c.lock.Lock()
-	sess = c.sessions[sessionId]
-	c.lock.Unlock()
-	if sess == nil {
-		Error("Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
+	sess, err := c.getSessionForVariableLease(sessionId)
+	if err != nil {
 		return
 	}
-	leases = make([]*Lease, tunnels)
-	for i := uint8(0); i < tunnels; i++ {
-		leases[i], err = NewLeaseFromStream(stream)
-		if err != nil {
-			Error("Failed to parse lease %d/%d for session %d: %v", i+1, tunnels, sessionId, err)
-			return
-		}
+
+	leases, err := parseVariableLeases(stream, sessionId, tunnels)
+	if err != nil {
+		return
 	}
-	Debug("Parsed %d leases for session %d", tunnels, sessionId)
 
 	// Store leases in session for use in CreateLeaseSet2
 	sess.mu.Lock()
@@ -1389,6 +1365,57 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
 		c.stateTracker.SetState(sessionId, SessionStateLeaseSetSent, "CreateLeaseSet2 sent")
 	}
+}
+
+// readVariableLeaseHeader reads the session ID and tunnel count from RequestVariableLeaseSet.
+func readVariableLeaseHeader(stream *Stream) (uint16, uint8, error) {
+	sessionId, err := stream.ReadUint16()
+	if err != nil {
+		Error("Failed to read session ID from RequestVariableLeaseSet: %v", err)
+		return 0, 0, err
+	}
+	tunnels, err := stream.ReadByte()
+	if err != nil {
+		Error("Failed to read tunnel count from RequestVariableLeaseSet: %v", err)
+		return sessionId, 0, err
+	}
+	return sessionId, tunnels, nil
+}
+
+// recordLeaseSetRequest updates state tracker when a LeaseSet request is received.
+func (c *Client) recordLeaseSetRequest(sessionId uint16, tunnels uint8) {
+	Debug("Received RequestVariableLeaseSet message.")
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		c.stateTracker.RecordLeaseSetReceived(sessionId, tunnels)
+		c.stateTracker.SetState(sessionId, SessionStateLeaseSetRequested, fmt.Sprintf("tunnels=%d", tunnels))
+	}
+}
+
+// getSessionForVariableLease retrieves the session for a RequestVariableLeaseSet message.
+func (c *Client) getSessionForVariableLease(sessionId uint16) (*Session, error) {
+	c.lock.Lock()
+	sess := c.sessions[sessionId]
+	c.lock.Unlock()
+	if sess == nil {
+		Error("Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
+		return nil, fmt.Errorf("session not found")
+	}
+	return sess, nil
+}
+
+// parseVariableLeases parses all leases from a RequestVariableLeaseSet message.
+func parseVariableLeases(stream *Stream, sessionId uint16, tunnels uint8) ([]*Lease, error) {
+	leases := make([]*Lease, tunnels)
+	for i := uint8(0); i < tunnels; i++ {
+		lease, err := NewLeaseFromStream(stream)
+		if err != nil {
+			Error("Failed to parse lease %d/%d for session %d: %v", i+1, tunnels, sessionId, err)
+			return nil, err
+		}
+		leases[i] = lease
+	}
+	Debug("Parsed %d leases for session %d", tunnels, sessionId)
+	return leases, nil
 }
 
 func (c *Client) onMsgHostReply(stream *Stream) {
@@ -2774,7 +2801,18 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 
-	// Clear pending messages to prevent memory leaks
+	cleanupSessionPendingMessages(sess)
+	cleanupSessionContext(sess)
+	cleanupSessionReferences(sess)
+	cleanupSessionLeases(sess)
+	markSessionClosed(sess)
+	closeSessionDestroyConfirmedChannel(sess)
+
+	Debug("Subsession %d cleanup complete", sess.id)
+}
+
+// cleanupSessionPendingMessages clears pending messages from a session.
+func cleanupSessionPendingMessages(sess *Session) {
 	if sess.pendingMessages != nil {
 		pendingCount := len(sess.pendingMessages)
 		if pendingCount > 0 {
@@ -2782,12 +2820,17 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 		}
 		sess.pendingMessages = nil
 	}
+}
 
-	// Cancel the session's context to signal any waiting goroutines
+// cleanupSessionContext cancels the session's context if it exists.
+func cleanupSessionContext(sess *Session) {
 	if sess.cancel != nil {
 		sess.cancel()
 	}
+}
 
+// cleanupSessionReferences clears references to other sessions and keys.
+func cleanupSessionReferences(sess *Session) {
 	// Clear the reference to primary session to allow GC
 	sess.primarySession = nil
 
@@ -2798,15 +2841,21 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 	sess.blindingScheme = 0
 	sess.blindingFlags = 0
 	sess.blindingParams = nil
+}
 
-	// Clear leases
+// cleanupSessionLeases clears the session's lease set.
+func cleanupSessionLeases(sess *Session) {
 	sess.leases = nil
+}
 
-	// Mark session as closed
+// markSessionClosed marks the session as closed and records the time.
+func markSessionClosed(sess *Session) {
 	sess.closed = true
 	sess.closedAt = time.Now()
+}
 
-	// Close destroyConfirmed channel if it exists and is open
+// closeSessionDestroyConfirmedChannel closes the destroyConfirmed channel if open.
+func closeSessionDestroyConfirmedChannel(sess *Session) {
 	if sess.destroyConfirmed != nil {
 		select {
 		case <-sess.destroyConfirmed:
@@ -2815,8 +2864,6 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 			close(sess.destroyConfirmed)
 		}
 	}
-
-	Debug("Subsession %d cleanup complete", sess.id)
 }
 
 // cleanupSubsessionFromMap removes a subsession from the client's sessions map.

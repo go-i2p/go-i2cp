@@ -258,35 +258,58 @@ func (sst *SessionStateTracker) DiagnosticReport() string {
 	}
 
 	for sessionID, state := range sst.states {
-		report += fmt.Sprintf("\nSession %d: %s\n", sessionID, state)
-
-		// Show timestamps for each state
-		if timestamps, exists := sst.stateTimestamps[sessionID]; exists {
-			report += "  State Timeline:\n"
-			for s, ts := range timestamps {
-				report += fmt.Sprintf("    %s: %v\n", s, ts.Format(time.RFC3339))
-			}
-		}
-
-		// Show history
-		if history, exists := sst.stateHistory[sessionID]; exists && len(history) > 0 {
-			report += "  Transition History:\n"
-			for _, trans := range history {
-				if trans.From == trans.To && trans.From == 0 {
-					report += fmt.Sprintf("    -> %s (%s) at %v\n",
-						trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
-				} else {
-					report += fmt.Sprintf("    %s -> %s (%s) at %v\n",
-						trans.From, trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
-				}
-			}
-		}
+		report += formatSessionDiagnostic(sessionID, state)
+		report += formatStateTimestamps(sst, sessionID)
+		report += formatStateHistory(sst, sessionID)
 	}
 
 	// Add LeaseSet wait info
 	report += "\n" + sst.GetLeaseSetWaitDiagnostics()
 
 	return report
+}
+
+// formatSessionDiagnostic formats the basic session information for diagnostic report.
+func formatSessionDiagnostic(sessionID uint16, state SessionState) string {
+	return fmt.Sprintf("\nSession %d: %s\n", sessionID, state)
+}
+
+// formatStateTimestamps formats state timestamps for a session in the diagnostic report.
+func formatStateTimestamps(sst *SessionStateTracker, sessionID uint16) string {
+	timestamps, exists := sst.stateTimestamps[sessionID]
+	if !exists {
+		return ""
+	}
+
+	report := "  State Timeline:\n"
+	for s, ts := range timestamps {
+		report += fmt.Sprintf("    %s: %v\n", s, ts.Format(time.RFC3339))
+	}
+	return report
+}
+
+// formatStateHistory formats state transition history for a session in the diagnostic report.
+func formatStateHistory(sst *SessionStateTracker, sessionID uint16) string {
+	history, exists := sst.stateHistory[sessionID]
+	if !exists || len(history) == 0 {
+		return ""
+	}
+
+	report := "  Transition History:\n"
+	for _, trans := range history {
+		report += formatTransition(trans)
+	}
+	return report
+}
+
+// formatTransition formats a single state transition for the diagnostic report.
+func formatTransition(trans StateTransition) string {
+	if trans.From == trans.To && trans.From == 0 {
+		return fmt.Sprintf("    -> %s (%s) at %v\n",
+			trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
+	}
+	return fmt.Sprintf("    %s -> %s (%s) at %v\n",
+		trans.From, trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
 }
 
 // ProtocolDebugger provides enhanced protocol debugging capabilities.
@@ -637,34 +660,50 @@ func (c *Client) EnableDebugging(config *DebugConfig) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if config.EnableMessageStats {
-		if c.messageStats == nil {
-			c.messageStats = NewMessageStats()
-		}
-		c.messageStats.Enable()
-	}
-
-	if config.EnableStateTracking {
-		if c.stateTracker == nil {
-			c.stateTracker = NewSessionStateTracker()
-		}
-		c.stateTracker.Enable()
-	}
-
-	if config.EnableProtocolDebug {
-		if c.protocolDebugger == nil {
-			c.protocolDebugger = NewProtocolDebugger()
-		}
-		if config.DumpDirectory != "" {
-			c.protocolDebugger.SetDumpDir(config.DumpDirectory)
-		}
-		c.protocolDebugger.Enable()
-	}
+	enableMessageStats(c, config.EnableMessageStats)
+	enableStateTracking(c, config.EnableStateTracking)
+	enableProtocolDebug(c, config.EnableProtocolDebug, config.DumpDirectory)
 
 	Info("I2CP debugging enabled: stats=%v, state=%v, protocol=%v",
 		config.EnableMessageStats, config.EnableStateTracking, config.EnableProtocolDebug)
 
 	return nil
+}
+
+// enableMessageStats enables or prepares message statistics tracking.
+func enableMessageStats(c *Client, enable bool) {
+	if !enable {
+		return
+	}
+	if c.messageStats == nil {
+		c.messageStats = NewMessageStats()
+	}
+	c.messageStats.Enable()
+}
+
+// enableStateTracking enables or prepares session state tracking.
+func enableStateTracking(c *Client, enable bool) {
+	if !enable {
+		return
+	}
+	if c.stateTracker == nil {
+		c.stateTracker = NewSessionStateTracker()
+	}
+	c.stateTracker.Enable()
+}
+
+// enableProtocolDebug enables or prepares protocol debugging with optional dump directory.
+func enableProtocolDebug(c *Client, enable bool, dumpDir string) {
+	if !enable {
+		return
+	}
+	if c.protocolDebugger == nil {
+		c.protocolDebugger = NewProtocolDebugger()
+	}
+	if dumpDir != "" {
+		c.protocolDebugger.SetDumpDir(dumpDir)
+	}
+	c.protocolDebugger.Enable()
 }
 
 // DisableAllDebugging disables all debugging features.

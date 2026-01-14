@@ -173,39 +173,60 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	// This is because Java reads the wire format, extracts keys per certificate, then re-serializes
 	// with extracted key sizes for signature verification.
 
-	// TEST: Try signing with PADDED format (same as wire) to see if router expects that
+	dataToSign := buildSessionDataToSign(config)
+	configTimestamp := getSessionTimestamp(config, client)
+	config.date = configTimestamp
+
+	signature, err := buildSessionSignature(config, dataToSign, configTimestamp, crypto)
+	if err != nil {
+		return
+	}
+
+	wireMessage := buildSessionWireMessage(config, configTimestamp)
+	stream.Write(wireMessage.Bytes())
+	stream.Write(signature)
+
+	Debug("Complete CreateSession message: %d bytes", stream.Len())
+}
+
+// buildSessionDataToSign constructs the data to be signed for session config.
+func buildSessionDataToSign(config *SessionConfig) *Stream {
 	dataToSign := NewStream(make([]byte, 0, 512))
 	Debug("dataToSign initial length: %d", dataToSign.Len())
 
 	if err := config.destination.WriteToMessage(dataToSign); err != nil {
 		Fatal("Failed to write destination to dataToSign: %v", err)
-		return
+		return dataToSign
 	}
 	Debug("dataToSign after destination: %d bytes (first 32: %x)", dataToSign.Len(), dataToSign.Bytes()[:min(32, dataToSign.Len())])
 
 	if err := config.writeMappingToMessage(dataToSign); err != nil {
 		Fatal("Failed to write mapping to dataToSign: %v", err)
-		return
+		return dataToSign
 	}
 	Debug("dataToSign after mapping: %d bytes", dataToSign.Len())
 
-	// Get timestamp
-	var configTimestamp uint64
+	return dataToSign
+}
+
+// getSessionTimestamp retrieves the session timestamp, synchronized with router time if available.
+func getSessionTimestamp(config *SessionConfig, client *Client) uint64 {
 	if client != nil {
 		client.routerTimeMu.RLock()
-		configTimestamp = uint64(time.Now().Unix()*1000 + client.routerTimeDelta)
-		client.routerTimeMu.RUnlock()
+		defer client.routerTimeMu.RUnlock()
+		configTimestamp := uint64(time.Now().Unix()*1000 + client.routerTimeDelta)
 		Debug("Using router-synchronized timestamp: %d (delta: %d ms)", configTimestamp, client.routerTimeDelta)
-	} else {
-		configTimestamp = uint64(time.Now().Unix() * 1000)
-		Warning("No client provided, using unsynchronized local time")
+		return configTimestamp
 	}
-	config.date = configTimestamp
+	Warning("No client provided, using unsynchronized local time")
+	return uint64(time.Now().Unix() * 1000)
+}
 
-	// Step 2: Add timestamp to signature data and sign it
+// buildSessionSignature creates and returns the signature for session config data.
+func buildSessionSignature(config *SessionConfig, dataToSign *Stream, timestamp uint64, crypto *Crypto) ([]byte, error) {
 	signatureData := NewStream(make([]byte, 0, 512))
 	signatureData.Write(dataToSign.Bytes())
-	signatureData.WriteUint64(configTimestamp)
+	signatureData.WriteUint64(timestamp)
 
 	Debug("Session config data to sign: %d bytes", signatureData.Len())
 	if signatureData.Len() > 0 {
@@ -217,39 +238,39 @@ func (config *SessionConfig) writeToMessage(stream *Stream, crypto *Crypto, clie
 	signature, err := config.signSessionConfig(signatureData.Bytes(), crypto)
 	if err != nil {
 		Fatal("Failed to sign session config: %v", err)
-		return
+		return nil, err
 	}
 	Debug("Generated signature: %d bytes, hex: %x", len(signature), signature)
 
-	// Log the public key for debugging (signature data available via Debug logging above)
+	// Log the public key for debugging
 	if config.destination.sgk.ed25519KeyPair != nil {
 		pubKey := config.destination.sgk.ed25519KeyPair.PublicKey()
 		Debug("Signing public key (%d bytes): %x", len(pubKey), pubKey[:])
 	}
 
-	// Step 3: Write WIRE MESSAGE with FULL padded Destination format
-	// This is what the router will actually read over I2CP
+	return signature, nil
+}
+
+// buildSessionWireMessage constructs the wire message for the router with destination, mapping, and timestamp.
+func buildSessionWireMessage(config *SessionConfig, timestamp uint64) *Stream {
 	wireMessage := NewStream(make([]byte, 0, 512))
 	if err := config.destination.WriteToMessage(wireMessage); err != nil {
 		Fatal("Failed to write destination to wire message: %v", err)
-		return
+		return wireMessage
 	}
 
 	if err := config.writeMappingToMessage(wireMessage); err != nil {
 		Fatal("Failed to write mapping to wire message: %v", err)
-		return
+		return wireMessage
 	}
 
-	wireMessage.WriteUint64(configTimestamp)
+	wireMessage.WriteUint64(timestamp)
 
 	Debug("Wire message for router (%d bytes): %x", wireMessage.Len(), wireMessage.Bytes())
 	Debug("Wire message first 32 bytes: %x", wireMessage.Bytes()[:min(32, wireMessage.Len())])
 	Debug("Wire message last 32 bytes: %x", wireMessage.Bytes()[max(0, wireMessage.Len()-32):])
 
-	stream.Write(wireMessage.Bytes())
-	stream.Write(signature)
-
-	Debug("Complete CreateSession message: %d bytes", stream.Len())
+	return wireMessage
 }
 
 // min returns the minimum of two integers
