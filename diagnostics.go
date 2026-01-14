@@ -171,38 +171,58 @@ func (ms *MessageStats) DiagnosticReport() string {
 	duration := time.Since(ms.startTime)
 	report := fmt.Sprintf("=== I2CP Diagnostic Report (tracking for %v) ===\n\n", duration)
 
-	// Check if CreateSession was sent
+	report += formatCreateSessionDiagnostic(ms)
+	report += formatSessionStatusDiagnostic(ms)
+	report += formatMessageFlowDiagnostic(ms)
+
+	return report
+}
+
+// formatCreateSessionDiagnostic formats diagnostic information about CreateSession messages.
+func formatCreateSessionDiagnostic(ms *MessageStats) string {
 	createSent := ms.sent[I2CP_MSG_CREATE_SESSION]
 	if createSent == 0 {
-		report += "❌ ISSUE: No CreateSession message sent\n"
-		report += "   → CreateSession must be sent before expecting SessionCreated response\n\n"
-	} else {
-		report += fmt.Sprintf("✓ CreateSession sent: %d time(s)\n", createSent)
-		if lastSent, exists := ms.lastSent[I2CP_MSG_CREATE_SESSION]; exists {
-			report += fmt.Sprintf("  Last sent: %v (%v ago)\n", lastSent.Format(time.RFC3339), time.Since(lastSent))
-		}
-		report += "\n"
+		return "❌ ISSUE: No CreateSession message sent\n" +
+			"   → CreateSession must be sent before expecting SessionCreated response\n\n"
 	}
 
-	// Check if SessionStatus was received
+	report := fmt.Sprintf("✓ CreateSession sent: %d time(s)\n", createSent)
+	if lastSent, exists := ms.lastSent[I2CP_MSG_CREATE_SESSION]; exists {
+		report += fmt.Sprintf("  Last sent: %v (%v ago)\n", lastSent.Format(time.RFC3339), time.Since(lastSent))
+	}
+	report += "\n"
+	return report
+}
+
+// formatSessionStatusDiagnostic formats diagnostic information about SessionStatus messages.
+func formatSessionStatusDiagnostic(ms *MessageStats) string {
+	createSent := ms.sent[I2CP_MSG_CREATE_SESSION]
 	statusReceived := ms.received[I2CP_MSG_SESSION_STATUS]
+
 	if createSent > 0 && statusReceived == 0 {
-		report += "❌ ISSUE: SessionStatus response not received\n"
-		report += "   Possible causes:\n"
-		report += "   1. Router not responding (check router logs)\n"
-		report += "   2. ProcessIO not running (must be started before CreateSession)\n"
-		report += "   3. Network/connection issue\n"
-		report += "   4. Router rejected session (would show in router logs)\n\n"
-	} else if statusReceived > 0 {
-		report += fmt.Sprintf("✓ SessionStatus received: %d time(s)\n", statusReceived)
-		if lastRecv, exists := ms.lastReceived[I2CP_MSG_SESSION_STATUS]; exists {
-			report += fmt.Sprintf("  Last received: %v (%v ago)\n", lastRecv.Format(time.RFC3339), time.Since(lastRecv))
-		}
-		report += "\n"
+		return "❌ ISSUE: SessionStatus response not received\n" +
+			"   Possible causes:\n" +
+			"   1. Router not responding (check router logs)\n" +
+			"   2. ProcessIO not running (must be started before CreateSession)\n" +
+			"   3. Network/connection issue\n" +
+			"   4. Router rejected session (would show in router logs)\n\n"
 	}
 
-	// Check message flow
-	report += fmt.Sprintf("Message Flow:\n")
+	if statusReceived == 0 {
+		return ""
+	}
+
+	report := fmt.Sprintf("✓ SessionStatus received: %d time(s)\n", statusReceived)
+	if lastRecv, exists := ms.lastReceived[I2CP_MSG_SESSION_STATUS]; exists {
+		report += fmt.Sprintf("  Last received: %v (%v ago)\n", lastRecv.Format(time.RFC3339), time.Since(lastRecv))
+	}
+	report += "\n"
+	return report
+}
+
+// formatMessageFlowDiagnostic formats diagnostic information about overall message flow.
+func formatMessageFlowDiagnostic(ms *MessageStats) string {
+	report := fmt.Sprintf("Message Flow:\n")
 	report += fmt.Sprintf("  Sent:     %d messages (%d bytes)\n", ms.totalSent(), ms.bytesSent)
 	report += fmt.Sprintf("  Received: %d messages (%d bytes)\n", ms.totalReceived(), ms.bytesReceived)
 

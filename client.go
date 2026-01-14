@@ -2274,36 +2274,62 @@ func (c *Client) msgGetDate(queue bool) {
 }
 
 func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
-	var err error
 	Info(">>> SENDING CreateSessionMessage to router")
 
-	// Track state - session pending
-	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-		// Use 0 as placeholder until we get the real session ID
-		c.stateTracker.SetState(0, SessionStatePending, "CreateSession being sent")
-	}
+	recordCreateSessionState(c)
 
 	// Build the session config message first (this sets config.date)
 	c.messageStream.Reset()
 	config.writeToMessage(c.messageStream, c.crypto, c)
 
-	// Dump CreateSession message for debugging
-	if c.protocolDebugger != nil && c.protocolDebugger.IsEnabled() {
-		msgBytes := c.messageStream.Bytes()
-		// Calculate component sizes from the message
-		// Format: Destination(391) + Mapping(variable) + Date(8) + Signature(64 for Ed25519)
-		destSize := 391 // Fixed size for Destination with certificate
-		sigSize := 64   // Ed25519 signature size
-		mappingSize := len(msgBytes) - destSize - 8 - sigSize
-		if mappingSize < 0 {
-			mappingSize = 0
-		}
-		c.protocolDebugger.DumpCreateSessionMessage(msgBytes, destSize, mappingSize, config.date, sigSize)
+	dumpCreateSessionMessage(c, c.messageStream, config)
+
+	// Validate timestamp skew
+	if err := validateCreateSessionTimestamp(c, config); err != nil {
+		return err
 	}
 
-	// SPEC COMPLIANCE: Validate session config date per I2CP § CreateSessionMessage
-	// "If the Date in the Session Config is too far (more than +/- 30 seconds) from the
-	// router's current time, the session will be rejected."
+	// Log detailed message info
+	Info("CreateSession message: %d bytes, timestamp: %d (%v)",
+		c.messageStream.Len(), config.date, time.UnixMilli(int64(config.date)).Format(time.RFC3339))
+
+	if err := c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
+		Error("Error while sending CreateSessionMessage.")
+		return err
+	}
+	Info("<<< CreateSessionMessage sent successfully, awaiting SessionStatus response")
+	Debug("<<< CreateSessionMessage sent successfully, awaiting SessionCreated response")
+	return nil
+}
+
+// recordCreateSessionState records the pending session state in the state tracker.
+func recordCreateSessionState(c *Client) {
+	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
+		// Use 0 as placeholder until we get the real session ID
+		c.stateTracker.SetState(0, SessionStatePending, "CreateSession being sent")
+	}
+}
+
+// dumpCreateSessionMessage dumps the CreateSession message for debugging if enabled.
+func dumpCreateSessionMessage(c *Client, messageStream *Stream, config *SessionConfig) {
+	if c.protocolDebugger == nil || !c.protocolDebugger.IsEnabled() {
+		return
+	}
+
+	msgBytes := messageStream.Bytes()
+	// Calculate component sizes from the message
+	// Format: Destination(391) + Mapping(variable) + Date(8) + Signature(64 for Ed25519)
+	destSize := 391 // Fixed size for Destination with certificate
+	sigSize := 64   // Ed25519 signature size
+	mappingSize := len(msgBytes) - destSize - 8 - sigSize
+	if mappingSize < 0 {
+		mappingSize = 0
+	}
+	c.protocolDebugger.DumpCreateSessionMessage(msgBytes, destSize, mappingSize, config.date, sigSize)
+}
+
+// validateCreateSessionTimestamp validates the session config timestamp against router time.
+func validateCreateSessionTimestamp(c *Client, config *SessionConfig) error {
 	c.routerTimeMu.RLock()
 	routerTimeDelta := c.routerTimeDelta
 	c.routerTimeMu.RUnlock()
@@ -2329,18 +2355,7 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 				configDate, skew)
 		}
 	}
-
-	// Log detailed message info
-	Info("CreateSession message: %d bytes, timestamp: %d (%v)",
-		c.messageStream.Len(), config.date, time.UnixMilli(int64(config.date)).Format(time.RFC3339))
-
-	if err = c.sendMessage(I2CP_MSG_CREATE_SESSION, c.messageStream, queue); err != nil {
-		Error("Error while sending CreateSessionMessage.")
-		return err
-	}
-	Info("<<< CreateSessionMessage sent successfully, awaiting SessionStatus response")
-	Debug("<<< CreateSessionMessage sent successfully, awaiting SessionCreated response")
-	return err
+	return nil
 }
 
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
