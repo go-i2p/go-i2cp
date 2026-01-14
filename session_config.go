@@ -433,17 +433,32 @@ func (config *SessionConfig) HasOfflineSignature() bool {
 //
 // Returns nil if the configuration is valid or if offline signing is not configured.
 func (config *SessionConfig) ValidateOfflineSignature() error {
-	exp := config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION)
-	key := config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY)
-	sig := config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE)
+	exp, key, sig := config.getOfflineSignatureProperties()
 
-	// Check for partial configuration (must be all or none)
-	hasExp := exp != ""
-	hasKey := key != ""
-	hasSig := sig != ""
+	if err := config.validateOfflinePropertiesPresence(exp, key, sig); err != nil {
+		return err
+	}
+
+	if exp == "" {
+		return nil // Offline signing not configured - valid
+	}
+
+	return config.validateOfflinePropertyValues(exp, key, sig)
+}
+
+// getOfflineSignatureProperties retrieves all offline signature related properties.
+func (config *SessionConfig) getOfflineSignatureProperties() (exp, key, sig string) {
+	exp = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION)
+	key = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY)
+	sig = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE)
+	return
+}
+
+// validateOfflinePropertiesPresence ensures all or none of the offline properties are set.
+func (config *SessionConfig) validateOfflinePropertiesPresence(exp, key, sig string) error {
+	hasExp, hasKey, hasSig := exp != "", key != "", sig != ""
 
 	if !hasExp && !hasKey && !hasSig {
-		// Offline signing not configured - valid
 		return nil
 	}
 
@@ -452,31 +467,50 @@ func (config *SessionConfig) ValidateOfflineSignature() error {
 			"(i2cp.leaseSetOfflineExpiration, i2cp.leaseSetTransientPublicKey, " +
 			"i2cp.leaseSetOfflineSignature) must be set together")
 	}
+	return nil
+}
 
-	// Validate expiration timestamp
+// validateOfflinePropertyValues validates the format and values of offline signature properties.
+func (config *SessionConfig) validateOfflinePropertyValues(exp, key, sig string) error {
+	expTimestamp, err := config.validateExpirationTimestamp(exp)
+	if err != nil {
+		return err
+	}
+
+	if err := validateBase64Property(key, "transient public key"); err != nil {
+		return err
+	}
+
+	if err := validateBase64Property(sig, "offline signature"); err != nil {
+		return err
+	}
+
+	now := uint32(time.Now().Unix())
+	Debug("Offline signature validation passed: expires=%d, %d seconds remaining",
+		expTimestamp, expTimestamp-now)
+
+	return nil
+}
+
+// validateExpirationTimestamp parses and validates the expiration timestamp.
+func (config *SessionConfig) validateExpirationTimestamp(exp string) (uint32, error) {
 	expTimestamp, err := strconv.ParseUint(exp, 10, 32)
 	if err != nil {
-		return fmt.Errorf("invalid offline expiration timestamp: %w", err)
+		return 0, fmt.Errorf("invalid offline expiration timestamp: %w", err)
 	}
 
 	now := uint32(time.Now().Unix())
 	if uint32(expTimestamp) <= now {
-		return fmt.Errorf("offline signature expired: expiration %d <= current time %d", expTimestamp, now)
+		return 0, fmt.Errorf("offline signature expired: expiration %d <= current time %d", expTimestamp, now)
 	}
+	return uint32(expTimestamp), nil
+}
 
-	// Validate base64 encoding of transient key
-	if _, err := base64.StdEncoding.DecodeString(key); err != nil {
-		return fmt.Errorf("invalid base64 encoding for transient public key: %w", err)
+// validateBase64Property validates that a property value is valid base64 encoding.
+func validateBase64Property(value, propertyName string) error {
+	if _, err := base64.StdEncoding.DecodeString(value); err != nil {
+		return fmt.Errorf("invalid base64 encoding for %s: %w", propertyName, err)
 	}
-
-	// Validate base64 encoding of signature
-	if _, err := base64.StdEncoding.DecodeString(sig); err != nil {
-		return fmt.Errorf("invalid base64 encoding for offline signature: %w", err)
-	}
-
-	Debug("Offline signature validation passed: expires=%d, %d seconds remaining",
-		expTimestamp, uint32(expTimestamp)-now)
-
 	return nil
 }
 

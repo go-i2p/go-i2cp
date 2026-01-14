@@ -86,43 +86,64 @@ func (ml *MetaLease) WriteToStream(stream *Stream) error {
 func ReadMetaLeaseFromStream(stream *Stream) (*MetaLease, error) {
 	ml := &MetaLease{}
 
-	// Read 32-byte hash
-	n, err := stream.Read(ml.Hash[:])
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease hash: %w", err)
-	}
-	if n != 32 {
-		return nil, fmt.Errorf("incomplete MetaLease hash: got %d bytes, expected 32", n)
+	if err := readMetaLeaseHash(stream, ml); err != nil {
+		return nil, err
 	}
 
-	// Read 3-byte flags (big-endian)
-	b0, err := stream.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease flags byte 0: %w", err)
-	}
-	b1, err := stream.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease flags byte 1: %w", err)
-	}
-	b2, err := stream.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease flags byte 2: %w", err)
-	}
-	ml.Flags = (uint32(b0) << 16) | (uint32(b1) << 8) | uint32(b2)
-
-	// Read 1-byte cost
-	ml.Cost, err = stream.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease cost: %w", err)
+	if err := readMetaLeaseFlags(stream, ml); err != nil {
+		return nil, err
 	}
 
-	// Read 4-byte end date
-	ml.EndDate, err = stream.ReadUint32()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MetaLease end date: %w", err)
+	if err := readMetaLeaseCostAndEndDate(stream, ml); err != nil {
+		return nil, err
 	}
 
 	return ml, nil
+}
+
+// readMetaLeaseHash reads the 32-byte hash from the stream.
+func readMetaLeaseHash(stream *Stream, ml *MetaLease) error {
+	n, err := stream.Read(ml.Hash[:])
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease hash: %w", err)
+	}
+	if n != 32 {
+		return fmt.Errorf("incomplete MetaLease hash: got %d bytes, expected 32", n)
+	}
+	return nil
+}
+
+// readMetaLeaseFlags reads the 3-byte flags from the stream.
+func readMetaLeaseFlags(stream *Stream, ml *MetaLease) error {
+	b0, err := stream.ReadByte()
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease flags byte 0: %w", err)
+	}
+	b1, err := stream.ReadByte()
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease flags byte 1: %w", err)
+	}
+	b2, err := stream.ReadByte()
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease flags byte 2: %w", err)
+	}
+	ml.Flags = (uint32(b0) << 16) | (uint32(b1) << 8) | uint32(b2)
+	return nil
+}
+
+// readMetaLeaseCostAndEndDate reads the cost and end date fields.
+func readMetaLeaseCostAndEndDate(stream *Stream, ml *MetaLease) error {
+	var err error
+	ml.Cost, err = stream.ReadByte()
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease cost: %w", err)
+	}
+
+	ml.EndDate, err = stream.ReadUint32()
+	if err != nil {
+		return fmt.Errorf("failed to read MetaLease end date: %w", err)
+	}
+	return nil
 }
 
 // MetaLeaseSetConfig holds the configuration for creating a MetaLeaseSet.

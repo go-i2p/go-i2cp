@@ -1941,40 +1941,20 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 // msgCreateLeaseSet2 sends CreateLeaseSet2Message (type 41) for modern LeaseSet creation
 // per I2CP specification 0.9.39+ - supports LS2/EncryptedLS/MetaLS with modern crypto
 func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool) error {
-	// Version check: CreateLeaseSet2 requires router 0.9.39+
-	if !c.SupportsVersion(VersionCreateLeaseSet2) {
-		return fmt.Errorf("router version %s does not support CreateLeaseSet2 (requires %s+)",
-			c.router.version.String(), VersionCreateLeaseSet2.String())
+	if err := c.checkLeaseSet2Support(); err != nil {
+		return err
 	}
 
 	Debug("Sending CreateLeaseSet2Message for session %d with %d leases", session.id, leaseCount)
 
-	// Generate X25519 encryption key pair for this session if not already present
-	if session.encryptionKeyPair == nil {
-		keyPair, err := NewX25519KeyPair()
-		if err != nil {
-			return fmt.Errorf("failed to generate X25519 encryption key pair: %w", err)
-		}
-		session.encryptionKeyPair = keyPair
-		Debug("Generated X25519 encryption key pair for session %d", session.id)
+	if err := c.ensureSessionEncryptionKeyPair(session); err != nil {
+		return err
 	}
 
 	leaseSet := NewStream(make([]byte, 0, 4096))
 	dest := session.config.destination
 
-	c.messageStream.Reset()
-	c.messageStream.WriteUint16(session.id)
-
-	// Write LeaseSet type byte to message stream (per I2CP spec, router reads this BEFORE the LeaseSet)
-	var leaseSetType uint8
-	if session.IsBlindingEnabled() {
-		leaseSetType = LEASESET_TYPE_ENCRYPTED
-		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
-	} else {
-		leaseSetType = LEASESET_TYPE_STANDARD
-		Debug("Creating standard LeaseSet2 for session %d", session.id)
-	}
-	c.messageStream.WriteByte(leaseSetType)
+	c.prepareLeaseSet2Header(session)
 
 	if err := c.buildLeaseSet2Content(session, leaseSet, dest, leaseCount); err != nil {
 		return err
@@ -1986,6 +1966,48 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 
 	Debug("Successfully sent CreateLeaseSet2Message for session %d", session.id)
 	return nil
+}
+
+// checkLeaseSet2Support verifies the router supports CreateLeaseSet2 messages.
+func (c *Client) checkLeaseSet2Support() error {
+	if !c.SupportsVersion(VersionCreateLeaseSet2) {
+		return fmt.Errorf("router version %s does not support CreateLeaseSet2 (requires %s+)",
+			c.router.version.String(), VersionCreateLeaseSet2.String())
+	}
+	return nil
+}
+
+// ensureSessionEncryptionKeyPair generates an X25519 encryption key pair if not present.
+func (c *Client) ensureSessionEncryptionKeyPair(session *Session) error {
+	if session.encryptionKeyPair != nil {
+		return nil
+	}
+	keyPair, err := NewX25519KeyPair()
+	if err != nil {
+		return fmt.Errorf("failed to generate X25519 encryption key pair: %w", err)
+	}
+	session.encryptionKeyPair = keyPair
+	Debug("Generated X25519 encryption key pair for session %d", session.id)
+	return nil
+}
+
+// prepareLeaseSet2Header writes the session ID and LeaseSet type to the message stream.
+func (c *Client) prepareLeaseSet2Header(session *Session) {
+	c.messageStream.Reset()
+	c.messageStream.WriteUint16(session.id)
+
+	leaseSetType := c.determineLeaseSetType(session)
+	c.messageStream.WriteByte(leaseSetType)
+}
+
+// determineLeaseSetType returns the appropriate LeaseSet type based on blinding configuration.
+func (c *Client) determineLeaseSetType(session *Session) uint8 {
+	if session.IsBlindingEnabled() {
+		Debug("Creating encrypted LeaseSet2 with blinding for session %d", session.id)
+		return LEASESET_TYPE_ENCRYPTED
+	}
+	Debug("Creating standard LeaseSet2 for session %d", session.id)
+	return LEASESET_TYPE_STANDARD
 }
 
 // buildLeaseSet2Content constructs the complete LeaseSet2 content including header, timestamps, flags, properties, encryption keys, leases, and blinding parameters.
@@ -2955,38 +2977,55 @@ func (c *Client) cleanupSubsessionFromMap(sessionID uint16) {
 // Per I2CP § Destroying Subsessions: "Destroying the primary session will,
 // however, destroy all subsessions and stop the I2CP connection."
 func (c *Client) cascadeCloseSubsessions(primaryID uint16) {
+	subsessions := c.collectSubsessions(primaryID)
+	c.closeSubsessionList(subsessions)
+	c.removeSubsessionsFromMap(primaryID)
+}
+
+// collectSubsessions gathers all subsessions associated with a primary session.
+func (c *Client) collectSubsessions(primaryID uint16) []*Session {
 	c.lock.Lock()
-	// Collect subsessions to close
+	defer c.lock.Unlock()
+
 	var subsessions []*Session
 	for id, sess := range c.sessions {
 		if id != primaryID && !sess.isPrimary {
 			subsessions = append(subsessions, sess)
 		}
 	}
-	c.lock.Unlock()
+	return subsessions
+}
 
-	// Close each subsession (this will remove them from the map)
+// closeSubsessionList marks each subsession as closed and dispatches status.
+func (c *Client) closeSubsessionList(subsessions []*Session) {
 	for _, sess := range subsessions {
 		Debug("cascadeCloseSubsessions: closing subsession %d", sess.id)
-		sess.mu.Lock()
-		if !sess.closed {
-			sess.closed = true
-			sess.closedAt = time.Now()
-		}
-		sess.mu.Unlock()
+		c.markSubsessionClosed(sess)
 		sess.dispatchStatus(I2CP_SESSION_STATUS_DESTROYED)
 	}
+}
 
-	// Remove all subsessions from the map
+// markSubsessionClosed marks a single subsession as closed with timestamp.
+func (c *Client) markSubsessionClosed(sess *Session) {
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if !sess.closed {
+		sess.closed = true
+		sess.closedAt = time.Now()
+	}
+}
+
+// removeSubsessionsFromMap removes all subsessions from the sessions map.
+func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	for id := range c.sessions {
 		if id != primaryID {
 			delete(c.sessions, id)
 		}
 	}
-	// Clear primarySessionID since we're destroying the primary
 	c.primarySessionID = nil
-	c.lock.Unlock()
 }
 
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.

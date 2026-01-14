@@ -105,31 +105,39 @@ func wrapSessionCallbacks(sess *Session, sessionCreated chan<- error) {
 // wrapClientDisconnectCallback wraps the client's OnDisconnect callback to catch router disconnects
 // during session creation. Returns a function to restore the original callback.
 func wrapClientDisconnectCallback(c *Client, sessionCreated chan<- error) func() {
-	var originalOnDisconnect func(*Client, string, *interface{})
-
-	if c.callbacks != nil {
-		originalOnDisconnect = c.callbacks.OnDisconnect
-		c.callbacks.OnDisconnect = func(client *Client, reason string, opaque *interface{}) {
-			// Call original callback if present
-			if originalOnDisconnect != nil {
-				originalOnDisconnect(client, reason, opaque)
-			}
-
-			// Signal session creation failure due to disconnect
-			Debug("CreateSessionSync: Router disconnected during session creation: %s", reason)
-			select {
-			case sessionCreated <- fmt.Errorf("router disconnected during session creation: %s", reason):
-			default:
-				// Channel already has a value, ignore
-			}
-		}
+	if c.callbacks == nil {
+		return func() {}
 	}
 
-	// Return function to restore original callback
+	originalOnDisconnect := c.callbacks.OnDisconnect
+	c.callbacks.OnDisconnect = createDisconnectWrapper(originalOnDisconnect, sessionCreated)
+
 	return func() {
-		if c.callbacks != nil {
-			c.callbacks.OnDisconnect = originalOnDisconnect
-		}
+		c.callbacks.OnDisconnect = originalOnDisconnect
+	}
+}
+
+// createDisconnectWrapper creates a wrapped disconnect callback that signals session creation failures.
+func createDisconnectWrapper(original func(*Client, string, *interface{}), sessionCreated chan<- error) func(*Client, string, *interface{}) {
+	return func(client *Client, reason string, opaque *interface{}) {
+		invokeOriginalDisconnect(original, client, reason, opaque)
+		signalDisconnectError(sessionCreated, reason)
+	}
+}
+
+// invokeOriginalDisconnect calls the original disconnect callback if present.
+func invokeOriginalDisconnect(original func(*Client, string, *interface{}), client *Client, reason string, opaque *interface{}) {
+	if original != nil {
+		original(client, reason, opaque)
+	}
+}
+
+// signalDisconnectError signals session creation failure due to disconnect.
+func signalDisconnectError(sessionCreated chan<- error, reason string) {
+	Debug("CreateSessionSync: Router disconnected during session creation: %s", reason)
+	select {
+	case sessionCreated <- fmt.Errorf("router disconnected during session creation: %s", reason):
+	default:
 	}
 }
 
