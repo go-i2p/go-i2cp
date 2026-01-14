@@ -705,46 +705,47 @@ func parsePayloadHeader(stream *Stream) (protocol uint8, srcPort, destPort uint1
 func (c *Client) onMsgPayload(stream *Stream) {
 	Debug("Received PayloadMessage message")
 
-	// Step 1: Read MessagePayloadMessage header (session ID, message ID)
 	session, err := c.readPayloadMessageHeader(stream)
 	if err != nil {
 		Error("Failed to read payload message header: %v", err)
 		return
 	}
 
-	// Step 2: Read payload size and extract gzip header info (protocol, ports)
 	protocol, srcPort, destPort, gzipData, err := c.readPayloadWithGzipHeader(stream)
 	if err != nil {
 		Error("Failed to read payload with gzip header: %v", err)
 		return
 	}
 
-	// Step 3: Decompress the gzip payload
 	payload, err := c.decompressGzipPayload(gzipData)
 	if err != nil {
 		Error("Failed to decompress payload: %v", err)
 		return
 	}
 
-	// Step 4: For repliable datagrams (protocol 17), parse source Destination from decompressed payload
-	// For other protocols (streaming=6, raw=18, etc.), source destination is not available at this layer
-	var srcDest *Destination
-	if protocol == 17 { // Repliable datagram - source destination is in payload
-		srcDest, payload, err = c.parseRepliableDatagramPayload(payload)
-		if err != nil {
-			Error("Failed to parse repliable datagram: %v", err)
-			return
-		}
-		Debug("Message from source: %s", srcDest.Base32())
-	} else {
-		// For streaming (6), raw datagrams (18), and custom protocols,
-		// source destination is not embedded in payload at I2CP layer
-		Debug("Received payload with protocol %d (no embedded source destination)", protocol)
+	srcDest, payload, err := c.extractSourceDestination(protocol, payload)
+	if err != nil {
+		Error("Failed to parse source destination: %v", err)
+		return
 	}
 
-	// Step 5: Dispatch to session
 	Debug("Dispatching message payload: protocol=%d, srcPort=%d, destPort=%d, size=%d", protocol, srcPort, destPort, payload.Len())
 	session.dispatchMessage(srcDest, protocol, srcPort, destPort, &Stream{payload})
+}
+
+// extractSourceDestination extracts source destination for repliable datagrams.
+func (c *Client) extractSourceDestination(protocol uint8, payload *bytes.Buffer) (*Destination, *bytes.Buffer, error) {
+	if protocol != 17 {
+		Debug("Received payload with protocol %d (no embedded source destination)", protocol)
+		return nil, payload, nil
+	}
+
+	srcDest, newPayload, err := c.parseRepliableDatagramPayload(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	Debug("Message from source: %s", srcDest.Base32())
+	return srcDest, newPayload, nil
 }
 
 // readPayloadMessageHeader reads session ID and message ID from MessagePayloadMessage.
@@ -776,42 +777,58 @@ func (c *Client) readPayloadMessageHeader(stream *Stream) (*Session, error) {
 // readPayloadWithGzipHeader reads the payload and extracts protocol/port info from gzip header.
 // Per I2CP spec: Payload = 4-byte length + gzip data (with ports in gzip mtime, protocol in gzip OS field)
 func (c *Client) readPayloadWithGzipHeader(stream *Stream) (protocol uint8, srcPort, destPort uint16, gzipData []byte, err error) {
+	gzipData, err = c.readGzipPayloadData(stream)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+
+	if err := validateGzipHeaderBytes(gzipData); err != nil {
+		return 0, 0, 0, nil, err
+	}
+
+	protocol, srcPort, destPort = extractI2CPFieldsFromGzip(gzipData)
+	return protocol, srcPort, destPort, gzipData, nil
+}
+
+// readGzipPayloadData reads the complete gzip payload from the stream.
+func (c *Client) readGzipPayloadData(stream *Stream) ([]byte, error) {
 	payloadSize, err := stream.ReadUint32()
 	if err != nil {
-		return 0, 0, 0, nil, fmt.Errorf("failed to read payload size: %w", err)
+		return nil, fmt.Errorf("failed to read payload size: %w", err)
 	}
 
 	if payloadSize == 0 {
-		return 0, 0, 0, nil, fmt.Errorf("empty payload")
+		return nil, fmt.Errorf("empty payload")
 	}
 
-	// Read entire gzip payload
-	gzipData = make([]byte, payloadSize)
+	gzipData := make([]byte, payloadSize)
 	n, err := stream.Read(gzipData)
 	if err != nil {
-		return 0, 0, 0, nil, fmt.Errorf("failed to read gzip payload: %w", err)
+		return nil, fmt.Errorf("failed to read gzip payload: %w", err)
 	}
 	if uint32(n) != payloadSize {
-		return 0, 0, 0, nil, fmt.Errorf("incomplete payload read: got %d, expected %d", n, payloadSize)
+		return nil, fmt.Errorf("incomplete payload read: got %d, expected %d", n, payloadSize)
 	}
+	return gzipData, nil
+}
 
-	// Validate gzip header (bytes 0-2: 0x1F 0x8B 0x08)
+// validateGzipHeaderBytes checks that the gzip header is valid.
+func validateGzipHeaderBytes(gzipData []byte) error {
 	if len(gzipData) < 10 {
-		return 0, 0, 0, nil, fmt.Errorf("gzip data too short: %d bytes", len(gzipData))
+		return fmt.Errorf("gzip data too short: %d bytes", len(gzipData))
 	}
 	if gzipData[0] != 0x1f || gzipData[1] != 0x8b || gzipData[2] != 0x08 {
-		return 0, 0, 0, nil, fmt.Errorf("invalid gzip header: %x %x %x", gzipData[0], gzipData[1], gzipData[2])
+		return fmt.Errorf("invalid gzip header: %x %x %x", gzipData[0], gzipData[1], gzipData[2])
 	}
+	return nil
+}
 
-	// Extract I2CP fields from gzip header:
-	// Bytes 4-5: Source port (little-endian, in gzip mtime field)
-	// Bytes 6-7: Dest port (little-endian, in gzip mtime field)
-	// Byte 9: Protocol (in gzip OS field)
+// extractI2CPFieldsFromGzip extracts protocol and port info from gzip header fields.
+func extractI2CPFieldsFromGzip(gzipData []byte) (protocol uint8, srcPort, destPort uint16) {
 	srcPort = binary.LittleEndian.Uint16(gzipData[4:6])
 	destPort = binary.LittleEndian.Uint16(gzipData[6:8])
 	protocol = gzipData[9]
-
-	return protocol, srcPort, destPort, gzipData, nil
+	return
 }
 
 // decompressGzipPayload decompresses gzip data and returns the payload.
@@ -913,46 +930,58 @@ func (c *Client) onMsgStatus(stream *Stream) {
 }
 
 func (c *Client) onMsgDestReply(stream *Stream) {
-	var b32 string
-	var destination *Destination
-	var lup LookupEntry
-	var err error
-	var requestId uint32
 	Debug("Received DestReply message.")
-	if stream.Len() != 32 {
-		destination, err = NewDestinationFromMessage(stream, c.crypto)
-		if err != nil {
-			Fatal("Failed to construct destination from stream")
-		}
-		b32 = destination.b32
-	} else {
-		// Use common/base32 for I2P-specific base32 encoding
-		b32Encoded := base32.EncodeToString(stream.Bytes())
-		b32 = b32Encoded + ".b32.i2p"
-		Debug("Could not resolve destination")
+
+	destination, b32, err := c.parseDestReplyPayload(stream)
+	if err != nil {
+		Fatal("Failed to construct destination from stream")
+		return
 	}
 
-	// Use two-value map access to verify lookup exists before using result
+	requestId, lup, err := c.lookupDestinationRequest(b32)
+	if err != nil {
+		Warning("%v", err)
+		return
+	}
+
+	lup.session.dispatchDestination(requestId, b32, destination)
+}
+
+// parseDestReplyPayload extracts destination and base32 address from DestReply message.
+func (c *Client) parseDestReplyPayload(stream *Stream) (*Destination, string, error) {
+	if stream.Len() != 32 {
+		destination, err := NewDestinationFromMessage(stream, c.crypto)
+		if err != nil {
+			return nil, "", err
+		}
+		return destination, destination.b32, nil
+	}
+
+	b32Encoded := base32.EncodeToString(stream.Bytes())
+	b32 := b32Encoded + ".b32.i2p"
+	Debug("Could not resolve destination")
+	return nil, b32, nil
+}
+
+// lookupDestinationRequest retrieves and removes pending lookup entries for a destination.
+func (c *Client) lookupDestinationRequest(b32 string) (uint32, LookupEntry, error) {
 	requestId, found := c.lookup[b32]
 	if !found {
-		Warning("No pending lookup found for address '%s'", b32)
-		return
+		return 0, LookupEntry{}, fmt.Errorf("no pending lookup found for address '%s'", b32)
 	}
 	delete(c.lookup, b32)
 
 	lup, lupFound := c.lookupReq[requestId]
 	if !lupFound {
-		Warning("No lookup entry found for request ID %d (address '%s')", requestId, b32)
-		return
+		return 0, LookupEntry{}, fmt.Errorf("no lookup entry found for request ID %d (address '%s')", requestId, b32)
 	}
 	delete(c.lookupReq, requestId)
 
 	if lup.session == nil {
-		Warning("Lookup entry for '%s' has nil session", b32)
-		return
+		return 0, LookupEntry{}, fmt.Errorf("lookup entry for '%s' has nil session", b32)
 	}
 
-	lup.session.dispatchDestination(requestId, b32, destination)
+	return requestId, lup, nil
 }
 
 // onMsgReceiveMessageBegin handles deprecated ReceiveMessageBeginMessage (type 6)
@@ -1241,60 +1270,74 @@ func readSessionStatusMessage(stream *Stream) (sessionID uint16, sessionStatus u
 // handleSessionCreated processes the SESSION_STATUS_CREATED message and registers the session.
 // This includes primary/subsession tracking and session map registration.
 func (c *Client) handleSessionCreated(sessionID uint16, sessionStatus uint8) {
-	if c.currentSession == nil {
-		Error("Received session status created without waiting for it %p", c)
-		return
-	}
-
-	// CRITICAL FIX: I2CP spec § Session ID - Validate session ID is not 0xFFFF
-	if sessionID == I2CP_SESSION_ID_NONE {
-		Error("Router assigned reserved session ID 0xFFFF - spec violation")
+	if err := c.validateSessionCreation(sessionID); err != nil {
+		Error("%v", err)
 		return
 	}
 
 	c.currentSession.id = sessionID
 	Debug("Assigned session ID %d to session %p", sessionID, c.currentSession)
 
-	// CRITICAL FIX: Register session in map BEFORE dispatching callback
-	c.lock.Lock()
+	sess := c.registerNewSession(sessionID)
+	c.trackSessionCreatedState(sessionID)
 
-	// MAJOR FIX: Multi-session tracking per I2CP spec § Multi-Session (as of 0.9.21)
+	Info(">>> Session %d CREATED - now waiting for RequestVariableLeaseSet (type 37) from router...", sessionID)
+	Debug(">>> Session %d created successfully, invoking OnStatus callback with SESSION_STATUS_CREATED", sessionID)
+	sess.dispatchStatus(SessionStatus(sessionStatus))
+}
+
+// validateSessionCreation checks preconditions for session creation.
+func (c *Client) validateSessionCreation(sessionID uint16) error {
+	if c.currentSession == nil {
+		return fmt.Errorf("received session status created without waiting for it %p", c)
+	}
+	if sessionID == I2CP_SESSION_ID_NONE {
+		return fmt.Errorf("router assigned reserved session ID 0xFFFF - spec violation")
+	}
+	return nil
+}
+
+// registerNewSession registers the session in the sessions map and configures primary/subsession relationship.
+func (c *Client) registerNewSession(sessionID uint16) *Session {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.configurePrimarySubsession(sessionID)
+
+	c.sessions[sessionID] = c.currentSession
+	sess := c.currentSession
+	c.currentSession = nil
+	return sess
+}
+
+// configurePrimarySubsession sets up primary/subsession tracking per I2CP spec.
+func (c *Client) configurePrimarySubsession(sessionID uint16) {
 	if c.primarySessionID == nil {
-		// This is the first session - mark as primary
 		id := sessionID
 		c.primarySessionID = &id
 		c.currentSession.isPrimary = true
 		c.currentSession.primarySession = nil
 		Debug("Session %d is primary session", sessionID)
+		return
+	}
+
+	c.currentSession.isPrimary = false
+	if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
+		c.currentSession.primarySession = primarySess
+		Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
 	} else {
-		// This is a subsession - link to primary
-		c.currentSession.isPrimary = false
-		if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
-			c.currentSession.primarySession = primarySess
-			Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
-		} else {
-			Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
-		}
+		Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
 	}
+}
 
-	// Register the session
-	c.sessions[sessionID] = c.currentSession
-	sess := c.currentSession
-	c.currentSession = nil
-	c.lock.Unlock()
-
-	// Track session state - now awaiting RequestVariableLeaseSet
-	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
-		c.stateTracker.SetState(sessionID, SessionStateCreated, "SessionStatus CREATED received")
-		c.stateTracker.SetState(sessionID, SessionStateAwaitingLeaseSet, "waiting for RequestVariableLeaseSet")
-		// Start tracking how long we wait for RequestVariableLeaseSet
-		c.stateTracker.StartLeaseSetWait(sessionID, 120*time.Second) // 2 minute timeout
+// trackSessionCreatedState updates state tracker for newly created session.
+func (c *Client) trackSessionCreatedState(sessionID uint16) {
+	if c.stateTracker == nil || !c.stateTracker.IsEnabled() {
+		return
 	}
-
-	Info(">>> Session %d CREATED - now waiting for RequestVariableLeaseSet (type 37) from router...", sessionID)
-	Debug(">>> Session %d created successfully, invoking OnStatus callback with SESSION_STATUS_CREATED", sessionID)
-	// Now dispatch status callback - session is already registered
-	sess.dispatchStatus(SessionStatus(sessionStatus))
+	c.stateTracker.SetState(sessionID, SessionStateCreated, "SessionStatus CREATED received")
+	c.stateTracker.SetState(sessionID, SessionStateAwaitingLeaseSet, "waiting for RequestVariableLeaseSet")
+	c.stateTracker.StartLeaseSetWait(sessionID, 120*time.Second)
 }
 
 // handleNonCreatedStatus processes status updates for existing sessions or rejected session creation.
