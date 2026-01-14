@@ -448,21 +448,36 @@ func (pd *ProtocolDebugger) DumpCreateSessionMessage(data []byte, destSize, mapp
 		return
 	}
 
-	// Create file path
 	ts := time.Now().Format("20060102-150405.000")
+	filePath := pd.writeCreateSessionBinary(ts, data)
+	pd.writeCreateSessionBreakdown(ts, data, destSize, mappingSize, timestamp, sigSize)
+	pd.recordCreateSessionDump(data, destSize, mappingSize, timestamp, sigSize, filePath)
+}
+
+// writeCreateSessionBinary writes the raw binary CreateSession message to a file.
+func (pd *ProtocolDebugger) writeCreateSessionBinary(ts string, data []byte) string {
 	filename := fmt.Sprintf("CreateSession-%s.bin", ts)
 	filePath := filepath.Join(pd.dumpDir, filename)
-
-	// Write to file
 	if err := os.WriteFile(filePath, data, 0644); err != nil {
 		Error("Failed to dump CreateSession message: %v", err)
 	} else {
 		Info("CreateSession message dumped to: %s", filePath)
 	}
+	return filePath
+}
 
-	// Also write a human-readable breakdown
+// writeCreateSessionBreakdown writes a human-readable breakdown of the message.
+func (pd *ProtocolDebugger) writeCreateSessionBreakdown(ts string, data []byte, destSize, mappingSize int, timestamp uint64, sigSize int) {
 	breakdownFile := filepath.Join(pd.dumpDir, fmt.Sprintf("CreateSession-%s-breakdown.txt", ts))
-	breakdown := fmt.Sprintf(`CreateSession Message Breakdown
+	breakdown := formatCreateSessionBreakdown(data, destSize, mappingSize, timestamp, sigSize)
+	if err := os.WriteFile(breakdownFile, []byte(breakdown), 0644); err != nil {
+		Error("Failed to write breakdown file: %v", err)
+	}
+}
+
+// formatCreateSessionBreakdown formats the breakdown content for a CreateSession message.
+func formatCreateSessionBreakdown(data []byte, destSize, mappingSize int, timestamp uint64, sigSize int) string {
+	return fmt.Sprintf(`CreateSession Message Breakdown
 ================================
 Timestamp: %v
 Total Size: %d bytes
@@ -488,12 +503,10 @@ Full Hex:
 		hex.Dump(data[:min(512, len(data))]),
 		hex.EncodeToString(data),
 	)
+}
 
-	if err := os.WriteFile(breakdownFile, []byte(breakdown), 0644); err != nil {
-		Error("Failed to write breakdown file: %v", err)
-	}
-
-	// Record dump info
+// recordCreateSessionDump records the dump info in memory for later retrieval.
+func (pd *ProtocolDebugger) recordCreateSessionDump(data []byte, destSize, mappingSize int, timestamp uint64, sigSize int, filePath string) {
 	dump := CreateSessionDump{
 		Timestamp:       time.Now(),
 		TotalSize:       len(data),

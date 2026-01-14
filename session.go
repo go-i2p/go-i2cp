@@ -335,44 +335,38 @@ func (session *Session) Close() error {
 
 	Debug("Closing session %d", session.id)
 
-	// Try to send destroy message to router (may fail if not connected)
 	messageSent := session.sendDestroyMessage()
 	session.cleanupResources()
+	session.markClosed()
 
-	// Mark as closed while holding lock
-	session.closed = true
-	session.closedAt = time.Now()
-
-	// Cache values before releasing lock
-	client := session.client
-	sessionID := session.id
-	isPrimary := session.isPrimary
-
-	// Release lock BEFORE dispatching callback to avoid deadlock
-	// (callback may try to access session fields which acquire the lock)
+	client, sessionID, isPrimary := session.client, session.id, session.isPrimary
 	session.mu.Unlock()
 
-	// Handle cleanup when message couldn't be sent
-	if client != nil && !messageSent {
-		if isPrimary {
-			// MAJOR-2 FIX: Cascade destruction to subsessions even if message not sent
-			// Per I2CP § Destroying Subsessions: "Destroying the primary session will,
-			// however, destroy all subsessions and stop the I2CP connection."
-			Debug("Close: cascading to subsessions for primary %d (message not sent)", sessionID)
-			client.cascadeCloseSubsessions(sessionID)
-		} else {
-			// MAJOR-2 FIX: Ensure subsession is removed from client's sessions map
-			// even if the destroy message couldn't be sent (e.g., connection closed)
-			// Per I2CP § Destroying Subsessions: cleanup must happen regardless of router communication
-			Debug("Close: cleanup subsession %d (message not sent)", sessionID)
-			client.cleanupSubsessionFromMap(sessionID)
-		}
-	}
-
-	// Dispatch status callback outside the lock
+	session.handlePostCloseCleanup(client, sessionID, isPrimary, messageSent)
 	session.dispatchStatus(I2CP_SESSION_STATUS_DESTROYED)
 
 	return nil
+}
+
+// markClosed marks the session as closed with timestamp.
+func (session *Session) markClosed() {
+	session.closed = true
+	session.closedAt = time.Now()
+}
+
+// handlePostCloseCleanup handles cleanup when destroy message couldn't be sent.
+func (session *Session) handlePostCloseCleanup(client *Client, sessionID uint16, isPrimary, messageSent bool) {
+	if client == nil || messageSent {
+		return
+	}
+
+	if isPrimary {
+		Debug("Close: cascading to subsessions for primary %d (message not sent)", sessionID)
+		client.cascadeCloseSubsessions(sessionID)
+	} else {
+		Debug("Close: cleanup subsession %d (message not sent)", sessionID)
+		client.cleanupSubsessionFromMap(sessionID)
+	}
 }
 
 // sendDestroyMessage sends DestroySession message to router if connected.
@@ -583,7 +577,21 @@ func (session *Session) dispatchStatus(status SessionStatus) {
 // dispatchStatusLocked is the internal version that requires the mutex to be held
 func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	Debug(">>> Dispatching session status %d (%s) to callback for session %d", status, getSessionStatusName(status), session.id)
-	// Log status change with structured logging
+	session.logStatusChange(status)
+
+	if session.callbacks == nil || session.callbacks.OnStatus == nil {
+		Warning("Session %d has no OnStatus callback registered - status change not delivered to application", session.id)
+		return
+	}
+
+	Debug(">>> Invoking OnStatus callback for session %d with status %s", session.id, getSessionStatusName(status))
+	session.executeCallback(func() {
+		session.callbacks.OnStatus(session, status)
+	}, "status")
+}
+
+// logStatusChange logs the session status change with structured logging.
+func (session *Session) logStatusChange(status SessionStatus) {
 	switch status {
 	case I2CP_SESSION_STATUS_CREATED:
 		Info("Session %d created at %v", session.id, session.created)
@@ -596,84 +604,39 @@ func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	default:
 		Warning("Session %d received unknown status %d", session.id, status)
 	}
-
-	if session.callbacks == nil || session.callbacks.OnStatus == nil {
-		Warning("Session %d has no OnStatus callback registered - status change not delivered to application", session.id)
-		return
-	}
-
-	Debug(">>> Invoking OnStatus callback for session %d with status %s", session.id, getSessionStatusName(status))
-
-	// Capture callback reference to prevent race condition if session.callbacks is modified
-	onStatus := session.callbacks.OnStatus
-
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				Error("Panic in status callback for session %d: %v", session.id, r)
-			}
-		}()
-
-		onStatus(session, status)
-	}
-
-	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
-	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
-	}
 }
 
 // dispatchMessageStatus dispatches message delivery status to registered callbacks
 // per I2CP specification - handles MessageStatusMessage (type 22) events with all 23 status codes
 func (session *Session) dispatchMessageStatus(messageId uint32, status SessionMessageStatus, size, nonce uint32) {
-	// Check if session is closed
 	if session.IsClosed() {
 		Warning("Ignoring message status dispatch to closed session %d", session.id)
 		return
 	}
 
-	// Complete tracked message if present
-	pending, wasTracked := session.CompleteMessage(nonce, status)
-	if wasTracked && pending != nil {
-		deliveryTime := pending.CompletedAt.Sub(pending.SentAt)
-		Debug("Message delivery completed for session %d: nonce=%d, delivery_time=%v",
-			session.id, nonce, deliveryTime)
-	}
+	session.completeTrackedMessage(nonce, status)
 
 	if session.callbacks == nil || session.callbacks.OnMessageStatus == nil {
 		Debug("No message status callback registered for session %d", session.id)
 		return
 	}
 
-	// Log message status with detailed information
 	statusName := getMessageStatusName(uint8(status))
 	Debug("Dispatching message status to session %d: messageId=%d, status=%d (%s), size=%d, nonce=%d",
 		session.id, messageId, status, statusName, size, nonce)
 
-	// Capture callback reference to prevent race condition if session.callbacks is modified
-	onMessageStatus := session.callbacks.OnMessageStatus
+	session.executeCallback(func() {
+		session.callbacks.OnMessageStatus(session, messageId, status, size, nonce)
+	}, "message status")
+}
 
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				Error("Panic in message status callback for session %d: %v", session.id, r)
-			}
-		}()
-
-		onMessageStatus(session, messageId, status, size, nonce)
-	}
-
-	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
-	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
+// completeTrackedMessage completes a tracked message and logs delivery time.
+func (session *Session) completeTrackedMessage(nonce uint32, status SessionMessageStatus) {
+	pending, wasTracked := session.CompleteMessage(nonce, status)
+	if wasTracked && pending != nil {
+		deliveryTime := pending.CompletedAt.Sub(pending.SentAt)
+		Debug("Message delivery completed for session %d: nonce=%d, delivery_time=%v",
+			session.id, nonce, deliveryTime)
 	}
 }
 

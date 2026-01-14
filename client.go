@@ -2226,8 +2226,24 @@ func (c *Client) writeLeaseSet2BlindingParams(session *Session, leaseSet *Stream
 func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *Destination, queue bool) error {
 	sgk := &dest.sgk
 
-	// Create data to sign: [type:1][leaseSet content]
-	// The type byte must be included in the signature per LeaseSet2 spec
+	signature, err := c.signLeaseSet2Data(session, leaseSet, sgk)
+	if err != nil {
+		return err
+	}
+
+	c.messageStream.Write(leaseSet.Bytes())
+	c.messageStream.Write(signature)
+	c.writePrivateKeysToMessage(session)
+
+	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
+		Error("Error while sending CreateLeaseSet2Message: %v", err)
+		return fmt.Errorf("failed to send CreateLeaseSet2Message: %w", err)
+	}
+	return nil
+}
+
+// signLeaseSet2Data creates and signs the LeaseSet2 data including the type byte.
+func (c *Client) signLeaseSet2Data(session *Session, leaseSet *Stream, sgk *SignatureKeyPair) ([]byte, error) {
 	var leaseSetType uint8
 	if session.IsBlindingEnabled() {
 		leaseSetType = LEASESET_TYPE_ENCRYPTED
@@ -2235,52 +2251,38 @@ func (c *Client) signAndSendLeaseSet2(session *Session, leaseSet *Stream, dest *
 		leaseSetType = LEASESET_TYPE_STANDARD
 	}
 
-	// Build the signable data: type byte + LeaseSet2 content
 	dataToSign := NewStream(make([]byte, 0, leaseSet.Len()+1))
 	dataToSign.WriteByte(leaseSetType)
 	dataToSign.Write(leaseSet.Bytes())
 
-	// Sign the combined data
 	if err := sgk.ed25519KeyPair.SignStream(dataToSign); err != nil {
 		Error("Failed to sign CreateLeaseSet2: %v", err)
-		return err
+		return nil, err
 	}
 
-	// Get the signature from the end of dataToSign (SignStream appends it)
 	signedData := dataToSign.Bytes()
-	// The signature is the last 64 bytes (Ed25519 signature size)
-	signature := signedData[len(signedData)-64:]
+	return signedData[len(signedData)-64:], nil
+}
 
-	// Write LeaseSet2 content (without type) + signature to message stream
-	c.messageStream.Write(leaseSet.Bytes())
-	c.messageStream.Write(signature)
-
-	// Write private keys after the signed LeaseSet2
-	// I2CP CreateLeaseSet2Message format: [numKeys:1][encType:2][keyLen:2][privKey:keyLen]...
-	if session.encryptionKeyPair != nil {
-		c.messageStream.WriteByte(1) // Number of private keys
-
-		// Write per I2CP spec: [encType:2][keyLen:2][privKey:keyLen]
-		encType := uint16(X25519) // X25519 = 4
-		keyLen := uint16(32)      // X25519 private keys are 32 bytes
-
-		c.messageStream.WriteUint16(encType)
-		c.messageStream.WriteUint16(keyLen)
-
-		privKey := session.encryptionKeyPair.PrivateKey()
-		c.messageStream.Write(privKey[:])
-
-		Debug("Wrote X25519 encryption private key to CreateLeaseSet2Message (type=%d, len=%d), total: %d bytes",
-			encType, keyLen, c.messageStream.Len())
-	} else {
-		c.messageStream.WriteByte(0) // No private keys
+// writePrivateKeysToMessage writes the private encryption keys to the message stream.
+func (c *Client) writePrivateKeysToMessage(session *Session) {
+	if session.encryptionKeyPair == nil {
+		c.messageStream.WriteByte(0)
+		return
 	}
 
-	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET2, c.messageStream, queue); err != nil {
-		Error("Error while sending CreateLeaseSet2Message: %v", err)
-		return fmt.Errorf("failed to send CreateLeaseSet2Message: %w", err)
-	}
-	return nil
+	c.messageStream.WriteByte(1)
+	encType := uint16(X25519)
+	keyLen := uint16(32)
+
+	c.messageStream.WriteUint16(encType)
+	c.messageStream.WriteUint16(keyLen)
+
+	privKey := session.encryptionKeyPair.PrivateKey()
+	c.messageStream.Write(privKey[:])
+
+	Debug("Wrote X25519 encryption private key to CreateLeaseSet2Message (type=%d, len=%d), total: %d bytes",
+		encType, keyLen, c.messageStream.Len())
 }
 
 // getAuthenticationMethod determines which authentication method is being used
@@ -2332,18 +2334,23 @@ func (c *Client) getAuthenticationMethod() uint8 {
 // NOTE: Per-client DH/PSK (methods 3-4) are NOT session auth methods.
 // They are for encrypted LeaseSet access via BlindingInfoMessage.
 func (c *Client) msgGetDate(queue bool) {
-	var err error
 	Debug("Sending GetDateMessage")
 	c.messageStream.Reset()
 	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
 
-	// Determine authentication method (will only return 0, 1, or 2)
+	c.writeAuthenticationMapping()
+
+	if err := c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
+		Error("Error while sending GetDateMessage")
+	}
+}
+
+// writeAuthenticationMapping writes the authentication mapping to the message stream.
+func (c *Client) writeAuthenticationMapping() {
 	authMethod := c.getAuthenticationMethod()
 
-	// Build authentication info mapping based on method
 	switch authMethod {
 	case AUTH_METHOD_USERNAME_PWD:
-		// Method 1: Username/password authentication (I2CP 0.9.11+)
 		authInfo := map[string]string{
 			"i2cp.username": c.properties["i2cp.username"],
 			"i2cp.password": c.properties["i2cp.password"],
@@ -2352,32 +2359,19 @@ func (c *Client) msgGetDate(queue bool) {
 		Debug("Using username/password authentication (method 1)")
 
 	case AUTH_METHOD_SSL_TLS:
-		// Method 2: TLS certificate authentication (I2CP 0.8.3+)
-		// The TLS handshake has already occurred in Connect()
-		// Just indicate the authentication method to the router
 		authInfo := map[string]string{
-			"i2cp.auth.method": "2", // TLS certificate authentication
+			"i2cp.auth.method": "2",
 		}
 		c.messageStream.WriteMapping(authInfo)
 		Debug("Using TLS certificate authentication (method 2)")
 
 	case AUTH_METHOD_NONE:
-		// Method 0: No authentication required
-		// SPEC COMPLIANCE (I2CP 0.9.11+): Send empty mapping for consistency
-		// Per spec: "Authentication [Mapping] (optional, as of release 0.9.11)"
-		// Sending 2-byte empty mapping (0x00 0x00) ensures compatibility with
-		// strict spec-compliant routers that expect the mapping field to be present.
 		c.messageStream.WriteMapping(map[string]string{})
 		Debug("Using no authentication (method 0) - sending empty mapping for 0.9.11+ compliance")
 
 	default:
-		// Should never happen, but handle gracefully with empty mapping for spec compliance
 		Warning("Unknown authentication method %d, using no authentication with empty mapping", authMethod)
 		c.messageStream.WriteMapping(map[string]string{})
-	}
-
-	if err = c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
-		Error("Error while sending GetDateMessage")
 	}
 }
 
@@ -3988,46 +3982,49 @@ func (c *Client) ReconnectAttempts() int {
 // This is called internally when a disconnect is detected and auto-reconnect is enabled.
 // It returns nil if reconnection succeeds, or an error if all retries are exhausted.
 func (c *Client) autoReconnect(ctx context.Context) error {
-	c.reconnectMu.Lock()
-	if !c.reconnectEnabled {
-		c.reconnectMu.Unlock()
-		return fmt.Errorf("auto-reconnect is not enabled")
+	maxRetries, initialBackoff, err := c.getReconnectConfig()
+	if err != nil {
+		return err
 	}
-	maxRetries := c.reconnectMaxRetries
-	initialBackoff := c.reconnectBackoff
-	c.reconnectMu.Unlock()
 
 	Info("Starting auto-reconnect (maxRetries=%d, initialBackoff=%v)", maxRetries, initialBackoff)
 
-	// Use RetryWithBackoff for the reconnection logic
-	err := RetryWithBackoff(ctx, maxRetries, initialBackoff, func() error {
-		c.reconnectMu.Lock()
-		c.reconnectAttempts++
-		attempt := c.reconnectAttempts
-		c.reconnectMu.Unlock()
-
-		Info("Reconnection attempt %d", attempt)
-
-		// Attempt to connect
-		connectErr := c.Connect(ctx)
-		if connectErr != nil {
-			Warning("Reconnection attempt %d failed: %v", attempt, connectErr)
-			return connectErr
-		}
-
-		Info("Reconnection attempt %d succeeded!", attempt)
-
-		// Reset attempt counter on success
-		c.reconnectMu.Lock()
-		c.reconnectAttempts = 0
-		c.reconnectMu.Unlock()
-
-		return nil
-	})
-	if err != nil {
+	if err := RetryWithBackoff(ctx, maxRetries, initialBackoff, c.attemptReconnect); err != nil {
 		Error("Auto-reconnect failed after all retries: %v", err)
 		return fmt.Errorf("auto-reconnect failed: %w", err)
 	}
+	return nil
+}
+
+// getReconnectConfig retrieves reconnection configuration from the client.
+func (c *Client) getReconnectConfig() (int, time.Duration, error) {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
+	if !c.reconnectEnabled {
+		return 0, 0, fmt.Errorf("auto-reconnect is not enabled")
+	}
+	return c.reconnectMaxRetries, c.reconnectBackoff, nil
+}
+
+// attemptReconnect performs a single reconnection attempt.
+func (c *Client) attemptReconnect() error {
+	c.reconnectMu.Lock()
+	c.reconnectAttempts++
+	attempt := c.reconnectAttempts
+	c.reconnectMu.Unlock()
+
+	Info("Reconnection attempt %d", attempt)
+
+	if err := c.Connect(context.Background()); err != nil {
+		Warning("Reconnection attempt %d failed: %v", attempt, err)
+		return err
+	}
+
+	Info("Reconnection attempt %d succeeded!", attempt)
+	c.reconnectMu.Lock()
+	c.reconnectAttempts = 0
+	c.reconnectMu.Unlock()
 
 	return nil
 }
