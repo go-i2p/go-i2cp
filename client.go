@@ -2055,6 +2055,23 @@ func (c *Client) determineLeaseSetType(session *Session) uint8 {
 
 // buildLeaseSet2Content constructs the complete LeaseSet2 content including header, timestamps, flags, properties, encryption keys, leases, and blinding parameters.
 func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest *Destination, leaseCount int) error {
+	if err := c.writeLeaseSet2HeaderAndTimestamps(session, leaseSet, dest); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2FlagsAndProperties(session, leaseSet); err != nil {
+		return err
+	}
+
+	if err := c.writeLeaseSet2KeysAndLeases(session, leaseSet, leaseCount); err != nil {
+		return err
+	}
+
+	return c.writeLeaseSet2BlindingParams(session, leaseSet)
+}
+
+// writeLeaseSet2HeaderAndTimestamps writes the destination and timestamps to the LeaseSet stream.
+func (c *Client) writeLeaseSet2HeaderAndTimestamps(session *Session, leaseSet *Stream, dest *Destination) error {
 	if err := c.writeLeaseSet2Header(session, leaseSet, dest); err != nil {
 		return err
 	}
@@ -2064,7 +2081,11 @@ func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest 
 		return err
 	}
 	Debug("LeaseSet2 after timestamps: %d bytes", leaseSet.Len())
+	return nil
+}
 
+// writeLeaseSet2FlagsAndProperties writes the flags and properties fields to the stream.
+func (c *Client) writeLeaseSet2FlagsAndProperties(session *Session, leaseSet *Stream) error {
 	if err := c.writeLeaseSet2Flags(session, leaseSet); err != nil {
 		return err
 	}
@@ -2075,19 +2096,18 @@ func (c *Client) buildLeaseSet2Content(session *Session, leaseSet *Stream, dest 
 	}
 	Debug("LeaseSet2 after properties: %d bytes", leaseSet.Len())
 	Debug("LeaseSet2 bytes 391-401: %x", leaseSet.Bytes()[391:401])
+	return nil
+}
 
-	// Write encryption public keys (after properties, before leases)
+// writeLeaseSet2KeysAndLeases writes the encryption keys and leases to the stream.
+func (c *Client) writeLeaseSet2KeysAndLeases(session *Session, leaseSet *Stream, leaseCount int) error {
 	if err := c.writeLeaseSet2EncryptionKeys(session, leaseSet); err != nil {
 		return err
 	}
 	Debug("LeaseSet2 after enc keys: %d bytes", leaseSet.Len())
 	Debug("LeaseSet2 bytes 401-436: %x", leaseSet.Bytes()[401:436])
 
-	if err := c.writeLeaseSet2Leases(session, leaseSet, leaseCount); err != nil {
-		return err
-	}
-
-	return c.writeLeaseSet2BlindingParams(session, leaseSet)
+	return c.writeLeaseSet2Leases(session, leaseSet, leaseCount)
 }
 
 // writeLeaseSet2Header writes the destination to the LeaseSet stream.
@@ -3425,25 +3445,37 @@ func (c *Client) validateAndConfigureSubsession(sess *Session) error {
 		return fmt.Errorf("subsession requires a primary session reference")
 	}
 
-	// Check router version supports multi-session (I2CP 0.9.21+)
-	if c.router.version.compare(Version{major: 0, minor: 9, micro: 21, qualifier: 0}) < 0 {
+	if err := c.checkSubsessionRouterVersion(); err != nil {
+		return err
+	}
+
+	inheritPrimarySessionConfig(sess, primary)
+	return nil
+}
+
+// checkSubsessionRouterVersion verifies the router supports multi-session feature (I2CP 0.9.21+).
+func (c *Client) checkSubsessionRouterVersion() error {
+	minVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
+	if c.router.version.compare(minVersion) < 0 {
 		return fmt.Errorf("router version %v does not support multi-session (requires >= 0.9.21)", c.router.version)
 	}
-
-	// Inherit all configuration from primary session
-	// Per Java I2P reference: ClientMessageEventListener.java:280-388
-	// "all the primary options, then the overrides from the alias"
-	if primary.config != nil {
-		for i := SessionConfigProperty(0); i < NR_OF_SESSION_CONFIG_PROPERTIES; i++ {
-			value := primary.config.GetProperty(i)
-			if value != "" {
-				sess.config.SetProperty(i, value)
-			}
-		}
-		Debug("Subsession inherited configuration from primary session %d", primary.ID())
-	}
-
 	return nil
+}
+
+// inheritPrimarySessionConfig copies all configuration properties from the primary to the subsession.
+// Per Java I2P reference: ClientMessageEventListener.java:280-388
+// "all the primary options, then the overrides from the alias"
+func inheritPrimarySessionConfig(sess *Session, primary *Session) {
+	if primary.config == nil {
+		return
+	}
+	for i := SessionConfigProperty(0); i < NR_OF_SESSION_CONFIG_PROPERTIES; i++ {
+		value := primary.config.GetProperty(i)
+		if value != "" {
+			sess.config.SetProperty(i, value)
+		}
+	}
+	Debug("Subsession inherited configuration from primary session %d", primary.ID())
 }
 
 // disableSubsessionTunnels overrides tunnel settings for subsessions to prevent tunnel creation.
@@ -3785,23 +3817,33 @@ func (c *Client) cleanupLookupRequest(requestId uint32) {
 }
 
 func (c *Client) DestinationLookup(ctx context.Context, session *Session, address string) (uint32, error) {
-	if err := c.ensureInitialized(); err != nil {
-		return 0, err
-	}
-
-	if err := validateLookupParameters(ctx, session, address); err != nil {
-		return 0, err
-	}
-
-	if err := c.validateLookupAddress(address); err != nil {
-		return 0, err
-	}
-
-	hashStream, err := decodeB32Address(address)
+	hashStream, err := c.validateAndPrepareLookup(ctx, session, address)
 	if err != nil {
 		return 0, err
 	}
 
+	return c.executeAndRegisterLookup(ctx, session, address, hashStream)
+}
+
+// validateAndPrepareLookup performs all validation checks and prepares the address hash for lookup.
+func (c *Client) validateAndPrepareLookup(ctx context.Context, session *Session, address string) (*Stream, error) {
+	if err := c.ensureInitialized(); err != nil {
+		return nil, err
+	}
+
+	if err := validateLookupParameters(ctx, session, address); err != nil {
+		return nil, err
+	}
+
+	if err := c.validateLookupAddress(address); err != nil {
+		return nil, err
+	}
+
+	return decodeB32Address(address)
+}
+
+// executeAndRegisterLookup registers the lookup request and executes it, with proper cleanup on failure.
+func (c *Client) executeAndRegisterLookup(ctx context.Context, session *Session, address string, hashStream *Stream) (uint32, error) {
 	requestId := c.registerLookupRequest(session, address)
 
 	if err := ctx.Err(); err != nil {

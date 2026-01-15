@@ -104,21 +104,38 @@ func startProcessIOLoop(client *i2cp.Client, ctx context.Context) context.Cancel
 	return cancelProcessIO
 }
 
-// runProcessIOLoop runs the ProcessIO loop.
+// runProcessIOLoop runs the ProcessIO loop until context cancellation or error.
 func runProcessIOLoop(client *i2cp.Client, ctx context.Context) {
 	for {
-		select {
-		case <-ctx.Done():
+		if shouldExitIOLoop(ctx) {
 			return
-		default:
-			if err := client.ProcessIO(ctx); err != nil {
-				if err != context.Canceled {
-					log.Printf("ProcessIO error: %v", err)
-				}
-				return
-			}
+		}
+		if handleProcessIO(client, ctx) {
+			return
 		}
 	}
+}
+
+// shouldExitIOLoop checks if the context is done and the loop should exit.
+func shouldExitIOLoop(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// handleProcessIO executes a single ProcessIO iteration and returns true if the loop should exit.
+func handleProcessIO(client *i2cp.Client, ctx context.Context) bool {
+	err := client.ProcessIO(ctx)
+	if err == nil {
+		return false
+	}
+	if err != context.Canceled {
+		log.Printf("ProcessIO error: %v", err)
+	}
+	return true
 }
 
 // sendCreateSession sends the CreateSession message.

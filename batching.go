@@ -105,15 +105,29 @@ func (c *Client) getBatchTickerChannel() <-chan time.Time {
 // runFlushLoop runs the main flush worker loop until shutdown.
 func (c *Client) runFlushLoop(tickerChan <-chan time.Time) {
 	for {
-		select {
-		case <-c.shutdown:
-			_ = c.flushOutputQueue()
+		if c.handleFlushEvent(tickerChan) {
 			return
-		case <-tickerChan:
-			if err := c.flushOutputQueue(); err != nil {
-				Warning("Batch flush failed: %v", err)
-			}
 		}
+	}
+}
+
+// handleFlushEvent processes a single flush event from the ticker or shutdown channel.
+// Returns true if the loop should exit (shutdown received), false otherwise.
+func (c *Client) handleFlushEvent(tickerChan <-chan time.Time) bool {
+	select {
+	case <-c.shutdown:
+		_ = c.flushOutputQueue()
+		return true
+	case <-tickerChan:
+		c.executeFlush()
+		return false
+	}
+}
+
+// executeFlush performs a flush operation and logs any errors.
+func (c *Client) executeFlush() {
+	if err := c.flushOutputQueue(); err != nil {
+		Warning("Batch flush failed: %v", err)
 	}
 }
 

@@ -212,27 +212,41 @@ func parseMappingData(mappingData []byte) (map[string]string, error) {
 	dataStream := NewStream(mappingData)
 
 	for dataStream.Len() > 0 {
-		key, err := readMappingKey(dataStream)
-		if err != nil {
-			if dataStream.Len() == 0 {
-				break // Normal end of data
-			}
-			return nil, err
-		}
-
-		value, err := readMappingValue(dataStream)
+		done, err := parseSingleMapping(dataStream, result)
 		if err != nil {
 			return nil, err
 		}
-
-		if err := readMappingSeparator(dataStream, ';'); err != nil {
-			return nil, err
+		if done {
+			break
 		}
-
-		result[key] = value
 	}
 
 	return result, nil
+}
+
+// parseSingleMapping reads a single key-value pair from the stream and adds it to the result map.
+// Returns (true, nil) when the stream is exhausted normally, (false, nil) on successful parse,
+// or (false, error) on parse failure.
+func parseSingleMapping(dataStream *Stream, result map[string]string) (bool, error) {
+	key, err := readMappingKey(dataStream)
+	if err != nil {
+		if dataStream.Len() == 0 {
+			return true, nil // Normal end of data
+		}
+		return false, err
+	}
+
+	value, err := readMappingValue(dataStream)
+	if err != nil {
+		return false, err
+	}
+
+	if err := readMappingSeparator(dataStream, ';'); err != nil {
+		return false, err
+	}
+
+	result[key] = value
+	return false, nil
 }
 
 // readMappingKey reads a length-prefixed key and its '=' separator from the stream.
