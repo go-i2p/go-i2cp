@@ -31,32 +31,31 @@ type Session struct {
 	cancel context.CancelFunc
 
 	// Blinding support (I2CP 0.9.43+)
-	// MINOR FIX: Blinding/Offline Signature Limitations Documentation
-	//
-	// These fields store blinding parameters from BlindingInfoMessage, but the
-	// cryptographic operations required to USE them are not yet implemented.
+	// Blinding key derivation is NOW IMPLEMENTED in blinding_crypto.go
 	//
 	// Current Status:
 	//   - ✅ BlindingInfoMessage received and parsed correctly
 	//   - ✅ Blinding parameters stored in session
-	//   - ❌ Blinding key derivation NOT implemented
+	//   - ✅ Blinding key derivation IMPLEMENTED (DeriveBlindingFactor, BlindPublicKey, etc.)
 	//   - ❌ Encrypted LeaseSet decryption NOT implemented
-	//   - ❌ Per-client authentication NOT implemented
+	//   - ❌ Per-client authentication NOT fully integrated
 	//
-	// Impact:
-	//   - Encrypted LeaseSets with DH/PSK authentication will be stored but unusable
-	//   - Applications requiring blinded destinations should verify router.version >= 0.9.43
-	//     AND implement custom crypto using these stored parameters
+	// Implemented Functions (see blinding_crypto.go):
+	//   - DeriveBlindingFactor(secret, date) - HKDF-SHA256 derivation per I2P Proposal 123
+	//   - BlindPublicKey(publicKey, alpha) - Ed25519 point blinding
+	//   - BlindPrivateKey(privateKey, alpha) - Ed25519 scalar blinding
+	//   - UnblindPublicKey(blindedPublicKey, alpha) - Reverse operation
+	//   - DeriveBlindingKeys/DeriveBlindingKeysWithPrivate - Complete derivation
+	//   - Session.DeriveBlindingKeysForDestination(date) - Session helper
 	//
-	// For encrypted LeaseSet access, applications must implement:
-	//   1. Key derivation: crypto.DeriveBlindingKey(blindingParams, privateKey)
-	//   2. LeaseSet decryption: crypto.DecryptLeaseSet2(encryptedLS, derivedKey)
-	//   3. Per-client auth: crypto.AuthenticateClient(blindingScheme, authData)
+	// For encrypted LeaseSet access, applications must still implement:
+	//   1. LeaseSet decryption: crypto.DecryptLeaseSet2(encryptedLS, derivedKey)
+	//   2. Per-client auth integration with BlindingInfoMessage parameters
 	//
 	// See I2CP § BlindingInfoMessage and § Encrypted LeaseSet2 for specifications.
 	blindingScheme uint16 // Blinding cryptographic scheme (0 = disabled, 1 = DH, 2 = PSK)
 	blindingFlags  uint16 // Blinding flags per I2CP spec (bit 0 = per-client auth required)
-	blindingParams []byte // Scheme-specific blinding parameters (NOT CRYPTOGRAPHICALLY PROCESSED)
+	blindingParams []byte // Scheme-specific blinding parameters
 
 	// Encryption key pair for LeaseSet2 (X25519 when i2cp.leaseSetEncType=4)
 	// Generated when creating LeaseSet2 response to RequestVariableLeaseSet
