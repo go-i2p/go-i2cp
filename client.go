@@ -79,7 +79,8 @@ type Client struct {
 	lookupReq       map[uint32]LookupEntry
 	lock            sync.Mutex
 	connected       bool
-	currentSession  *Session // *opaque in the C lib
+	currentSession  *Session      // *opaque in the C lib
+	sessionMu       sync.RWMutex  // Protects currentSession pointer access (CRITICAL: prevents race conditions during session creation)
 	lookupRequestId uint32
 	crypto          *Crypto
 	shutdown        chan struct{}  // Channel to signal shutdown
@@ -1275,20 +1276,30 @@ func (c *Client) handleSessionCreated(sessionID uint16, sessionStatus uint8) {
 		return
 	}
 
-	c.currentSession.id = sessionID
-	Debug("Assigned session ID %d to session %p", sessionID, c.currentSession)
+	// Use sessionMu to protect currentSession access and SetID for thread-safe id assignment
+	c.sessionMu.RLock()
+	sess := c.currentSession
+	c.sessionMu.RUnlock()
 
-	sess := c.registerNewSession(sessionID)
+	sess.SetID(sessionID)
+	Debug("Assigned session ID %d to session %p", sessionID, sess)
+
+	registeredSess := c.registerNewSession(sessionID)
 	c.trackSessionCreatedState(sessionID)
 
 	Info(">>> Session %d CREATED - now waiting for RequestVariableLeaseSet (type 37) from router...", sessionID)
 	Debug(">>> Session %d created successfully, invoking OnStatus callback with SESSION_STATUS_CREATED", sessionID)
-	sess.dispatchStatus(SessionStatus(sessionStatus))
+	registeredSess.dispatchStatus(SessionStatus(sessionStatus))
 }
 
 // validateSessionCreation checks preconditions for session creation.
+// Thread-safe: uses sessionMu to protect currentSession access.
 func (c *Client) validateSessionCreation(sessionID uint16) error {
-	if c.currentSession == nil {
+	c.sessionMu.RLock()
+	currentSess := c.currentSession
+	c.sessionMu.RUnlock()
+
+	if currentSess == nil {
 		return fmt.Errorf("received session status created without waiting for it %p", c)
 	}
 	if sessionID == I2CP_SESSION_ID_NONE {
@@ -1298,32 +1309,77 @@ func (c *Client) validateSessionCreation(sessionID uint16) error {
 }
 
 // registerNewSession registers the session in the sessions map and configures primary/subsession relationship.
+// Thread-safe: uses sessionMu to protect currentSession access and lock for sessions map.
 func (c *Client) registerNewSession(sessionID uint16) *Session {
+	// First, get the current session with sessionMu protection
+	c.sessionMu.Lock()
+	sess := c.currentSession
+	c.currentSession = nil
+	c.sessionMu.Unlock()
+
+	// Then update the sessions map with lock protection
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.configurePrimarySubsession(sessionID)
+	c.configurePrimarySubsessionForSession(sessionID, sess)
 
-	c.sessions[sessionID] = c.currentSession
-	sess := c.currentSession
-	c.currentSession = nil
+	c.sessions[sessionID] = sess
 	return sess
 }
 
-// configurePrimarySubsession sets up primary/subsession tracking per I2CP spec.
-func (c *Client) configurePrimarySubsession(sessionID uint16) {
+// configurePrimarySubsessionForSession sets up primary/subsession tracking per I2CP spec.
+// Takes the session as a parameter to avoid accessing currentSession directly.
+func (c *Client) configurePrimarySubsessionForSession(sessionID uint16, sess *Session) {
 	if c.primarySessionID == nil {
 		id := sessionID
 		c.primarySessionID = &id
-		c.currentSession.isPrimary = true
-		c.currentSession.primarySession = nil
+		sess.SetPrimary(true)
+		sess.mu.Lock()
+		sess.primarySession = nil
+		sess.mu.Unlock()
 		Debug("Session %d is primary session", sessionID)
 		return
 	}
 
-	c.currentSession.isPrimary = false
+	sess.SetPrimary(false)
 	if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
-		c.currentSession.primarySession = primarySess
+		sess.mu.Lock()
+		sess.primarySession = primarySess
+		sess.mu.Unlock()
+		Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
+	} else {
+		Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
+	}
+}
+
+// configurePrimarySubsession sets up primary/subsession tracking per I2CP spec.
+// Deprecated: Use configurePrimarySubsessionForSession instead for thread safety.
+func (c *Client) configurePrimarySubsession(sessionID uint16) {
+	c.sessionMu.RLock()
+	sess := c.currentSession
+	c.sessionMu.RUnlock()
+
+	if sess == nil {
+		Error("configurePrimarySubsession called with nil currentSession")
+		return
+	}
+
+	if c.primarySessionID == nil {
+		id := sessionID
+		c.primarySessionID = &id
+		sess.SetPrimary(true)
+		sess.mu.Lock()
+		sess.primarySession = nil
+		sess.mu.Unlock()
+		Debug("Session %d is primary session", sessionID)
+		return
+	}
+
+	sess.SetPrimary(false)
+	if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
+		sess.mu.Lock()
+		sess.primarySession = primarySess
+		sess.mu.Unlock()
 		Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
 	} else {
 		Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
@@ -1355,8 +1411,13 @@ func (c *Client) handleNonCreatedStatus(sessionID uint16, sessionStatus uint8) {
 }
 
 // handleMissingSession processes status for a session that doesn't exist in the sessions map.
+// Thread-safe: uses sessionMu to protect currentSession access.
 func (c *Client) handleMissingSession(sessionID uint16, sessionStatus uint8) {
-	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && c.currentSession != nil {
+	c.sessionMu.RLock()
+	currentSess := c.currentSession
+	c.sessionMu.RUnlock()
+
+	if SessionStatus(sessionStatus) == I2CP_SESSION_STATUS_DESTROYED && currentSess != nil {
 		c.handleRejectedSession(sessionID, sessionStatus)
 		return
 	}
@@ -1365,15 +1426,20 @@ func (c *Client) handleMissingSession(sessionID uint16, sessionStatus uint8) {
 }
 
 // handleRejectedSession handles the case when the router rejects session creation.
+// Thread-safe: uses sessionMu to protect currentSession access and SetID for thread-safe id assignment.
 func (c *Client) handleRejectedSession(sessionID uint16, sessionStatus uint8) {
 	Debug("Router rejected session creation for sessionID %d (received DESTROYED without CREATED)", sessionID)
 	if c.stateTracker != nil && c.stateTracker.IsEnabled() {
 		c.stateTracker.SetState(sessionID, SessionStateRejected, "session rejected by router")
 	}
 	Error("❌ Session %d REJECTED by router (SessionStatus=DESTROYED without CREATED)", sessionID)
+
+	c.sessionMu.Lock()
 	sess := c.currentSession
-	sess.id = sessionID
 	c.currentSession = nil
+	c.sessionMu.Unlock()
+
+	sess.SetID(sessionID)
 	c.lock.Unlock()
 	sess.dispatchStatus(SessionStatus(sessionStatus))
 }
@@ -3570,12 +3636,15 @@ func (c *Client) configureSessionProperties(sess *Session) error {
 
 // sendSessionCreationRequest sends the CreateSession message to the router and updates metrics.
 // The session status response will be processed asynchronously by ProcessIO.
+// Thread-safe: uses sessionMu to protect currentSession assignment.
 func (c *Client) sendSessionCreationRequest(sess *Session) error {
 	if err := c.msgCreateSession(sess.config, false); err != nil {
 		return fmt.Errorf("failed to send CreateSession message: %w", err)
 	}
 
+	c.sessionMu.Lock()
 	c.currentSession = sess
+	c.sessionMu.Unlock()
 
 	Debug("CreateSession message sent, waiting for SessionCreated response...")
 	Debug("IMPORTANT: Ensure ProcessIO() is running in background to receive response")
