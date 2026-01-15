@@ -142,9 +142,10 @@ client := go_i2cp.NewClient(&go_i2cp.ClientCallbacks{
     OnBandwidthLimits: func(c *go_i2cp.Client, limits *go_i2cp.BandwidthLimits) {
         log.Printf("Bandwidth limits: %s", limits.String())
         
-        // Configure rate limiter
-        inboundRate := float64(limits.InboundBurstKBytesPerSecond * 1024)
-        outboundRate := float64(limits.OutboundBurstKBytesPerSecond * 1024)
+        // Configure rate limiter using router burst limits
+        // RouterInboundBurst and RouterOutboundBurst are in KBps
+        inboundRate := float64(limits.RouterInboundBurst * 1024)
+        outboundRate := float64(limits.RouterOutboundBurst * 1024)
         
         inboundLimiter := rate.NewLimiter(rate.Limit(inboundRate), int(inboundRate))
         outboundLimiter := rate.NewLimiter(rate.Limit(outboundRate), int(outboundRate))
