@@ -3,8 +3,11 @@ package go_i2cp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-i2p/common/base32"
 )
 
 // NewSession creates a new I2CP session with the specified client and callbacks
@@ -807,42 +810,21 @@ func (session *Session) validateLookupRequest(address string) error {
 }
 
 // prepareLookupData determines lookup type and prepares lookup data bytes.
+// Base32 destination hashes are 56 characters and decode to 32 bytes (SHA-256).
 func (session *Session) prepareLookupData(address string) (uint8, []byte, error) {
-	var lookupType uint8
-	var lookupData interface{}
-
-	if len(address) == 64 { // Assume base32 destination hash
-		lookupType = 0 // Hash lookup
-		// TODO: Decode base32 hash
-		lookupData = []byte(address) // Placeholder
-	} else {
-		lookupType = 1 // Hostname lookup
-		lookupData = address
-	}
-
-	lookupDataBytes, err := session.convertLookupData(lookupType, lookupData)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	return lookupType, lookupDataBytes, nil
-}
-
-// convertLookupData converts lookup data to bytes based on lookup type.
-func (session *Session) convertLookupData(lookupType uint8, lookupData interface{}) ([]byte, error) {
-	if lookupType == 0 {
-		// Hash lookup - lookupData should be []byte
-		if data, ok := lookupData.([]byte); ok {
-			return data, nil
+	// Check for base32 destination hash (56 chars without .b32.i2p suffix)
+	// I2P base32 hashes: 32 bytes encoded with padding = 56 chars
+	if len(address) == 56 {
+		// Hash lookup - decode base32 to 32-byte hash
+		decoded, err := base32.DecodeString(strings.ToLower(address))
+		if err != nil {
+			return 0, nil, fmt.Errorf("invalid base32 hash: %w", err)
 		}
-		return nil, fmt.Errorf("invalid lookup data type for hash lookup")
+		return 0, decoded, nil
 	}
 
-	// Hostname lookup - lookupData should be string
-	if data, ok := lookupData.(string); ok {
-		return []byte(data), nil
-	}
-	return nil, fmt.Errorf("invalid lookup data type for hostname lookup")
+	// Hostname lookup
+	return 1, []byte(address), nil
 }
 
 // LookupDestinationWithContext performs a destination lookup with context support
