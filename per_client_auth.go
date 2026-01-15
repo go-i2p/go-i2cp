@@ -348,7 +348,7 @@ func (s *Session) SendBlindingInfoForHostname(
 //   - Code 3: Private key required (per-client auth)
 //   - Code 4: Both password and private key required
 //   - Code 5: Decryption failure (credentials may be incorrect)
-func HandleHostReplyAuthError(errorCode uint8) (message string, action string) {
+func HandleHostReplyAuthError(errorCode uint8) (message, action string) {
 	switch errorCode {
 	case HOST_REPLY_PASSWORD_REQUIRED:
 		return "Encrypted LeaseSet requires lookup password",

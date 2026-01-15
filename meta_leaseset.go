@@ -39,7 +39,7 @@ const (
 //   - leaseSetType: Type of LeaseSet (1=LeaseSet, 3=LeaseSet2, 5=MetaLeaseSet)
 //   - cost: Priority cost (0=highest priority, 255=lowest)
 //   - endDate: Expiration timestamp in seconds since epoch
-func NewMetaLease(hash [32]byte, leaseSetType uint8, cost uint8, endDate uint32) *MetaLease {
+func NewMetaLease(hash [32]byte, leaseSetType, cost uint8, endDate uint32) *MetaLease {
 	return &MetaLease{
 		Hash:    hash,
 		Flags:   uint32(leaseSetType & 0x0F), // Only bits 0-3 are used for type

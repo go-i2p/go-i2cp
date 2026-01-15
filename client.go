@@ -3536,7 +3536,7 @@ func (c *Client) checkSubsessionRouterVersion() error {
 // inheritPrimarySessionConfig copies all configuration properties from the primary to the subsession.
 // Per Java I2P reference: ClientMessageEventListener.java:280-388
 // "all the primary options, then the overrides from the alias"
-func inheritPrimarySessionConfig(sess *Session, primary *Session) {
+func inheritPrimarySessionConfig(sess, primary *Session) {
 	if primary.config == nil {
 		return
 	}

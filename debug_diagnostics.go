@@ -370,7 +370,7 @@ func (pd *ProtocolDebugger) Enable() {
 	pd.enabled = true
 
 	// Create dump directory
-	if err := os.MkdirAll(pd.dumpDir, 0755); err != nil {
+	if err := os.MkdirAll(pd.dumpDir, 0o755); err != nil {
 		Error("Failed to create debug dump directory: %v", err)
 	}
 }
@@ -395,7 +395,7 @@ func (pd *ProtocolDebugger) SetDumpDir(dir string) {
 	defer pd.mu.Unlock()
 	pd.dumpDir = dir
 	if pd.enabled {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			Error("Failed to create debug dump directory: %v", err)
 		}
 	}
@@ -458,7 +458,7 @@ func (pd *ProtocolDebugger) DumpCreateSessionMessage(data []byte, destSize, mapp
 func (pd *ProtocolDebugger) writeCreateSessionBinary(ts string, data []byte) string {
 	filename := fmt.Sprintf("CreateSession-%s.bin", ts)
 	filePath := filepath.Join(pd.dumpDir, filename)
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
 		Error("Failed to dump CreateSession message: %v", err)
 	} else {
 		Info("CreateSession message dumped to: %s", filePath)
@@ -470,7 +470,7 @@ func (pd *ProtocolDebugger) writeCreateSessionBinary(ts string, data []byte) str
 func (pd *ProtocolDebugger) writeCreateSessionBreakdown(ts string, data []byte, destSize, mappingSize int, timestamp uint64, sigSize int) {
 	breakdownFile := filepath.Join(pd.dumpDir, fmt.Sprintf("CreateSession-%s-breakdown.txt", ts))
 	breakdown := formatCreateSessionBreakdown(data, destSize, mappingSize, timestamp, sigSize)
-	if err := os.WriteFile(breakdownFile, []byte(breakdown), 0644); err != nil {
+	if err := os.WriteFile(breakdownFile, []byte(breakdown), 0o644); err != nil {
 		Error("Failed to write breakdown file: %v", err)
 	}
 }
@@ -554,7 +554,7 @@ Raw bytes (%d bytes):
 		pd.disconnectInfo.HexDump,
 	)
 
-	if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filename, []byte(content), 0o644); err != nil {
 		Error("Failed to write disconnect dump: %v", err)
 	}
 

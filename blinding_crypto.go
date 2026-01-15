@@ -96,7 +96,7 @@ func DeriveBlindingFactorWithTimestamp(secret []byte, unixTimestamp int64) ([32]
 // Returns:
 //   - Blinded 32-byte public key
 //   - Error if public key is invalid or alpha is invalid
-func BlindPublicKey(publicKey [32]byte, alpha [32]byte) ([32]byte, error) {
+func BlindPublicKey(publicKey, alpha [32]byte) ([32]byte, error) {
 	return cryptoed25519.BlindPublicKey(publicKey, alpha)
 }
 
@@ -129,7 +129,7 @@ func BlindPrivateKey(privateKey [64]byte, alpha [32]byte) ([64]byte, error) {
 // Returns:
 //   - Original unblinded 32-byte public key
 //   - Error if inputs are invalid
-func UnblindPublicKey(blindedPublicKey [32]byte, alpha [32]byte) ([32]byte, error) {
+func UnblindPublicKey(blindedPublicKey, alpha [32]byte) ([32]byte, error) {
 	return cryptoed25519.UnblindPublicKey(blindedPublicKey, alpha)
 }
 
@@ -271,7 +271,7 @@ func (s *Session) DeriveBlindingKeysForDestination(date string) (*BlindingKeyDer
 //
 // The stored parameters can be retrieved with BlindingParams() and used
 // for key derivation with DeriveBlindingFactor.
-func (s *Session) StoreBlindingInfo(scheme uint16, flags uint16, params []byte) {
+func (s *Session) StoreBlindingInfo(scheme, flags uint16, params []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -302,7 +302,7 @@ func (s *Session) StoreBlindingInfo(scheme uint16, flags uint16, params []byte) 
 // Returns:
 //   - true if the blinded key corresponds to the expected key
 //   - false otherwise
-func VerifyBlindedDestination(blindedPubKey, expectedPubKey [32]byte, alpha [32]byte) bool {
+func VerifyBlindedDestination(blindedPubKey, expectedPubKey, alpha [32]byte) bool {
 	unblinded, err := UnblindPublicKey(blindedPubKey, alpha)
 	if err != nil {
 		return false
