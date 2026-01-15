@@ -52,11 +52,12 @@ type SessionCallbacks struct {
 	//   - nonce: Message nonce (same as messageId)
 	OnMessageStatus func(session *Session, messageId uint32, status SessionMessageStatus, size, nonce uint32)
 
-	// OnLeaseSet2 is called when a modern LeaseSet2 is received from the router.
-	// I2CP 0.9.38+ - Supports standard, encrypted, and meta LeaseSet types.
+	// OnLeaseSet2 is called when the router requests LeaseSet publication via RequestVariableLeaseSetMessage.
+	// I2CP 0.9.38+ - The router provides lease information; the client creates and publishes the LeaseSet2.
+	// Note: This is NOT triggered when receiving a remote destination's LeaseSet - use DestLookup for that.
 	// Parameters:
-	//   - session: The session that received the LeaseSet2
-	//   - leaseSet: The LeaseSet2 structure with destination, leases, and signature
+	//   - session: The session that received the LeaseSet request
+	//   - leaseSet: The LeaseSet2 structure with destination, leases, and signature to publish
 	//
 	// Example:
 	//
