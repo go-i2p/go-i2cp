@@ -69,7 +69,9 @@ session := go_i2cp.NewSession(client, go_i2cp.SessionCallbacks{
         // Handle blinding for encrypted LeaseSets
     },
     OnLeaseSet2: func(sess *go_i2cp.Session, leaseSet *go_i2cp.LeaseSet2) {
-        // Handle LeaseSet updates
+        // Called when YOUR session's LeaseSet2 is published to the network.
+        // NOTE: This is NOT triggered when receiving a remote destination's LeaseSet.
+        // Use DestLookup callbacks (OnDestination) for remote LeaseSet retrieval.
     },
     OnMessageStatusUpdate: func(sess *go_i2cp.Session, messageId, status uint32) {
         // Track message delivery status
