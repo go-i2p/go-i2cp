@@ -2934,7 +2934,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 	// DisconnectMessage. If there are subsessions or primary remains, it does not reply."
 
 	wasPrimary := sess.IsPrimary() // Thread-safe getter
-	sessionID := sess.ID()        // Thread-safe getter
+	sessionID := sess.ID()         // Thread-safe getter
 	Debug("msgDestroySession called for session %d (isPrimary: %v)", sessionID, wasPrimary)
 	cascadeDestroySubsessions(c, sess)
 
@@ -3000,8 +3000,8 @@ func cascadeDestroySubsessions(c *Client, sess *Session) {
 // - Removing the reference to the primary session
 // - Clearing encryption key pairs and blinding parameters
 func cleanupDestroyedSubsession(c *Client, sess *Session) {
-	sessionID := sess.ID()        // Thread-safe getter
-	if sess.IsPrimary() {         // Thread-safe getter
+	sessionID := sess.ID() // Thread-safe getter
+	if sess.IsPrimary() {  // Thread-safe getter
 		// Primary sessions are cleaned up via Close(), not here
 		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sessionID)
 		return
@@ -3157,8 +3157,8 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.
 // Returns an error if the message cannot be sent.
 func sendDestroySessionMessage(c *Client, sess *Session, queue bool) error {
-	sessionID := sess.ID()         // Thread-safe getter
-	isPrimary := sess.IsPrimary()  // Thread-safe getter
+	sessionID := sess.ID()        // Thread-safe getter
+	isPrimary := sess.IsPrimary() // Thread-safe getter
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sessionID)
