@@ -235,8 +235,7 @@ if go_i2cp.IsTemporary(err) {
 
 **🔄 Future Enhancements (Phase 4):**
 
-- DH/PSK authentication (methods 3-4) - Low priority
-- Blinding key derivation and encrypted LeaseSet decryption
+- DH/PSK authentication (methods 3-4) - Implemented, pending integration testing
 - Observability (Prometheus metrics export, OpenTelemetry tracing)
 - MetaLeaseSet support (preliminary spec)
 
