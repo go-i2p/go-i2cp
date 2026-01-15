@@ -79,8 +79,8 @@ type Client struct {
 	lookupReq       map[uint32]LookupEntry
 	lock            sync.Mutex
 	connected       bool
-	currentSession  *Session      // *opaque in the C lib
-	sessionMu       sync.RWMutex  // Protects currentSession pointer access (CRITICAL: prevents race conditions during session creation)
+	currentSession  *Session     // *opaque in the C lib
+	sessionMu       sync.RWMutex // Protects currentSession pointer access (CRITICAL: prevents race conditions during session creation)
 	lookupRequestId uint32
 	crypto          *Crypto
 	shutdown        chan struct{}  // Channel to signal shutdown
@@ -2933,8 +2933,9 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 	// The router never sends SessionStatus(Destroyed). If no sessions are left, it sends
 	// DisconnectMessage. If there are subsessions or primary remains, it does not reply."
 
-	wasPrimary := sess.isPrimary
-	Debug("msgDestroySession called for session %d (isPrimary: %v)", sess.id, wasPrimary)
+	wasPrimary := sess.IsPrimary() // Thread-safe getter
+	sessionID := sess.ID()        // Thread-safe getter
+	Debug("msgDestroySession called for session %d (isPrimary: %v)", sessionID, wasPrimary)
 	cascadeDestroySubsessions(c, sess)
 
 	if err := sendDestroySessionMessage(c, sess, queue); err != nil {
@@ -2954,7 +2955,7 @@ func (c *Client) msgDestroySession(sess *Session, queue bool) error {
 	// Per I2CP § Destroying Subsessions: "A subsession may be destroyed with the DestroySession
 	// message as usual. This will not destroy the primary session or stop the I2CP connection."
 	// We must clean up the subsession's local state and remove it from the sessions map.
-	Debug("Calling cleanupDestroyedSubsession for session %d", sess.id)
+	Debug("Calling cleanupDestroyedSubsession for session %d", sessionID)
 	cleanupDestroyedSubsession(c, sess)
 
 	return nil
@@ -2967,15 +2968,16 @@ func cascadeDestroySubsessions(c *Client, sess *Session) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if !sess.isPrimary {
+	if !sess.IsPrimary() { // Thread-safe getter
 		return
 	}
 
-	Debug("Destroying primary session %d - cascading to all subsessions per I2CP spec", sess.id)
+	sessionID := sess.ID() // Thread-safe getter
+	Debug("Destroying primary session %d - cascading to all subsessions per I2CP spec", sessionID)
 	// Destroy all subsessions first
 	for id, s := range c.sessions {
-		if id != sess.id && !s.isPrimary {
-			Debug("Auto-destroying subsession %d (primary %d being destroyed)", id, sess.id)
+		if id != sessionID && !s.IsPrimary() { // Thread-safe getter
+			Debug("Auto-destroying subsession %d (primary %d being destroyed)", id, sessionID)
 			// Recursive call for subsessions
 			c.lock.Unlock()
 			c.msgDestroySession(s, false)
@@ -2998,18 +3000,19 @@ func cascadeDestroySubsessions(c *Client, sess *Session) {
 // - Removing the reference to the primary session
 // - Clearing encryption key pairs and blinding parameters
 func cleanupDestroyedSubsession(c *Client, sess *Session) {
-	if sess.isPrimary {
+	sessionID := sess.ID()        // Thread-safe getter
+	if sess.IsPrimary() {         // Thread-safe getter
 		// Primary sessions are cleaned up via Close(), not here
-		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sess.id)
+		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sessionID)
 		return
 	}
 
-	Debug("cleanupDestroyedSubsession: Cleaning up destroyed subsession %d", sess.id)
+	Debug("cleanupDestroyedSubsession: Cleaning up destroyed subsession %d", sessionID)
 
 	// Remove from client's sessions map
 	c.lock.Lock()
-	Debug("cleanupDestroyedSubsession: Deleting session %d from sessions map", sess.id)
-	delete(c.sessions, sess.id)
+	Debug("cleanupDestroyedSubsession: Deleting session %d from sessions map", sessionID)
+	delete(c.sessions, sessionID)
 	c.lock.Unlock()
 
 	// Clean up the session's internal state
@@ -3112,7 +3115,7 @@ func (c *Client) collectSubsessions(primaryID uint16) []*Session {
 
 	var subsessions []*Session
 	for id, sess := range c.sessions {
-		if id != primaryID && !sess.isPrimary {
+		if id != primaryID && !sess.IsPrimary() { // Thread-safe getter
 			subsessions = append(subsessions, sess)
 		}
 	}
@@ -3122,7 +3125,7 @@ func (c *Client) collectSubsessions(primaryID uint16) []*Session {
 // closeSubsessionList marks each subsession as closed and dispatches status.
 func (c *Client) closeSubsessionList(subsessions []*Session) {
 	for _, sess := range subsessions {
-		Debug("cascadeCloseSubsessions: closing subsession %d", sess.id)
+		Debug("cascadeCloseSubsessions: closing subsession %d", sess.ID()) // Thread-safe getter
 		c.markSubsessionClosed(sess)
 		sess.dispatchStatus(I2CP_SESSION_STATUS_DESTROYED)
 	}
@@ -3154,9 +3157,11 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.
 // Returns an error if the message cannot be sent.
 func sendDestroySessionMessage(c *Client, sess *Session, queue bool) error {
-	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sess.id, sess.isPrimary)
+	sessionID := sess.ID()         // Thread-safe getter
+	isPrimary := sess.IsPrimary()  // Thread-safe getter
+	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
 	c.messageStream.Reset()
-	c.messageStream.WriteUint16(sess.id)
+	c.messageStream.WriteUint16(sessionID)
 
 	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
 		Error("Error while sending DestroySessionMessage: %v", err)
