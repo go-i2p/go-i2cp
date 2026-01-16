@@ -98,7 +98,7 @@ func parseCertificate(certBytes []byte, certType uint8, length uint16) (cert Cer
 		return
 	}
 
-	cert.cert = &commonCert
+	cert.cert = commonCert
 	cert.certType = certType
 	cert.length = length
 	if length > 0 {
@@ -118,7 +118,7 @@ func (cert *Certificate) Copy() (newCert Certificate) {
 		// Copy using common certificate's bytes
 		certBytes := cert.cert.Bytes()
 		commonCert, _, _ := certificate.ReadCertificate(certBytes)
-		newCert.cert = &commonCert
+		newCert.cert = commonCert
 	}
 	// Copy legacy fields
 	newCert.certType = cert.certType
