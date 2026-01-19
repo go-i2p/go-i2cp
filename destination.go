@@ -307,8 +307,29 @@ func (dest *Destination) WriteToFile(filename string) (err error) {
 	return nil
 }
 
+// WriteToMessage writes the destination in I2CP/I2NP WIRE FORMAT.
+// This is the format used for transmitting destinations over the network and in datagram envelopes.
+//
+// WIRE FORMAT (391+ bytes for Ed25519):
+//   - pubKey: 256 bytes (encryption public key, zeros for modern crypto)
+//   - signingPubKey: 128 bytes (Ed25519 key right-aligned at bytes 96-127)
+//   - certificate: 7+ bytes (KEY certificate with sig/crypto type)
+//
+// USE THIS METHOD FOR:
+//   - Building datagram envelopes (sender destination in Datagram1/2/3)
+//   - Any I2CP message that transmits a destination over the wire
+//   - Hash computation for replay prevention (Datagram2)
+//
+// The I2P specification says destinations are "387+ bytes" for DSA, but for Ed25519
+// with KEY certificates, the wire format is 391+ bytes (256 + 128 + 7).
+// The apparent discrepancy is because DSA-SHA1 keys fit exactly in the legacy fields
+// while Ed25519 requires padding and a KEY certificate.
+//
+// See also:
+//   - WriteForSignature: for signature computation (different signing key format)
+//   - WriteToStream: for file storage (compact format, not wire-compatible)
+//   - NewDestinationFromMessage: reads this format
 func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
-	// CRITICAL: This is the WIRE FORMAT for sending Destinations over I2CP
 	// Wire format: pubKey(256 bytes) + signingPubKey(128 bytes) + certificate
 	// The router will read this, extract the actual key sizes from the certificate,
 	// and store the keys in their native sizes (32 bytes for Ed25519)
@@ -339,11 +360,31 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	return nil
 }
 
-// WriteForSignature writes the destination in the format used by Java I2P for signature computation.
-// CRITICAL: This differs from WriteToMessage!
-// When Java reads a Destination from the wire, it extracts keys based on the certificate's declared sizes.
-// When re-serializing for signature verification, it writes the EXTRACTED key sizes, not the padded wire format.
-// For Ed25519: wire format has 128-byte field (key at bytes 96-127), but signature format has only 32 bytes.
+// WriteForSignature writes the destination in the format used by Java I2P for SIGNATURE COMPUTATION.
+//
+// SIGNATURE FORMAT (295 bytes for Ed25519):
+//   - pubKey: 256 bytes (same as wire format)
+//   - signingPubKey: 32 bytes (TRUNCATED, not padded to 128 bytes)
+//   - certificate: 7+ bytes (same as wire format)
+//
+// CRITICAL DIFFERENCE FROM WriteToMessage:
+// When Java reads a Destination from the wire (128-byte signing key field), it extracts
+// the actual key based on the certificate's declared sizes. When re-serializing for
+// signature verification, Java writes the EXTRACTED key sizes, not the padded wire format.
+//
+// For Ed25519:
+//   - Wire format (WriteToMessage): 128-byte field with 32-byte key at bytes 96-127
+//   - Signature format (WriteForSignature): just 32 bytes
+//
+// USE THIS METHOD FOR:
+//   - Computing data-to-sign for datagram authentication
+//   - Signature verification (must match sender's computation)
+//
+// DO NOT USE FOR:
+//   - Transmitting destinations over the network (use WriteToMessage)
+//   - Building datagram envelopes (use WriteToMessage)
+//
+// See Java I2P: SigningPublicKey.writeTruncatedBytes() for reference implementation.
 func (dest *Destination) WriteForSignature(stream *Stream) (err error) {
 	// Write 256 bytes for encryption key (same as wire format)
 	if _, err = stream.Write(dest.pubKey[:]); err != nil {
@@ -369,6 +410,30 @@ func (dest *Destination) WriteForSignature(stream *Stream) (err error) {
 	return nil
 }
 
+// WriteToStream writes the destination in a COMPACT STORAGE FORMAT.
+// This format is used for saving destinations to files (e.g., .dat files).
+//
+// STORAGE FORMAT (varies):
+//   - certificate: 3+ bytes
+//   - algorithmType: 4 bytes
+//   - signingKeyPair: algorithm-specific size
+//   - encryptionPubKey: 256 bytes
+//
+// This format differs from the wire format (WriteToMessage) and is NOT compatible
+// with I2CP/I2NP message parsing. Use WriteToFile() for file operations.
+//
+// USE THIS METHOD FOR:
+//   - Saving destinations to disk for later loading
+//   - Internal storage operations
+//
+// DO NOT USE FOR:
+//   - Network transmission (use WriteToMessage)
+//   - Datagram envelopes (use WriteToMessage)
+//   - Signature computation (use WriteForSignature)
+//
+// See also:
+//   - WriteToFile: convenience wrapper for file I/O
+//   - NewDestinationFromFile: reads this format
 func (dest *Destination) WriteToStream(stream *Stream) (err error) {
 	if err = dest.writeCertificateToStream(stream); err != nil {
 		return err

@@ -5,11 +5,45 @@ package go_i2cp
 // This file contains constants defined by the I2CP specification for the
 // I2P Control Protocol. I2CP is a lower-level protocol for managing sessions,
 // leases, and message routing between I2P clients and routers.
+
+// I2P Application Protocol Number Constants
 //
-// Note: This library focuses solely on I2CP. Higher-level application protocols
-// such as streaming (protocol 6) and datagram (protocol 17/18) are intentionally
-// NOT defined here as they are built on top of I2CP, not part of the I2CP spec.
-// Applications using I2CP can define their own protocol identifiers as needed.
+// These protocol numbers identify the application-layer protocol within I2P messages.
+// They are passed in the protocol field of SendMessage/SendMessageExpires messages
+// and received in payload messages. These constants match the Java I2PSession interface.
+//
+// Per I2P Datagram Specification (https://geti2p.net/spec/datagrams):
+//   - Protocol 6 (Streaming) is reserved for streaming connections
+//   - Protocol 17 (Datagram) is for repliable, authenticated datagrams (Datagram1)
+//   - Protocol 18 (DatagramRaw) is for raw, non-repliable datagrams
+//   - Protocol 19 (Datagram2) is for repliable datagrams with replay prevention
+//   - Protocol 20 (Datagram3) is for repliable datagrams without authentication
+//
+// IMPORTANT: Datagram1 (protocol 17) does NOT support offline signatures (LS2 offline keys).
+// If Session.IsOffline() returns true, use Datagram2 (protocol 19) instead.
+const (
+	// ProtoStreaming is reserved for I2P streaming connections.
+	// Do not use this for datagrams.
+	ProtoStreaming uint8 = 6
+
+	// ProtoDatagram (Datagram1) is for repliable, authenticated datagrams.
+	// The sender's Destination is included and signed for authentication.
+	// WARNING: Does NOT support offline signatures. Use ProtoDatagram2 for offline keys.
+	ProtoDatagram uint8 = 17
+
+	// ProtoDatagramRaw is for raw, non-repliable datagrams.
+	// No sender information is included - the receiver cannot reply.
+	ProtoDatagramRaw uint8 = 18
+
+	// ProtoDatagram2 is for repliable datagrams with replay prevention.
+	// Includes sender Destination, authentication, and timestamp for replay protection.
+	// Supports offline signatures (LS2 offline keys).
+	ProtoDatagram2 uint8 = 19
+
+	// ProtoDatagram3 is for repliable datagrams without authentication.
+	// Includes sender Destination but no signature verification.
+	ProtoDatagram3 uint8 = 20
+)
 
 // I2CP Client Constants
 // Moved from: client.go

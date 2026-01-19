@@ -292,6 +292,55 @@ func (session *Session) SetPrimary(isPrimary bool) {
 	Debug("Session %d primary status set to %t", session.id, isPrimary)
 }
 
+// IsOffline returns true if this session uses offline keys (LS2 offline signing).
+// per I2CP specification § SessionConfig - Offline Signatures
+//
+// Sessions with offline keys have a transient signing key that is time-limited,
+// while the master signing key remains offline (not accessible to the I2CP client).
+//
+// IMPORTANT: Datagram1 (protocol 17) does NOT support offline signatures.
+// If this method returns true, applications should use Datagram2 (protocol 19)
+// instead of Datagram1 for repliable authenticated datagrams.
+//
+// The Java reference implementation (I2PDatagramMaker.java) throws
+// IllegalArgumentException if session.isOffline() returns true when
+// attempting to create Datagram1 messages.
+//
+// Example usage:
+//
+//	if session.IsOffline() {
+//	    // Use Datagram2 for repliable authenticated datagrams
+//	    protocol = go_i2cp.ProtoDatagram2
+//	} else {
+//	    // Use Datagram1 (traditional repliable datagram)
+//	    protocol = go_i2cp.ProtoDatagram
+//	}
+func (session *Session) IsOffline() bool {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.config == nil {
+		return false
+	}
+	return session.config.HasOfflineSignature()
+}
+
+// ValidateProtocol checks if the given protocol is compatible with this session's configuration.
+// Returns an error if the protocol cannot be used with this session.
+//
+// Currently validates:
+//   - ProtoDatagram (17) is not used with offline-signed sessions
+//
+// This provides a clear error message instead of cryptographic failures when
+// users attempt incompatible protocol/session combinations.
+func (session *Session) ValidateProtocol(protocol uint8) error {
+	if protocol == ProtoDatagram && session.IsOffline() {
+		return fmt.Errorf("protocol %d (Datagram1) does not support offline signatures; "+
+			"use protocol %d (Datagram2) instead", ProtoDatagram, ProtoDatagram2)
+	}
+	return nil
+}
+
 // PrimarySession returns the primary session for this subsession
 // per I2CP specification 0.9.21+ - subsessions reference their primary for tunnel sharing
 func (session *Session) PrimarySession() *Session {
