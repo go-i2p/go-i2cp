@@ -291,9 +291,10 @@ func canReadBuffered(tcp *Tcp) bool {
 // peekBufferedData attempts to peek at one byte with a timeout to avoid blocking.
 // Returns nil if data is available, error otherwise.
 func peekBufferedData(tcp *Tcp) error {
-	// Set a short read deadline to prevent blocking indefinitely
-	// This prevents CanRead() from hanging on closed or unresponsive connections
-	deadline := time.Now().Add(1 * time.Millisecond)
+	// Set a read deadline to prevent blocking indefinitely.
+	// Using 100ms instead of 1ms for more reliable timeout handling.
+	// This prevents CanRead() from hanging on closed or unresponsive connections.
+	deadline := time.Now().Add(100 * time.Millisecond)
 	tcp.conn.SetReadDeadline(deadline)
 
 	// Peek at 1 byte without consuming it from the buffer
@@ -330,8 +331,8 @@ func handleReadError(tcp *Tcp, err error) bool {
 // canReadUnbuffered checks data availability without buffered reader.
 // This is a fallback path that consumes one byte from the stream.
 func canReadUnbuffered(tcp *Tcp) bool {
-	// Set a very short read deadline (1ms) to check data availability without blocking
-	deadline := time.Now().Add(1 * time.Millisecond)
+	// Set a read deadline (100ms) to check data availability without blocking
+	deadline := time.Now().Add(100 * time.Millisecond)
 	tcp.conn.SetReadDeadline(deadline)
 
 	// Try to peek at one byte

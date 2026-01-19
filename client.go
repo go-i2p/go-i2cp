@@ -3954,10 +3954,14 @@ func (c *Client) signalShutdown() error {
 	}
 }
 
-// destroyAllSessions destroys all active sessions if the client is connected.
+// destroyAllSessions destroys all active sessions.
+// Does not check IsConnected() to avoid blocking I/O during shutdown.
 // Logs warnings for any session destruction failures but continues with others.
 func (c *Client) destroyAllSessions() {
-	if !c.tcp.IsConnected() {
+	// Skip IsConnected() check - it can block indefinitely on Peek().
+	// Instead, just attempt to destroy sessions; the write will fail quickly
+	// if the connection is closed, and we handle errors gracefully.
+	if c.tcp.conn == nil {
 		return
 	}
 
