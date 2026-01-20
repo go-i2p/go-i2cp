@@ -249,6 +249,52 @@ func (session *Session) SigningKeyPair() (*Ed25519KeyPair, error) {
 	return dest.sgk.ed25519KeyPair, nil
 }
 
+// TransientSigningKeyPair returns the transient Ed25519 signing key pair for offline sessions.
+// This is used for signing Datagram2 payloads when the session uses offline keys.
+//
+// Per I2P Proposal 163 (Datagram2), offline signature block construction requires:
+//   - Authorization: Sign(expires||sigtype||transient_pubkey) with destination key
+//   - Payload: Sign(target_hash||flags||options||offline_sig||payload) with transient key
+//
+// This method returns the transient key pair needed for the payload signature.
+// Use SigningKeyPair() to get the destination key for authorization signatures.
+//
+// Returns:
+//   - The transient Ed25519 key pair if offline signing is configured
+//   - Error if session is not offline or no transient key pair is configured
+//
+// Example usage for Datagram2 offline signature construction:
+//
+//	if session.IsOffline() {
+//	    transientKP, err := session.TransientSigningKeyPair()
+//	    if err != nil {
+//	        return err
+//	    }
+//	    payloadSig, err := transientKP.Sign(payloadData)
+//	}
+func (session *Session) TransientSigningKeyPair() (*Ed25519KeyPair, error) {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	// Check session initialization
+	if session.config == nil {
+		return nil, ErrSessionNotInitialized
+	}
+
+	// Check if session is offline
+	if !session.config.HasOfflineSignature() {
+		return nil, fmt.Errorf("session is not configured for offline signing")
+	}
+
+	// Check transient key pair exists
+	transientKP := session.config.GetTransientKeyPair()
+	if transientKP == nil {
+		return nil, fmt.Errorf("transient key pair not configured; use SessionConfig.SetTransientKeyPair()")
+	}
+
+	return transientKP, nil
+}
+
 // ID returns the session ID assigned by the router
 // per I2CP specification - unique identifier for session within I2CP connection
 func (session *Session) ID() uint16 {

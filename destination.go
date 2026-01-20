@@ -587,3 +587,30 @@ func (dest *Destination) VerifySignature(message, signature []byte) bool {
 	}
 	return signingKey.Verify(message, signature)
 }
+
+// Hash returns the SHA-256 hash of the destination's canonical wire format serialization.
+// This matches Java I2P's Destination.calculateHash() method.
+//
+// The hash is computed over the wire format (WriteToMessage):
+//   - pubKey: 256 bytes (encryption public key)
+//   - signingPubKey: 128 bytes (Ed25519 key right-aligned at bytes 96-127)
+//   - certificate: 7+ bytes (KEY certificate with sig/crypto type)
+//
+// USE CASES:
+//   - Datagram2: Target destination hash for replay prevention
+//   - Datagram3: Sender's fromhash for repliability
+//   - LeaseSet addressing and lookup
+//   - Any protocol requiring canonical destination identification
+//
+// INTEROPERABILITY: This produces the same hash as Java I2P's calculateHash(),
+// enabling cross-implementation compatibility for datagram protocols.
+//
+// Returns the 32-byte SHA-256 hash, or a zero hash if serialization fails.
+func (dest *Destination) Hash() [32]byte {
+	stream := NewStream(make([]byte, 0, DEST_SIZE))
+	if err := dest.WriteToMessage(stream); err != nil {
+		Error("Failed to serialize destination for hash: %v", err)
+		return [32]byte{}
+	}
+	return sha256.Sum256(stream.Bytes())
+}

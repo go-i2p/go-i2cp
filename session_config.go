@@ -86,6 +86,13 @@ type SessionConfig struct {
 	properties  [NR_OF_SESSION_CONFIG_PROPERTIES]string
 	date        uint64
 	destination *Destination
+
+	// Transient key pair for offline-signed sessions (LS2 offline keys)
+	// This is the Ed25519 key pair that is used for signing when the session is offline.
+	// The public key is sent to the router via i2cp.leaseSetTransientPublicKey.
+	// The private key is kept locally for signing Datagram2 messages and LeaseSets.
+	// This field is nil for non-offline sessions.
+	transientKeyPair *Ed25519KeyPair
 }
 
 // NewSessionConfig creates a new SessionConfig with auto-generated destination.
@@ -421,6 +428,36 @@ func (config *SessionConfig) HasOfflineSignature() bool {
 	return config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION) != "" &&
 		config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY) != "" &&
 		config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE) != ""
+}
+
+// SetTransientKeyPair sets the transient signing key pair for offline-signed sessions.
+// This key pair is used for Datagram2 payload signing when the session is offline.
+//
+// The transient key pair should be generated separately and the public key should also
+// be passed to SetOfflineSignature() along with the authorization signature.
+//
+// Per I2P Proposal 163 (Datagram2), offline signature block construction requires:
+//   - Authorization: Sign(expires||sigtype||transient_pubkey) with destination key
+//   - Payload: Sign(target_hash||flags||options||offline_sig||payload) with transient key
+//
+// This method stores the transient private key needed for the payload signature.
+// Returns an error if the key pair is nil.
+func (config *SessionConfig) SetTransientKeyPair(keyPair *Ed25519KeyPair) error {
+	if keyPair == nil {
+		return fmt.Errorf("transient key pair cannot be nil")
+	}
+	config.transientKeyPair = keyPair
+	Debug("Transient key pair configured for offline signing")
+	return nil
+}
+
+// GetTransientKeyPair returns the transient signing key pair for offline sessions.
+// Returns nil if no transient key pair has been configured.
+//
+// This method provides access to the transient private key needed for signing
+// Datagram2 payloads when the session is offline (IsOffline() returns true).
+func (config *SessionConfig) GetTransientKeyPair() *Ed25519KeyPair {
+	return config.transientKeyPair
 }
 
 // ValidateOfflineSignature validates the offline signature configuration.
