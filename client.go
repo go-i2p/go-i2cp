@@ -4185,6 +4185,15 @@ func (c *Client) IsConnected() bool {
 	return c.tcp.IsConnected()
 }
 
+// isConnectedFast returns the cached connection state without performing socket operations.
+// This is safe to call while holding other locks as it doesn't block on I/O.
+// Use this for internal checks where blocking I/O could cause deadlocks.
+func (c *Client) isConnectedFast() bool {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.connected
+}
+
 // SetMetrics enables metrics collection with the provided collector.
 // Pass nil to disable metrics collection.
 // This method is safe to call on a running client.

@@ -484,9 +484,12 @@ func (session *Session) handlePostCloseCleanup(client *Client, sessionID uint16,
 // false if the message couldn't be sent (caller should handle cleanup).
 // CALLER MUST HOLD session.mu (read or write lock)
 func (session *Session) sendDestroyMessage() bool {
+	// Use isConnectedFast() instead of IsConnected() to avoid blocking I/O
+	// while holding session.mu. IsConnected() calls CanRead() which does a
+	// blocking Peek() on the socket, which could deadlock with the I/O goroutine.
 	Debug("sendDestroyMessage called for session %d (client=%v, connected=%v)",
-		session.id, session.client != nil, session.client != nil && session.client.IsConnected())
-	if session.client != nil && session.client.IsConnected() {
+		session.id, session.client != nil, session.client != nil && session.client.isConnectedFast())
+	if session.client != nil && session.client.isConnectedFast() {
 		if session.id != 0 {
 			Debug("sendDestroyMessage: calling msgDestroySession for session %d", session.id)
 			// Pass sessionID and isPrimary directly to avoid lock re-entry (caller holds session.mu)
