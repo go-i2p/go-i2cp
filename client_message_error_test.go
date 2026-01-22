@@ -168,7 +168,7 @@ func TestMsgDestroySession(t *testing.T) {
 				}
 			}()
 
-			client.msgDestroySession(session, tt.queue)
+			client.msgDestroySession(session, session.IsPrimary(), tt.queue)
 
 			if tt.validate != nil {
 				tt.validate(t, client, session)

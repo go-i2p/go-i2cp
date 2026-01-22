@@ -328,6 +328,12 @@ func (session *Session) IsPrimary() bool {
 	return session.isPrimary
 }
 
+// isPrimaryLocked returns the isPrimary flag without acquiring lock.
+// CALLER MUST HOLD session.mu (read or write lock)
+func (session *Session) isPrimaryLocked() bool {
+	return session.isPrimary
+}
+
 // SetPrimary sets the primary session flag (internal use only)
 // per I2CP specification 0.9.21+ - used for multi-session support
 func (session *Session) SetPrimary(isPrimary bool) {
@@ -470,13 +476,15 @@ func (session *Session) handlePostCloseCleanup(client *Client, sessionID uint16,
 // sendDestroyMessage sends DestroySession message to router if connected.
 // Returns true if the message was sent (and cleanup will be handled by msgDestroySession),
 // false if the message couldn't be sent (caller should handle cleanup).
+// CALLER MUST HOLD session.mu (read or write lock)
 func (session *Session) sendDestroyMessage() bool {
 	Debug("sendDestroyMessage called for session %d (client=%v, connected=%v)",
 		session.id, session.client != nil, session.client != nil && session.client.IsConnected())
 	if session.client != nil && session.client.IsConnected() {
 		if session.id != 0 {
 			Debug("sendDestroyMessage: calling msgDestroySession for session %d", session.id)
-			session.client.msgDestroySession(session, false)
+			// Pass isPrimary directly to avoid lock re-entry (caller holds session.mu)
+			session.client.msgDestroySession(session, session.isPrimaryLocked(), false)
 			Debug("Sent DestroySession message for session %d", session.id)
 			return true
 		}
