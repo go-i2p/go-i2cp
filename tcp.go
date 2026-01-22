@@ -295,14 +295,22 @@ func peekBufferedData(tcp *Tcp) error {
 	// Using 100ms instead of 1ms for more reliable timeout handling.
 	// This prevents CanRead() from hanging on closed or unresponsive connections.
 	deadline := time.Now().Add(100 * time.Millisecond)
-	tcp.conn.SetReadDeadline(deadline)
+	if tcp.conn != nil {
+		tcp.conn.SetReadDeadline(deadline)
+	} else {
+		return fmt.Errorf("connection is nil")
+	}
 
 	// Peek at 1 byte without consuming it from the buffer
 	_, err := tcp.reader.Peek(1)
 
 	// Reset deadline to zero (blocking mode) for actual message reads
 	var zero time.Time
-	tcp.conn.SetReadDeadline(zero)
+	if tcp.conn != nil {
+		tcp.conn.SetReadDeadline(zero)
+	} else {
+		return fmt.Errorf("connection is nil")
+	}
 
 	return err
 }
