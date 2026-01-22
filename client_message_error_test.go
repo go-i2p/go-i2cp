@@ -168,7 +168,8 @@ func TestMsgDestroySession(t *testing.T) {
 				}
 			}()
 
-			client.msgDestroySession(session, session.IsPrimary(), tt.queue)
+			// callerHoldsLock=false because test doesn't hold session.mu
+			client.msgDestroySession(session, session.ID(), session.IsPrimary(), tt.queue, false)
 
 			if tt.validate != nil {
 				tt.validate(t, client, session)

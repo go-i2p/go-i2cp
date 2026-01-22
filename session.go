@@ -303,6 +303,12 @@ func (session *Session) ID() uint16 {
 	return session.id
 }
 
+// idLocked returns the session ID without acquiring lock.
+// CALLER MUST HOLD session.mu (read or write lock)
+func (session *Session) idLocked() uint16 {
+	return session.id
+}
+
 // SessionID returns the session ID assigned by the router
 // per I2CP specification - unique identifier for session within I2CP connection
 // This is an idiomatic alias for ID() following Go naming conventions
@@ -483,8 +489,9 @@ func (session *Session) sendDestroyMessage() bool {
 	if session.client != nil && session.client.IsConnected() {
 		if session.id != 0 {
 			Debug("sendDestroyMessage: calling msgDestroySession for session %d", session.id)
-			// Pass isPrimary directly to avoid lock re-entry (caller holds session.mu)
-			session.client.msgDestroySession(session, session.isPrimaryLocked(), false)
+			// Pass sessionID and isPrimary directly to avoid lock re-entry (caller holds session.mu)
+			// callerHoldsLock=true because Session.Close() holds session.mu
+			session.client.msgDestroySession(session, session.idLocked(), session.isPrimaryLocked(), false, true)
 			Debug("Sent DestroySession message for session %d", session.id)
 			return true
 		}

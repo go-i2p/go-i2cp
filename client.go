@@ -2925,7 +2925,7 @@ func (c *Client) msgGetBandwidthLimits(queue bool) {
 	}
 }
 
-func (c *Client) msgDestroySession(sess *Session, isPrimary bool, queue bool) error {
+func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary bool, queue bool, callerHoldsLock bool) error {
 	// I2CP SPEC COMPLIANCE: Handle both spec-compliant and Java I2P router behaviors
 	// Per I2CP spec § DestroySessionMessage: "The router should respond with a SessionStatusMessage (Destroyed)"
 	// Per I2CP 0.9.67 § DestroySessionMessage Notes (Java I2P deviation):
@@ -2933,14 +2933,14 @@ func (c *Client) msgDestroySession(sess *Session, isPrimary bool, queue bool) er
 	// The router never sends SessionStatus(Destroyed). If no sessions are left, it sends
 	// DisconnectMessage. If there are subsessions or primary remains, it does not reply."
 
-	// NOTE: isPrimary is passed as parameter to avoid mutex re-entry deadlock
+	// NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry deadlock
 	// when called from Session.Close() which already holds session.mu
+	// callerHoldsLock indicates if the caller already holds sess.mu
 	wasPrimary := isPrimary
-	sessionID := sess.ID() // Thread-safe getter
-	Debug("msgDestroySession called for session %d (isPrimary: %v)", sessionID, wasPrimary)
-	cascadeDestroySubsessions(c, sess, wasPrimary)
+	Debug("msgDestroySession called for session %d (isPrimary: %v, callerHoldsLock: %v)", sessionID, wasPrimary, callerHoldsLock)
+	cascadeDestroySubsessions(c, sess, sessionID, wasPrimary)
 
-	if err := sendDestroySessionMessage(c, sess, queue); err != nil {
+	if err := sendDestroySessionMessage(c, sessionID, wasPrimary, queue); err != nil {
 		return err
 	}
 
@@ -2958,14 +2958,15 @@ func (c *Client) msgDestroySession(sess *Session, isPrimary bool, queue bool) er
 	// message as usual. This will not destroy the primary session or stop the I2CP connection."
 	// We must clean up the subsession's local state and remove it from the sessions map.
 	Debug("Calling cleanupDestroyedSubsession for session %d", sessionID)
-	cleanupDestroyedSubsession(c, sess)
+	cleanupDestroyedSubsession(c, sess, sessionID, isPrimary, callerHoldsLock)
 
 	return nil
 }
 
 // cascadeDestroySubsessions destroys all subsessions when a primary session is destroyed.
 // Per I2CP § Multisession Notes, destroying the primary cascades to all subsessions.
-func cascadeDestroySubsessions(c *Client, sess *Session, isPrimary bool) {
+// NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry deadlock
+func cascadeDestroySubsessions(c *Client, sess *Session, sessionID uint16, isPrimary bool) {
 	// COMPLIANCE FIX: Cascade destroy subsessions when primary is destroyed (I2CP § Multisession Notes)
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -2975,15 +2976,15 @@ func cascadeDestroySubsessions(c *Client, sess *Session, isPrimary bool) {
 		return
 	}
 
-	sessionID := sess.ID() // Thread-safe getter
 	Debug("Destroying primary session %d - cascading to all subsessions per I2CP spec", sessionID)
 	// Destroy all subsessions first
 	for id, s := range c.sessions {
 		if id != sessionID && !s.IsPrimary() { // Thread-safe getter (different session, safe to call)
 			Debug("Auto-destroying subsession %d (primary %d being destroyed)", id, sessionID)
-			// Recursive call for subsessions - subsession's isPrimary is false
+			// Recursive call for subsessions - subsession's isPrimary is false, use s.ID() which is safe
+			// callerHoldsLock=false because we don't hold the subsession's lock
 			c.lock.Unlock()
-			c.msgDestroySession(s, false, false)
+			c.msgDestroySession(s, s.ID(), false, false, false)
 			c.lock.Lock()
 			delete(c.sessions, id)
 		}
@@ -3002,9 +3003,11 @@ func cascadeDestroySubsessions(c *Client, sess *Session, isPrimary bool) {
 // - Cancelling the session's context
 // - Removing the reference to the primary session
 // - Clearing encryption key pairs and blinding parameters
-func cleanupDestroyedSubsession(c *Client, sess *Session) {
-	sessionID := sess.ID() // Thread-safe getter
-	if sess.IsPrimary() {  // Thread-safe getter
+//
+// NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry.
+// The callerHoldsLock parameter indicates if the caller already holds sess.mu.
+func cleanupDestroyedSubsession(c *Client, sess *Session, sessionID uint16, isPrimary bool, callerHoldsLock bool) {
+	if isPrimary {
 		// Primary sessions are cleaned up via Close(), not here
 		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sessionID)
 		return
@@ -3019,8 +3022,11 @@ func cleanupDestroyedSubsession(c *Client, sess *Session) {
 	c.lock.Unlock()
 
 	// Clean up the session's internal state
-	sess.mu.Lock()
-	defer sess.mu.Unlock()
+	// Only acquire lock if caller doesn't already hold it
+	if !callerHoldsLock {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+	}
 
 	cleanupSessionPendingMessages(sess)
 	cleanupSessionContext(sess)
@@ -3159,9 +3165,8 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.
 // Returns an error if the message cannot be sent.
-func sendDestroySessionMessage(c *Client, sess *Session, queue bool) error {
-	sessionID := sess.ID()        // Thread-safe getter
-	isPrimary := sess.IsPrimary() // Thread-safe getter
+// NOTE: sessionID is passed as parameter to avoid mutex re-entry deadlock
+func sendDestroySessionMessage(c *Client, sessionID uint16, isPrimary bool, queue bool) error {
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sessionID)
@@ -3979,7 +3984,8 @@ func (c *Client) destroyAllSessions() {
 	// Destroy sessions without holding lock to avoid deadlock with cascadeDestroySubsessions
 	for _, sess := range sessionsToDestroy {
 		Debug("Destroying session %d during shutdown", sess.id)
-		if err := c.msgDestroySession(sess, sess.IsPrimary(), false); err != nil {
+		// callerHoldsLock=false because we don't hold the session's lock
+		if err := c.msgDestroySession(sess, sess.ID(), sess.IsPrimary(), false, false); err != nil {
 			Warning("Failed to destroy session %d during shutdown: %v", sess.id, err)
 		}
 	}
