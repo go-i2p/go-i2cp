@@ -3983,10 +3983,28 @@ func (c *Client) destroyAllSessions() {
 
 	// Destroy sessions without holding lock to avoid deadlock with cascadeDestroySubsessions
 	for _, sess := range sessionsToDestroy {
-		Debug("Destroying session %d during shutdown", sess.id)
-		// callerHoldsLock=false because we don't hold the session's lock
-		if err := c.msgDestroySession(sess, sess.ID(), sess.IsPrimary(), false, false); err != nil {
-			Warning("Failed to destroy session %d during shutdown: %v", sess.id, err)
+		// DEADLOCK FIX: Try to acquire the session lock. If we can't, the session is
+		// already being destroyed by another goroutine (e.g., the primary session's
+		// Close() which triggered this destroyAllSessions call). Skip it.
+		if !sess.mu.TryLock() {
+			Debug("Session %d is already locked (being destroyed elsewhere), skipping", sess.id)
+			continue
+		}
+		// We now hold the lock, extract values and release before calling msgDestroySession
+		sessionID := sess.id
+		isPrimary := sess.isPrimary
+		closed := sess.closed
+		sess.mu.Unlock()
+
+		if closed {
+			Debug("Session %d already closed, skipping", sessionID)
+			continue
+		}
+
+		Debug("Destroying session %d during shutdown", sessionID)
+		// callerHoldsLock=false because we released the session's lock above
+		if err := c.msgDestroySession(sess, sessionID, isPrimary, false, false); err != nil {
+			Warning("Failed to destroy session %d during shutdown: %v", sessionID, err)
 		}
 	}
 }
