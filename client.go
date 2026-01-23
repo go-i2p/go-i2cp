@@ -1497,6 +1497,15 @@ func (c *Client) onMsgReqVariableLease(stream *Stream) {
 		return
 	}
 
+	// Check if session is already closed/being destroyed - skip lease set creation
+	// This prevents race conditions where a RequestVariableLeaseSet arrives after
+	// the session has been destroyed locally but before the router processes our
+	// DestroySession message.
+	if sess.IsClosed() {
+		Debug("Session %d is closed, skipping CreateLeaseSet2", sessionId)
+		return
+	}
+
 	leases, err := parseVariableLeases(stream, sessionId, tunnels)
 	if err != nil {
 		return
