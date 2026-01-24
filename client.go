@@ -70,7 +70,8 @@ type Client struct {
 	tcp             Tcp
 	outputStream    *Stream
 	messageStream   *Stream
-	receiveStream   *Stream // Dedicated buffer for receiving messages (prevents corruption from messageStream reuse)
+	messageStreamMu sync.Mutex // Protects messageStream access (CRITICAL: prevents race conditions in concurrent message sending)
+	receiveStream   *Stream    // Dedicated buffer for receiving messages (prevents corruption from messageStream reuse)
 	router          RouterInfo
 	outputQueue     []*Stream
 	sessions        map[uint16]*Session
@@ -2038,6 +2039,10 @@ func buildLeaseSetData(leaseSet *Stream, dest *Destination, sgk *SignatureKeyPai
 func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
 	Debug("Sending CreateLeaseSetMessage")
 
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	leaseSet := initializeLeaseSetStream(c, sessionId)
 
 	config := session.config
@@ -2075,6 +2080,10 @@ func (c *Client) msgCreateLeaseSet2(session *Session, leaseCount int, queue bool
 
 	leaseSet := NewStream(make([]byte, 0, 4096))
 	dest := session.config.destination
+
+	// Thread-safe: protect messageStream access for entire LeaseSet2 creation
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	c.prepareLeaseSet2Header(session)
 
@@ -2434,6 +2443,11 @@ func (c *Client) getAuthenticationMethod() uint8 {
 // They are for encrypted LeaseSet access via BlindingInfoMessage.
 func (c *Client) msgGetDate(queue bool) {
 	Debug("Sending GetDateMessage")
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	c.messageStream.Reset()
 	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
 
@@ -2478,6 +2492,10 @@ func (c *Client) msgCreateSession(config *SessionConfig, queue bool) error {
 	Info(">>> SENDING CreateSessionMessage to router")
 
 	recordCreateSessionState(c)
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	// Build the session config message first (this sets config.date)
 	c.messageStream.Reset()
@@ -2561,6 +2579,11 @@ func validateCreateSessionTimestamp(c *Client, config *SessionConfig) error {
 
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
 	Debug("Sending DestLookupMessage.")
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	c.messageStream.Reset()
 	c.messageStream.Write(hash)
 	if err := c.sendMessage(I2CP_MSG_DEST_LOOKUP, c.messageStream, queue); err != nil {
@@ -2574,6 +2597,10 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 		return fmt.Errorf("router version %s does not support HostLookup (requires %s+), use DestLookup instead",
 			c.router.version.String(), VersionHostLookup.String())
 	}
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	var sessionId uint16
 	Debug("Sending HostLookupMessage.")
@@ -2610,6 +2637,10 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 // per I2CP specification section 7.1 - implements runtime tunnel and crypto parameter changes
 func (c *Client) msgReconfigureSession(session *Session, properties map[string]string, queue bool) error {
 	Debug("Sending ReconfigureSessionMessage for session %d with %d properties", session.id, len(properties))
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(session.id)
@@ -2692,6 +2723,10 @@ func (c *Client) msgBlindingInfo(sess *Session, info *BlindingInfo, queue bool) 
 	}
 
 	Debug("Sending BlindingInfoMessage for session %d, endpoint type %d", sess.id, info.EndpointType)
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	if err := c.buildBlindingInfoMessage(sess, info); err != nil {
 		return err
@@ -2932,6 +2967,11 @@ func (session *Session) SendBlindingInfo(info *BlindingInfo) error {
 
 func (c *Client) msgGetBandwidthLimits(queue bool) {
 	Debug("Sending GetBandwidthLimitsMessage.")
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	c.messageStream.Reset()
 	if err := c.sendMessage(I2CP_MSG_GET_BANDWIDTH_LIMITS, c.messageStream, queue); err != nil {
 		Error("Error while sending GetBandwidthLimitsMessage")
@@ -3181,6 +3221,11 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 // NOTE: sessionID is passed as parameter to avoid mutex re-entry deadlock
 func sendDestroySessionMessage(c *Client, sessionID uint16, isPrimary bool, queue bool) error {
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sessionID)
 
@@ -3219,6 +3264,11 @@ func waitForDestroyConfirmation(sess *Session, wasPrimary bool) {
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
 	Debug("Sending SendMessageMessage")
 	out := &bytes.Buffer{}
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
 	dest.WriteToMessage(c.messageStream)
@@ -3266,6 +3316,10 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	if err != nil {
 		return err
 	}
+
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
 
 	c.buildSendMessageStream(sess, dest, compressedPayload, nonce, flags, expirationSeconds)
 
