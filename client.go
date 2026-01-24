@@ -965,7 +965,11 @@ func (c *Client) parseDestReplyPayload(stream *Stream) (*Destination, string, er
 }
 
 // lookupDestinationRequest retrieves and removes pending lookup entries for a destination.
+// Thread-safe: uses lock to protect lookup and lookupReq map access.
 func (c *Client) lookupDestinationRequest(b32 string) (uint32, LookupEntry, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	requestId, found := c.lookup[b32]
 	if !found {
 		return 0, LookupEntry{}, fmt.Errorf("no pending lookup found for address '%s'", b32)
@@ -3978,7 +3982,11 @@ func (c *Client) destroyAllSessions() {
 	// Skip IsConnected() check - it can block indefinitely on Peek().
 	// Instead, just attempt to destroy sessions; the write will fail quickly
 	// if the connection is closed, and we handle errors gracefully.
-	if c.tcp.conn == nil {
+	// Thread-safe: use TCP mutex to check connection state
+	c.tcp.mu.RLock()
+	connNil := c.tcp.conn == nil
+	c.tcp.mu.RUnlock()
+	if connNil {
 		return
 	}
 
