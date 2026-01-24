@@ -516,7 +516,11 @@ func (session *Session) cleanupResources() {
 
 // finalizeClose dispatches status and marks session as closed.
 func (session *Session) finalizeClose() {
-	session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
+	// Prevent duplicate DESTROYED callbacks
+	if !session.destroyedDispatched {
+		session.destroyedDispatched = true
+		session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
+	}
 	session.closed = true
 	session.closedAt = time.Now()
 }
@@ -685,12 +689,29 @@ func (session *Session) executeCallback(callback func(), callbackName string) {
 // dispatchStatus dispatches session status changes to registered callbacks
 // per I2CP specification - handles SessionStatusMessage (type 20) events
 func (session *Session) dispatchStatus(status SessionStatus) {
+	// For DESTROYED status, prevent duplicate callbacks during concurrent close operations
+	// Check-and-set must be done atomically under the write lock
+	if status == I2CP_SESSION_STATUS_DESTROYED {
+		session.mu.Lock()
+		if session.destroyedDispatched {
+			Debug("Session %d: DESTROYED status already dispatched, skipping duplicate callback", session.id)
+			session.mu.Unlock()
+			return
+		}
+		session.destroyedDispatched = true
+		session.mu.Unlock()
+	}
+
+	// Use RLock for the actual dispatch to allow concurrent reads
+	// The callback may need to access session properties
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 	session.dispatchStatusLocked(status)
 }
 
 // dispatchStatusLocked is the internal version that requires the mutex to be held
+// IMPORTANT: For DESTROYED status, callers should set destroyedDispatched = true
+// before calling this function to prevent duplicate callbacks
 func (session *Session) dispatchStatusLocked(status SessionStatus) {
 	Debug(">>> Dispatching session status %d (%s) to callback for session %d", status, getSessionStatusName(status), session.id)
 	session.logStatusChange(status)

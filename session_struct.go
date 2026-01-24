@@ -79,6 +79,10 @@ type Session struct {
 	// DestroySession response tracking (I2CP spec compliance)
 	// Closed when SessionStatus(Destroyed) received from router
 	destroyConfirmed chan struct{}
+
+	// destroyedDispatched tracks whether DESTROYED status has been dispatched
+	// to prevent duplicate callbacks during concurrent close operations
+	destroyedDispatched bool
 }
 
 // PendingMessage represents a message awaiting delivery status
