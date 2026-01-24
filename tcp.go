@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -172,17 +173,23 @@ func (tcp *Tcp) Connect() (err error) {
 		return err
 	}
 
+	var conn net.Conn
 	if tcp.tlsConfig != nil {
-		if err := tcp.connectTLS(); err != nil {
+		conn, err = tcp.dialTLS()
+		if err != nil {
 			return err
 		}
 	} else {
-		if err := tcp.connectTCP(); err != nil {
+		conn, err = tcp.dialTCP()
+		if err != nil {
 			return err
 		}
 	}
 
-	tcp.reader = bufio.NewReader(tcp.conn)
+	tcp.mu.Lock()
+	tcp.conn = conn
+	tcp.reader = bufio.NewReader(conn)
+	tcp.mu.Unlock()
 	return nil
 }
 
@@ -197,21 +204,20 @@ func (tcp *Tcp) ensureAddressInitialized() error {
 	return nil
 }
 
-// connectTLS establishes a TLS connection and verifies the handshake.
-func (tcp *Tcp) connectTLS() error {
+// dialTLS establishes a TLS connection and verifies the handshake.
+func (tcp *Tcp) dialTLS() (net.Conn, error) {
 	Debug("Establishing TLS connection to %s", tcp.address.String())
 	conn, err := tls.Dial("tcp", tcp.address.String(), tcp.tlsConfig)
 	if err != nil {
-		return fmt.Errorf("i2cp: failed to dial TLS connection to %s: %w", tcp.address, err)
+		return nil, fmt.Errorf("i2cp: failed to dial TLS connection to %s: %w", tcp.address, err)
 	}
 
 	if err := tcp.verifyTLSHandshake(conn); err != nil {
 		conn.Close()
-		return err
+		return nil, err
 	}
 
-	tcp.conn = conn
-	return nil
+	return conn, nil
 }
 
 // verifyTLSHandshake completes and validates the TLS handshake.
@@ -231,54 +237,66 @@ func (tcp *Tcp) verifyTLSHandshake(conn net.Conn) error {
 	return nil
 }
 
-// connectTCP establishes a plain TCP connection.
-func (tcp *Tcp) connectTCP() error {
+// dialTCP establishes a plain TCP connection.
+func (tcp *Tcp) dialTCP() (net.Conn, error) {
 	Debug("Establishing TCP connection to %s", tcp.address.String())
 	conn, err := net.Dial("tcp", tcp.address.String())
 	if err != nil {
-		return fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
+		return nil, fmt.Errorf("i2cp: failed to dial TCP connection to %s: %w", tcp.address, err)
 	}
-	tcp.conn = conn
-	return nil
+	return conn, nil
 }
 
 func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
-	if tcp.conn == nil {
+	tcp.mu.RLock()
+	conn := tcp.conn
+	tcp.mu.RUnlock()
+	if conn == nil {
 		return 0, fmt.Errorf("connection not established")
 	}
-	i, err = tcp.conn.Write(buf.Bytes())
+	i, err = conn.Write(buf.Bytes())
 	return
 }
 
 func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
 	// Use buffered reader to preserve data consumed by CanRead()
-	if tcp.reader != nil {
-		i, err = tcp.reader.Read(buf.Bytes())
+	tcp.mu.RLock()
+	reader := tcp.reader
+	conn := tcp.conn
+	tcp.mu.RUnlock()
+	if reader != nil {
+		i, err = reader.Read(buf.Bytes())
+	} else if conn != nil {
+		i, err = conn.Read(buf.Bytes())
 	} else {
-		i, err = tcp.conn.Read(buf.Bytes())
+		err = fmt.Errorf("connection not established")
 	}
 	return
 }
 
 func (tcp *Tcp) CanRead() bool {
-	if tcp.conn == nil {
+	tcp.mu.RLock()
+	conn := tcp.conn
+	reader := tcp.reader
+	tcp.mu.RUnlock()
+	if conn == nil {
 		return false
 	}
 
 	// Use buffered reader's Peek() for non-destructive data availability check
 	// This fixes the critical bug where CanRead() consumed bytes from the stream
-	if tcp.reader != nil {
-		return canReadBuffered(tcp)
+	if reader != nil {
+		return canReadBuffered(tcp, conn, reader)
 	}
 
 	// Fallback for unbuffered connection (should not occur in normal operation)
-	return canReadUnbuffered(tcp)
+	return canReadUnbuffered(tcp, conn)
 }
 
 // canReadBuffered checks if data is available using buffered reader's Peek.
 // Returns true if data is available, false otherwise.
-func canReadBuffered(tcp *Tcp) bool {
-	err := peekBufferedData(tcp)
+func canReadBuffered(tcp *Tcp, conn net.Conn, reader *bufio.Reader) bool {
+	err := peekBufferedData(conn, reader)
 
 	if err == nil {
 		// Data is available and buffered
@@ -290,24 +308,24 @@ func canReadBuffered(tcp *Tcp) bool {
 
 // peekBufferedData attempts to peek at one byte with a timeout to avoid blocking.
 // Returns nil if data is available, error otherwise.
-func peekBufferedData(tcp *Tcp) error {
+func peekBufferedData(conn net.Conn, reader *bufio.Reader) error {
 	// Set a read deadline to prevent blocking indefinitely.
 	// Using 100ms instead of 1ms for more reliable timeout handling.
 	// This prevents CanRead() from hanging on closed or unresponsive connections.
 	deadline := time.Now().Add(100 * time.Millisecond)
-	if tcp.conn != nil {
-		tcp.conn.SetReadDeadline(deadline)
+	if conn != nil {
+		conn.SetReadDeadline(deadline)
 	} else {
 		return fmt.Errorf("connection is nil")
 	}
 
 	// Peek at 1 byte without consuming it from the buffer
-	_, err := tcp.reader.Peek(1)
+	_, err := reader.Peek(1)
 
 	// Reset deadline to zero (blocking mode) for actual message reads
 	var zero time.Time
-	if tcp.conn != nil {
-		tcp.conn.SetReadDeadline(zero)
+	if conn != nil {
+		conn.SetReadDeadline(zero)
 	} else {
 		return fmt.Errorf("connection is nil")
 	}
@@ -338,18 +356,18 @@ func handleReadError(tcp *Tcp, err error) bool {
 
 // canReadUnbuffered checks data availability without buffered reader.
 // This is a fallback path that consumes one byte from the stream.
-func canReadUnbuffered(tcp *Tcp) bool {
+func canReadUnbuffered(tcp *Tcp, conn net.Conn) bool {
 	// Set a read deadline (100ms) to check data availability without blocking
 	deadline := time.Now().Add(100 * time.Millisecond)
-	tcp.conn.SetReadDeadline(deadline)
+	conn.SetReadDeadline(deadline)
 
 	// Try to peek at one byte
 	one := make([]byte, 1)
-	_, err := tcp.conn.Read(one)
+	_, err := conn.Read(one)
 
 	// Always reset deadline to zero (blocking mode) for actual message reads
 	var zero time.Time
-	tcp.conn.SetReadDeadline(zero)
+	conn.SetReadDeadline(zero)
 
 	// Handle different error conditions
 	if err == io.EOF {
@@ -375,6 +393,8 @@ func canReadUnbuffered(tcp *Tcp) bool {
 }
 
 func (tcp *Tcp) Disconnect() {
+	tcp.mu.Lock()
+	defer tcp.mu.Unlock()
 	if tcp.conn != nil {
 		tcp.conn.Close()
 		tcp.conn = nil
@@ -396,6 +416,7 @@ func (tcp *Tcp) GetProperty(property TcpProperty) string {
 }
 
 type Tcp struct {
+	mu         sync.RWMutex // Protects conn and reader from concurrent access
 	address    net.Addr
 	conn       net.Conn
 	reader     *bufio.Reader // Buffered reader for non-destructive peeking (fixes CanRead() bug)
