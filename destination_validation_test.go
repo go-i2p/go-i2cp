@@ -208,3 +208,15 @@ func TestDestinationGenerateB64ErrorHandling(t *testing.T) {
 		}
 	})
 }
+
+// TestDestinationVerifyErrorHandling tests Verify error handling
+// DEPRECATED: Verify() method removed - DSA verification no longer supported
+// Modern I2CP implementations use Ed25519 signatures exclusively
+/*
+func TestDestinationVerifyErrorHandling(t *testing.T) {
+	crypto := NewCrypto()
+
+	t.Run("verify destination", func(t *testing.T) {
+	})
+}
+*/
