@@ -560,9 +560,9 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		}
 	}()
 
-	// Wait for target tunnels to establish
+	// Wait for target tunnels to establish and destination to be published
 	t.Log("Waiting for target tunnels to establish...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	// Create lookup client and session
 	lookupClient := NewClient(nil)
@@ -637,23 +637,39 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 
 	// Give lookup client time to establish tunnels
 	t.Log("Waiting for lookup tunnels to establish...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
-	// Perform destination lookup by B32 address
-	t.Logf("Looking up destination: %s", targetB32)
-	requestId, err := lookupClient.DestinationLookup(lookupIOCtx, lookupSession, targetB32)
-	if err != nil {
-		t.Fatalf("Failed to initiate destination lookup: %v", err)
+	// Perform destination lookup by B32 address with retries
+	// Destination publishing to the floodfill DHT can take time
+	const maxLookupAttempts = 5
+	const lookupRetryDelay = 15 * time.Second
+
+	var lookupSuccess bool
+	for attempt := 1; attempt <= maxLookupAttempts; attempt++ {
+		t.Logf("Looking up destination (attempt %d/%d): %s", attempt, maxLookupAttempts, targetB32)
+		requestId, err := lookupClient.DestinationLookup(lookupIOCtx, lookupSession, targetB32)
+		if err != nil {
+			t.Fatalf("Failed to initiate destination lookup: %v", err)
+		}
+
+		t.Logf("Destination lookup initiated - requestId: %d", requestId)
+
+		select {
+		case <-destinationFound:
+			t.Log("Destination lookup successful")
+			lookupSuccess = true
+		case <-time.After(operationTimeout):
+			if attempt < maxLookupAttempts {
+				t.Logf("Lookup attempt %d timed out, retrying in %v...", attempt, lookupRetryDelay)
+				time.Sleep(lookupRetryDelay)
+			}
+		}
+		if lookupSuccess {
+			break
+		}
 	}
-
-	t.Logf("Destination lookup initiated - requestId: %d", requestId)
-
-	// Wait for lookup to complete
-	select {
-	case <-destinationFound:
-		t.Log("Destination lookup successful")
-	case <-time.After(operationTimeout):
-		t.Fatal("Timeout waiting for destination lookup")
+	if !lookupSuccess {
+		t.Fatal("All destination lookup attempts timed out")
 	}
 
 	// Verify looked-up destination matches target
@@ -678,7 +694,7 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	msgPayload := NewStream(testMsg)
 
 	lookupMu.Lock()
-	err = lookupSession.SendMessage(
+	sendErr := lookupSession.SendMessage(
 		lookedUpDest,
 		protocolTestData,
 		11111, // source port
@@ -688,8 +704,8 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	)
 	lookupMu.Unlock()
 
-	if err != nil {
-		t.Fatalf("Failed to send message to looked-up destination: %v", err)
+	if sendErr != nil {
+		t.Fatalf("Failed to send message to looked-up destination: %v", sendErr)
 	}
 
 	t.Log("Message sent, waiting for delivery...")
