@@ -68,7 +68,7 @@ func TestOfflineSignature_SetOfflineSignature(t *testing.T) {
 			}
 
 			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !offlineContainsString(err.Error(), tt.errContains) {
+				if err == nil || !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("SetOfflineSignature() error = %v, want error containing %q", err, tt.errContains)
 				}
 				return
@@ -269,7 +269,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 			}
 
 			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !offlineContainsString(err.Error(), tt.errContains) {
+				if err == nil || !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("ValidateOfflineSignature() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -365,19 +365,6 @@ func TestOfflineSignature_PropertyConstants(t *testing.T) {
 }
 
 // Helper functions
-
-func offlineContainsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && offlineContainsStringImpl(s, substr))
-}
-
-func offlineContainsStringImpl(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
 
 func formatUint32(v uint32) string {
 	return string([]byte{

@@ -269,20 +269,6 @@ func TestCircuitBreakerStates(t *testing.T) {
 	}
 }
 
-// Helper function to check if string contains substring
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsSubstringHelper(s, substr))
-}
-
-func containsSubstringHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
 // TestCircuitBreakerZeroFailures tests circuit with max failures = 0
 func TestCircuitBreakerZeroFailures(t *testing.T) {
 	cb := NewCircuitBreaker(0, 30*time.Second)

@@ -397,10 +397,10 @@ func TestLeaseSet2_String(t *testing.T) {
 	}
 
 	// Check that string contains expected fields
-	if !contains(str, "encrypted") {
+	if !containsSubstring(str, "encrypted") {
 		t.Error("String() should contain 'encrypted' for encrypted LeaseSet")
 	}
-	if !contains(str, "leases=1") {
+	if !containsSubstring(str, "leases=1") {
 		t.Error("String() should contain lease count")
 	}
 }
@@ -505,7 +505,7 @@ func TestOfflineSignature_String(t *testing.T) {
 		t.Error("String() returned empty string")
 	}
 
-	if !contains(str, "sigType=7") {
+	if !containsSubstring(str, "sigType=7") {
 		t.Error("String() should contain signing key type")
 	}
 }

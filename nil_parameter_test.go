@@ -23,7 +23,7 @@ func TestClientCreateSessionNilSession(t *testing.T) {
 	}
 
 	expectedMsg := "session cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -43,7 +43,7 @@ func TestClientDestinationLookupNilSession(t *testing.T) {
 	}
 
 	expectedMsg := "session cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -64,7 +64,7 @@ func TestClientDestinationLookupEmptyAddress(t *testing.T) {
 	}
 
 	expectedMsg := "address cannot be empty"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -81,7 +81,7 @@ func TestSessionSendMessageNilDestination(t *testing.T) {
 	}
 
 	expectedMsg := "destination cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -101,7 +101,7 @@ func TestSessionSendMessageNilPayload(t *testing.T) {
 	}
 
 	expectedMsg := "payload cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -122,7 +122,7 @@ func TestSessionSendMessageWithContextNilContext(t *testing.T) {
 	}
 
 	expectedMsg := "context cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -139,7 +139,7 @@ func TestSessionSendMessageExpiresNilDestination(t *testing.T) {
 	}
 
 	expectedMsg := "destination cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -159,7 +159,7 @@ func TestSessionSendMessageExpiresNilPayload(t *testing.T) {
 	}
 
 	expectedMsg := "payload cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -180,7 +180,7 @@ func TestSessionSendMessageExpiresWithContextNilContext(t *testing.T) {
 	}
 
 	expectedMsg := "context cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -196,7 +196,7 @@ func TestSessionReconfigureSessionNilProperties(t *testing.T) {
 	}
 
 	expectedMsg := "properties cannot be nil or empty"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -212,7 +212,7 @@ func TestSessionReconfigureSessionEmptyProperties(t *testing.T) {
 	}
 
 	expectedMsg := "properties cannot be nil or empty"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -229,7 +229,7 @@ func TestSessionReconfigureSessionWithContextNilContext(t *testing.T) {
 	}
 
 	expectedMsg := "context cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -245,7 +245,7 @@ func TestSessionSetPrimarySessionNilPrimary(t *testing.T) {
 	}
 
 	expectedMsg := "primary session cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -261,7 +261,7 @@ func TestSessionLookupDestinationEmptyAddress(t *testing.T) {
 	}
 
 	expectedMsg := "address cannot be empty"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -277,7 +277,7 @@ func TestSessionLookupDestinationWithContextNilContext(t *testing.T) {
 	}
 
 	expectedMsg := "context cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -292,7 +292,7 @@ func TestNewSessionWithContextNilClient(t *testing.T) {
 	}
 
 	expectedMsg := "client cannot be nil"
-	if !containsString(err.Error(), expectedMsg) {
+	if !containsSubstring(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }
@@ -346,9 +346,4 @@ func TestNilParameterErrorWrapping(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return containsSubstring(s, substr)
 }

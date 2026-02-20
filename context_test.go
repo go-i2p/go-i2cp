@@ -60,7 +60,7 @@ func TestConnectWithContext(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Connect() expected error containing %q, got nil", tt.errContains)
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+				} else if tt.errContains != "" && !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("Connect() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -116,7 +116,7 @@ func TestCreateSessionWithContext(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("CreateSession() expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+				} else if tt.errContains != "" && !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("CreateSession() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -171,7 +171,7 @@ func TestProcessIOWithContext(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ProcessIO() expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+				} else if tt.errContains != "" && !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("ProcessIO() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -234,7 +234,7 @@ func TestDestinationLookupWithContext(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("DestinationLookup() expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+				} else if tt.errContains != "" && !containsSubstring(err.Error(), tt.errContains) {
 					t.Errorf("DestinationLookup() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -335,7 +335,7 @@ func TestContextTimeout(t *testing.T) {
 	if err == nil {
 		t.Errorf("Connect() with timed out context should fail")
 	}
-	if !errors.Is(err, context.DeadlineExceeded) && !contains(err.Error(), "context") {
+	if !errors.Is(err, context.DeadlineExceeded) && !containsSubstring(err.Error(), "context") {
 		t.Errorf("Connect() error should be context-related, got: %v", err)
 	}
 }
@@ -374,19 +374,4 @@ func TestBackwardCompatibilityDisconnect(t *testing.T) {
 	default:
 		t.Errorf("Disconnect() should close shutdown channel")
 	}
-}
-
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && containsHelper(s, substr)))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

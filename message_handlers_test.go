@@ -2,14 +2,6 @@ package go_i2cp
 
 import "testing"
 
-// setupTestClient creates a minimal client for testing message handlers
-func setupTestClient() *Client {
-	return &Client{
-		router:   RouterInfo{},
-		sessions: make(map[uint16]*Session),
-	}
-}
-
 // TestOnMsgReceiveMessageBegin tests the deprecated ReceiveMessageBegin handler
 func TestOnMsgReceiveMessageBegin(t *testing.T) {
 	client := setupTestClient()

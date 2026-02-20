@@ -191,7 +191,7 @@ func TestMsgBlindingInfo_Validation(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tt.errorSubstr)
-				} else if tt.errorSubstr != "" && !blindingContainsSubstring(err.Error(), tt.errorSubstr) {
+				} else if tt.errorSubstr != "" && !containsSubstring(err.Error(), tt.errorSubstr) {
 					t.Errorf("expected error containing %q, got %q", tt.errorSubstr, err.Error())
 				}
 			} else {
@@ -565,19 +565,4 @@ func TestBlindingInfoConstants(t *testing.T) {
 	if I2CP_MSG_BLINDING_INFO != 42 {
 		t.Errorf("I2CP_MSG_BLINDING_INFO should be 42, got %d", I2CP_MSG_BLINDING_INFO)
 	}
-}
-
-// blindingContainsSubstring is a helper to check if a string contains a substring.
-func blindingContainsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && blindingFindSubstring(s, substr)))
-}
-
-func blindingFindSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
