@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"encoding/binary"
 	"testing"
 )
 
@@ -27,15 +28,15 @@ func TestMsgCreateLeaseSetSessionID(t *testing.T) {
 	}
 
 	// Create a test lease with minimal data
-	lease := &Lease{
-		tunnelGateway: [32]byte{
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-			17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-		},
-		tunnelId: 12345,
-		endDate:  1234567890,
-	}
-	leases := []*Lease{lease}
+	var leaseBytes [44]byte
+	copy(leaseBytes[:32], []byte{
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+	})
+	binary.BigEndian.PutUint32(leaseBytes[32:36], 12345)
+	binary.BigEndian.PutUint64(leaseBytes[36:44], 1234567890)
+	testLease := Lease(leaseBytes)
+	leases := []*Lease{&testLease}
 
 	// Call msgCreateLeaseSet with explicit sessionId (like onMsgReqVariableLease does)
 	testSessionId := uint16(42)
@@ -78,15 +79,15 @@ func TestMsgCreateLeaseSetWithSetSessionID(t *testing.T) {
 	session.SetID(99)
 
 	// Create a test lease with minimal data
-	lease := &Lease{
-		tunnelGateway: [32]byte{
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-			17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-		},
-		tunnelId: 12345,
-		endDate:  1234567890,
-	}
-	leases := []*Lease{lease}
+	var leaseBytes2 [44]byte
+	copy(leaseBytes2[:32], []byte{
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+	})
+	binary.BigEndian.PutUint32(leaseBytes2[32:36], 12345)
+	binary.BigEndian.PutUint64(leaseBytes2[36:44], 1234567890)
+	testLease2 := Lease(leaseBytes2)
+	leases := []*Lease{&testLease2}
 
 	// Call msgCreateLeaseSet with explicit sessionId parameter
 	// The parameter should take precedence over session.id

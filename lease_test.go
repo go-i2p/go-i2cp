@@ -40,25 +40,27 @@ func TestNewLeaseFromStream(t *testing.T) {
 	stream := NewStream(leaseData[:])
 
 	// Read lease from stream
-	lease, err := NewLeaseFromStream(stream)
+	l, err := NewLeaseFromStream(stream)
 	if err != nil {
 		t.Fatalf("NewLeaseFromStream failed: %v", err)
 	}
 
-	// Verify legacy fields
-	if lease.tunnelGateway != tunnelGateway {
-		t.Errorf("tunnelGateway mismatch: got %x, want %x", lease.tunnelGateway, tunnelGateway)
+	// Verify lease fields via common accessors
+	gw := l.TunnelGateway()
+	if gw != tunnelGateway {
+		t.Errorf("tunnelGateway mismatch: got %x, want %x", gw, tunnelGateway)
 	}
-	if lease.tunnelId != tunnelID {
-		t.Errorf("tunnelId mismatch: got %d, want %d", lease.tunnelId, tunnelID)
+	if l.TunnelID() != tunnelID {
+		t.Errorf("tunnelId mismatch: got %d, want %d", l.TunnelID(), tunnelID)
 	}
-	if lease.endDate != endDate {
-		t.Errorf("endDate mismatch: got %d, want %d", lease.endDate, endDate)
+	// Verify end date via raw bytes (8-byte big-endian ms timestamp at offset 36)
+	leaseBytes := l.Bytes()
+	var readEndDate uint64
+	for i := 0; i < 8; i++ {
+		readEndDate = (readEndDate << 8) | uint64(leaseBytes[36+i])
 	}
-
-	// Verify common lease was created
-	if lease.lease == nil {
-		t.Error("common/lease.Lease was not initialized")
+	if readEndDate != endDate {
+		t.Errorf("endDate mismatch: got %d, want %d", readEndDate, endDate)
 	}
 }
 
@@ -92,14 +94,14 @@ func TestLeaseRoundTrip(t *testing.T) {
 
 	// Read lease from stream
 	readStream := NewStream(leaseData[:])
-	lease, err := NewLeaseFromStream(readStream)
+	l, err := NewLeaseFromStream(readStream)
 	if err != nil {
 		t.Fatalf("NewLeaseFromStream failed: %v", err)
 	}
 
 	// Write lease to new stream
 	writeStream := NewStream(make([]byte, 0, 44))
-	err = lease.WriteToMessage(writeStream)
+	err = WriteLeaseToMessage(l, writeStream)
 	if err != nil {
 		t.Fatalf("WriteToMessage failed: %v", err)
 	}
@@ -149,10 +151,8 @@ func TestLeaseIntegrationWithCommonPackage(t *testing.T) {
 		t.Fatalf("NewLeaseFromStream failed: %v", err)
 	}
 
-	// Verify common/lease integration
-	if i2cpLease.lease == nil {
-		t.Fatal("common/lease.Lease not initialized")
-	}
+	// Verify common/lease integration - the returned Lease IS a common lease
+	// (no need to check for nil inner field since it's a type alias)
 
 	// Verify common/lease can parse the same data independently
 	commonLease, _, err := lease.ReadLease(leaseData[:])
@@ -161,13 +161,13 @@ func TestLeaseIntegrationWithCommonPackage(t *testing.T) {
 	}
 
 	// Verify both produce the same tunnel ID
-	if i2cpLease.lease.TunnelID() != commonLease.TunnelID() {
+	if i2cpLease.TunnelID() != commonLease.TunnelID() {
 		t.Errorf("tunnel ID mismatch: i2cp=%d, common=%d",
-			i2cpLease.lease.TunnelID(), commonLease.TunnelID())
+			i2cpLease.TunnelID(), commonLease.TunnelID())
 	}
 
 	// Verify tunnel gateway hashes match
-	i2cpGateway := i2cpLease.lease.TunnelGateway()
+	i2cpGateway := i2cpLease.TunnelGateway()
 	commonGateway := commonLease.TunnelGateway()
 	if i2cpGateway != commonGateway {
 		t.Errorf("tunnel gateway mismatch: i2cp=%x, common=%x",
@@ -185,19 +185,14 @@ func TestLeaseWriteToMessageWithCommonLease(t *testing.T) {
 
 	// Read lease from stream
 	readStream := NewStream(leaseData[:])
-	lease, err := NewLeaseFromStream(readStream)
+	l, err := NewLeaseFromStream(readStream)
 	if err != nil {
 		t.Fatalf("NewLeaseFromStream failed: %v", err)
 	}
 
-	// Verify common lease is initialized
-	if lease.lease == nil {
-		t.Fatal("common/lease.Lease not initialized")
-	}
-
 	// Write lease to stream
 	writeStream := NewStream(make([]byte, 0, 44))
-	err = lease.WriteToMessage(writeStream)
+	err = WriteLeaseToMessage(l, writeStream)
 	if err != nil {
 		t.Fatalf("WriteToMessage failed: %v", err)
 	}
@@ -285,9 +280,10 @@ func TestMultipleLeases(t *testing.T) {
 	// Verify each lease has correct data
 	for i := 0; i < numLeases; i++ {
 		expectedFirstByte := byte(i * 44)
-		if leases[i].tunnelGateway[0] != expectedFirstByte {
+		gw := leases[i].TunnelGateway()
+		if gw[0] != expectedFirstByte {
 			t.Errorf("lease %d: first byte mismatch: got %d, want %d",
-				i, leases[i].tunnelGateway[0], expectedFirstByte)
+				i, gw[0], expectedFirstByte)
 		}
 	}
 }

@@ -4,55 +4,43 @@ import (
 	"github.com/go-i2p/common/certificate"
 )
 
-// Certificate wraps the common/certificate.Certificate type to maintain
-// backward compatibility with existing I2CP code while delegating
-// certificate operations to the shared common package.
-type Certificate struct {
-	// Embed the common certificate for delegation
-	cert *certificate.Certificate
-	// Legacy fields for backward compatibility (deprecated)
-	certType uint8
-	data     []byte
-	length   uint16
-}
+// Certificate is a type alias for certificate.Certificate from the common package.
+// All certificate operations (Type, Length, Data, Bytes, IsValid) are provided
+// by the common package. I2CP-specific stream helpers are defined as package functions.
+type Certificate = certificate.Certificate
 
-// NewCertificate creates a new Certificate with the specified type.
-// This maintains backward compatibility with the old API.
-func NewCertificate(typ uint8) (cert Certificate) {
-	// Create certificate using common package
+// NewCertificate creates a new Certificate with the specified type using the common package.
+func NewCertificate(typ uint8) *Certificate {
 	commonCert, err := certificate.NewCertificateWithType(typ, nil)
 	if err != nil {
-		// For null certificates, this should never error
-		// but we handle it gracefully
 		Error("Failed to create certificate: %v", err)
-		return Certificate{}
+		return certificate.NewCertificate() // fallback to null
 	}
-	cert.cert = commonCert
-	// Populate legacy fields for backward compatibility
-	cert.certType = typ
-	cert.length = 0
-	return
+	return commonCert
 }
 
 // NewCertificateFromMessage reads a Certificate from an I2CP message stream.
-// This maintains backward compatibility while using common/certificate internally.
-func NewCertificateFromMessage(stream *Stream) (cert Certificate, err error) {
+// Uses common/certificate.ReadCertificate for parsing.
+func NewCertificateFromMessage(stream *Stream) (*Certificate, error) {
 	certType, length, err := readCertificateHeader(stream)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	if err = validateCertificateFormat(certType, length); err != nil {
-		return
+		return nil, err
 	}
 
 	certBytes, err := buildCertificateBytes(stream, certType, length)
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	cert, err = parseCertificate(certBytes, certType, length)
-	return
+	commonCert, _, err := certificate.ReadCertificate(certBytes)
+	if err != nil {
+		return nil, err
+	}
+	return commonCert, nil
 }
 
 // readCertificateHeader reads the certificate type and length from the stream.
@@ -91,69 +79,64 @@ func buildCertificateBytes(stream *Stream, certType uint8, length uint16) ([]byt
 	return certBytes, nil
 }
 
-// parseCertificate parses certificate bytes and populates legacy fields for backward compatibility.
-func parseCertificate(certBytes []byte, certType uint8, length uint16) (cert Certificate, err error) {
-	commonCert, _, err := certificate.ReadCertificate(certBytes)
-	if err != nil {
-		return
-	}
-
-	cert.cert = commonCert
-	cert.certType = certType
-	cert.length = length
-	if length > 0 {
-		cert.data = certBytes[3:]
-	}
-	return
-}
-
 // NewCertificateFromStream is an alias for NewCertificateFromMessage.
-func NewCertificateFromStream(stream *Stream) (Certificate, error) {
+func NewCertificateFromStream(stream *Stream) (*Certificate, error) {
 	return NewCertificateFromMessage(stream)
 }
 
-// Copy creates a deep copy of the Certificate.
-func (cert *Certificate) Copy() (newCert Certificate) {
-	if cert.cert != nil {
-		// Copy using common certificate's bytes
-		certBytes := cert.cert.Bytes()
-		commonCert, _, _ := certificate.ReadCertificate(certBytes)
-		newCert.cert = commonCert
+// CopyCertificate creates a deep copy of a Certificate by re-parsing its bytes.
+func CopyCertificate(cert *Certificate) *Certificate {
+	if cert == nil {
+		return nil
 	}
-	// Copy legacy fields
-	newCert.certType = cert.certType
-	newCert.length = cert.length
-	if len(cert.data) > 0 {
-		newCert.data = make([]byte, len(cert.data))
-		copy(newCert.data, cert.data)
+	certBytes := cert.Bytes()
+	copied, _, err := certificate.ReadCertificate(certBytes)
+	if err != nil {
+		return nil
 	}
-	return
+	return copied
 }
 
-// WriteToMessage writes the Certificate to an I2CP message stream.
-func (cert *Certificate) WriteToMessage(stream *Stream) (err error) {
-	if cert.cert != nil {
-		// Use common certificate's Bytes() method
-		certBytes := cert.cert.Bytes()
-		_, err = stream.Write(certBytes)
-		return
+// WriteCertificateToMessage writes a Certificate to an I2CP message stream.
+func WriteCertificateToMessage(cert *Certificate, stream *Stream) error {
+	if cert == nil {
+		if err := stream.WriteByte(CERTIFICATE_NULL); err != nil {
+			return err
+		}
+		return stream.WriteUint16(0)
 	}
-	// Fallback to legacy fields if common cert is not set
-	err = stream.WriteByte(cert.certType)
-	if err != nil {
-		return
-	}
-	err = stream.WriteUint16(cert.length)
-	if err != nil {
-		return
-	}
-	if cert.length > 0 {
-		_, err = stream.Write(cert.data)
-	}
-	return
+	certBytes := cert.Bytes()
+	_, err := stream.Write(certBytes)
+	return err
 }
 
-// WriteToStream is an alias for WriteToMessage.
-func (cert *Certificate) WriteToStream(stream *Stream) error {
-	return cert.WriteToMessage(stream)
+// WriteCertificateToStream is an alias for WriteCertificateToMessage.
+func WriteCertificateToStream(cert *Certificate, stream *Stream) error {
+	return WriteCertificateToMessage(cert, stream)
+}
+
+// CertType is a helper that returns the certificate type as uint8.
+// Returns 0 (CERTIFICATE_NULL) if type extraction fails.
+func CertType(cert *Certificate) uint8 {
+	if cert == nil {
+		return CERTIFICATE_NULL
+	}
+	t, err := cert.Type()
+	if err != nil {
+		return CERTIFICATE_NULL
+	}
+	return uint8(t)
+}
+
+// CertLength is a helper that returns the certificate data length as uint16.
+// Returns 0 if length extraction fails.
+func CertLength(cert *Certificate) uint16 {
+	if cert == nil {
+		return 0
+	}
+	l, err := cert.Length()
+	if err != nil {
+		return 0
+	}
+	return uint16(l)
 }

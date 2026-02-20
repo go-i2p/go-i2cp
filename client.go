@@ -2030,7 +2030,7 @@ func buildLeaseSetData(leaseSet *Stream, dest *Destination, sgk *SignatureKeyPai
 
 	leaseSet.WriteByte(tunnels)
 	for i := uint8(0); i < tunnels; i++ {
-		leases[i].WriteToMessage(leaseSet)
+		WriteLeaseToMessage(leases[i], leaseSet)
 	}
 
 	return nil
@@ -2287,7 +2287,7 @@ func (c *Client) writeLeaseSet2Leases(session *Session, leaseSet *Stream, leaseC
 	if len(leases) >= leaseCount {
 		for i := 0; i < leaseCount; i++ {
 			// Use WriteToLeaseSet2 for Lease2 format (40 bytes with 4-byte timestamp)
-			if err := leases[i].WriteToLeaseSet2(leaseSet); err != nil {
+			if err := WriteLeaseToLeaseSet2(leases[i], leaseSet); err != nil {
 				return fmt.Errorf("failed to write lease %d: %w", i, err)
 			}
 		}

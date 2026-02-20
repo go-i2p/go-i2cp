@@ -38,8 +38,7 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create KEY certificate: %w", err)
 	}
-	keyCert := Certificate{cert: commonCert, certType: CERTIFICATE_KEY, length: 4, data: keyCertPayload}
-	dest.cert = &keyCert
+	dest.cert = commonCert
 
 	// Generate Ed25519 signing keypair (fast, modern)
 	dest.sgk, err = crypto.SignatureKeygen(ED25519_SHA256)
@@ -110,10 +109,10 @@ func NewDestinationFromMessage(stream *Stream, crypto *Crypto) (dest *Destinatio
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
-	dest.cert = &cert
+	dest.cert = cert
 
-	if cert.certType != CERTIFICATE_KEY {
-		return nil, fmt.Errorf("unsupported certificate type: %d (only KEY certificates with Ed25519 supported)", cert.certType)
+	if CertType(cert) != CERTIFICATE_KEY {
+		return nil, fmt.Errorf("unsupported certificate type: %d (only KEY certificates with Ed25519 supported)", CertType(cert))
 	}
 
 	dest.sgk, err = createEd25519SigningKeyPair(signingKeyPadded)
@@ -164,7 +163,7 @@ func readDestinationCertificate(stream *Stream) (*Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
-	return &cert, nil
+	return cert, nil
 }
 
 // validateDestinationAlgorithm reads and validates the signature algorithm type.
@@ -354,7 +353,7 @@ func (dest *Destination) WriteToMessage(stream *Stream) (err error) {
 	}
 
 	// Write certificate
-	if err = dest.cert.WriteToMessage(stream); err != nil {
+	if err = WriteCertificateToMessage(dest.cert, stream); err != nil {
 		return fmt.Errorf("failed to write certificate: %w", err)
 	}
 	return nil
@@ -404,7 +403,7 @@ func (dest *Destination) WriteForSignature(stream *Stream) (err error) {
 	}
 
 	// Write certificate (same as wire format)
-	if err = dest.cert.WriteToMessage(stream); err != nil {
+	if err = WriteCertificateToMessage(dest.cert, stream); err != nil {
 		return fmt.Errorf("failed to write certificate: %w", err)
 	}
 	return nil
@@ -456,7 +455,7 @@ func (dest *Destination) WriteToStream(stream *Stream) (err error) {
 
 // writeCertificateToStream writes the destination certificate to the stream.
 func (dest *Destination) writeCertificateToStream(stream *Stream) error {
-	if err := dest.cert.WriteToStream(stream); err != nil {
+	if err := WriteCertificateToStream(dest.cert, stream); err != nil {
 		return fmt.Errorf("failed to write certificate to stream: %w", err)
 	}
 	return nil

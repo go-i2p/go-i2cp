@@ -376,7 +376,7 @@ func BenchmarkCertificate_Serialization(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream := NewStream(make([]byte, 0, 128))
-		err := cert.WriteToStream(stream)
+		err := WriteCertificateToStream(cert, stream)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -388,7 +388,7 @@ func BenchmarkCertificate_Deserialization(b *testing.B) {
 
 	// Pre-serialize certificate
 	stream := NewStream(make([]byte, 0, 128))
-	err := cert.WriteToStream(stream)
+	err := WriteCertificateToStream(cert, stream)
 	if err != nil {
 		b.Fatal(err)
 	}

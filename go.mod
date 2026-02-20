@@ -5,8 +5,8 @@ go 1.24.5
 toolchain go1.24.12
 
 require (
-	github.com/go-i2p/common v0.1.2
-	github.com/go-i2p/crypto v0.1.3
+	github.com/go-i2p/common v0.1.4-0.20260219220717-0b14adbcbaf8
+	github.com/go-i2p/crypto v0.1.4-0.20260218221204-a8834457f3f1
 	github.com/go-i2p/logger v0.1.2
 	go.step.sm/crypto v0.76.0
 	golang.org/x/crypto v0.47.0
