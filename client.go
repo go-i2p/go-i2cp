@@ -2109,15 +2109,35 @@ func (c *Client) checkLeaseSet2Support() error {
 }
 
 // ensureSessionEncryptionKeyPair generates an X25519 encryption key pair if not present.
+// Thread-safe: acquires session.mu to synchronize with cleanupSessionReferences.
 func (c *Client) ensureSessionEncryptionKeyPair(session *Session) error {
+	session.mu.Lock()
 	if session.encryptionKeyPair != nil {
+		session.mu.Unlock()
 		return nil
 	}
+	if session.closed {
+		session.mu.Unlock()
+		Debug("Session %d is closed, skipping encryption key pair generation", session.id)
+		return fmt.Errorf("session %d is closed", session.id)
+	}
+	session.mu.Unlock()
+
 	keyPair, err := NewX25519KeyPair()
 	if err != nil {
 		return fmt.Errorf("failed to generate X25519 encryption key pair: %w", err)
 	}
+
+	session.mu.Lock()
+	// Re-check after key generation in case session was closed concurrently
+	if session.closed {
+		session.mu.Unlock()
+		Debug("Session %d closed during key generation, discarding key pair", session.id)
+		return fmt.Errorf("session %d is closed", session.id)
+	}
 	session.encryptionKeyPair = keyPair
+	session.mu.Unlock()
+
 	Debug("Generated X25519 encryption key pair for session %d", session.id)
 	return nil
 }
