@@ -539,7 +539,8 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	t.Logf("Target destination (B32): %s", targetB32)
 
 	// Start target I/O processing
-	targetIOCtx, targetIOCancel := context.WithTimeout(context.Background(), messageTimeout)
+	// Needs long timeout to cover tunnel establishment + lookup retries + message delivery
+	targetIOCtx, targetIOCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer targetIOCancel()
 
 	go func() {
@@ -614,7 +615,8 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	t.Logf("Lookup session created - ID: %d", lookupSession.ID())
 
 	// Start lookup I/O processing
-	lookupIOCtx, lookupIOCancel := context.WithTimeout(context.Background(), messageTimeout)
+	// Needs long timeout to cover tunnel establishment + lookup retries + message delivery
+	lookupIOCtx, lookupIOCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer lookupIOCancel()
 
 	go func() {
