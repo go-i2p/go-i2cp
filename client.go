@@ -990,6 +990,20 @@ func (c *Client) lookupDestinationRequest(b32 string) (uint32, LookupEntry, erro
 	return requestId, lup, nil
 }
 
+// readDeprecatedSessionMessage reads session ID and message ID from a deprecated
+// I2CP message stream. Used by legacy ReceiveMessageBegin/End handlers.
+func readDeprecatedSessionMessage(stream *Stream, msgName string) (sessionID uint16, messageID uint32, err error) {
+	sessionID, err = stream.ReadUint16()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to read session ID from %s: %w", msgName, err)
+	}
+	messageID, err = stream.ReadUint32()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to read message ID from %s: %w", msgName, err)
+	}
+	return sessionID, messageID, nil
+}
+
 // onMsgReceiveMessageBegin handles deprecated ReceiveMessageBeginMessage (type 6)
 //
 // DEPRECATED: This message type is not used in fastReceive mode, which has been
@@ -1006,17 +1020,9 @@ func (c *Client) lookupDestinationRequest(b32 string) (uint32, LookupEntry, erro
 func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
 	Warning("Received deprecated ReceiveMessageBeginMessage - fastReceive mode should be used")
 
-	// Read session ID
-	sessionID, err := stream.ReadUint16()
+	sessionID, messageID, err := readDeprecatedSessionMessage(stream, "ReceiveMessageBegin")
 	if err != nil {
-		Error("Failed to read session ID from ReceiveMessageBegin: %v", err)
-		return
-	}
-
-	// Read message ID
-	messageID, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read message ID from ReceiveMessageBegin: %v", err)
+		Error("%v", err)
 		return
 	}
 
@@ -1047,17 +1053,9 @@ func (c *Client) onMsgReceiveMessageBegin(stream *Stream) {
 func (c *Client) onMsgReceiveMessageEnd(stream *Stream) {
 	Warning("Received deprecated ReceiveMessageEndMessage - fastReceive mode should be used")
 
-	// Read session ID
-	sessionID, err := stream.ReadUint16()
+	sessionID, messageID, err := readDeprecatedSessionMessage(stream, "ReceiveMessageEnd")
 	if err != nil {
-		Error("Failed to read session ID from ReceiveMessageEnd: %v", err)
-		return
-	}
-
-	// Read message ID
-	messageID, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read message ID from ReceiveMessageEnd: %v", err)
+		Error("%v", err)
 		return
 	}
 
@@ -1369,26 +1367,7 @@ func (c *Client) configurePrimarySubsession(sessionID uint16) {
 		return
 	}
 
-	if c.primarySessionID == nil {
-		id := sessionID
-		c.primarySessionID = &id
-		sess.SetPrimary(true)
-		sess.mu.Lock()
-		sess.primarySession = nil
-		sess.mu.Unlock()
-		Debug("Session %d is primary session", sessionID)
-		return
-	}
-
-	sess.SetPrimary(false)
-	if primarySess, exists := c.sessions[*c.primarySessionID]; exists {
-		sess.mu.Lock()
-		sess.primarySession = primarySess
-		sess.mu.Unlock()
-		Debug("Session %d is subsession of primary %d", sessionID, *c.primarySessionID)
-	} else {
-		Warning("Primary session %d not found for subsession %d", *c.primarySessionID, sessionID)
-	}
+	c.configurePrimarySubsessionForSession(sessionID, sess)
 }
 
 // trackSessionCreatedState updates state tracker for newly created session.
@@ -3283,7 +3262,11 @@ func waitForDestroyConfirmation(sess *Session, wasPrimary bool) {
 
 func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32, queue bool) error {
 	Debug("Sending SendMessageMessage")
-	out := &bytes.Buffer{}
+
+	compressedPayload, err := c.compressPayload(payload, protocol, srcPort, destPort)
+	if err != nil {
+		return err
+	}
 
 	// Thread-safe: protect messageStream access
 	c.messageStreamMu.Lock()
@@ -3292,27 +3275,12 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 	c.messageStream.Reset()
 	c.messageStream.WriteUint16(sess.id)
 	dest.WriteToMessage(c.messageStream)
-	compress := gzip.NewWriter(out)
-	compress.Write(payload.Bytes())
-	compress.Close()
-	header := out.Bytes()[:10]
-	binary.LittleEndian.PutUint16(header[4:6], srcPort)
-	binary.LittleEndian.PutUint16(header[6:8], destPort)
-	header[9] = protocol
-	c.messageStream.WriteUint32(uint32(out.Len()))
-	c.messageStream.Write(out.Bytes())
+	c.messageStream.WriteUint32(uint32(compressedPayload.Len()))
+	c.messageStream.Write(compressedPayload.Bytes())
 	c.messageStream.WriteUint32(nonce)
 
-	// Validate total message size per I2CP specification (max 64KB)
-	totalMessageSize := c.messageStream.Len()
-	if totalMessageSize > I2CP_MAX_MESSAGE_PAYLOAD_SIZE {
-		return fmt.Errorf("total I2CP message size %d exceeds maximum %d bytes (compressed payload size: %d bytes)",
-			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, out.Len())
-	}
-	// MINOR FIX: Warn if exceeding conservative size - spec says "about 64KB" (router-dependent)
-	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
-		Warning("Message size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
-			totalMessageSize, I2CP_SAFE_MESSAGE_SIZE, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
+	if err := c.validateMessageSize(compressedPayload.Len()); err != nil {
+		return err
 	}
 
 	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
@@ -3387,7 +3355,7 @@ func (c *Client) validateMessageSize(compressedSize int) error {
 			totalMessageSize, I2CP_MAX_MESSAGE_PAYLOAD_SIZE, compressedSize)
 	}
 	if totalMessageSize > I2CP_SAFE_MESSAGE_SIZE {
-		Warning("SendMessageExpires size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
+		Warning("Message size %d exceeds conservative limit %d bytes (max %d), some routers may reject",
 			totalMessageSize, I2CP_SAFE_MESSAGE_SIZE, I2CP_MAX_MESSAGE_PAYLOAD_SIZE)
 	}
 	return nil

@@ -36,6 +36,28 @@ import (
 	"fmt"
 )
 
+// writeKeyPairToStream writes an algorithm type, private key, and public key to a stream.
+// Shared by Ed25519KeyPair.WriteToStream and X25519KeyPair.WriteToStream.
+func writeKeyPairToStream(stream *Stream, algorithmType uint32, privateKey, publicKey []byte, keyTypeName string) error {
+	if stream == nil {
+		return fmt.Errorf("stream cannot be nil")
+	}
+
+	if err := stream.WriteUint32(algorithmType); err != nil {
+		return fmt.Errorf("failed to write algorithm type: %w", err)
+	}
+
+	if _, err := stream.Write(privateKey); err != nil {
+		return fmt.Errorf("failed to write %s private key: %w", keyTypeName, err)
+	}
+
+	if _, err := stream.Write(publicKey); err != nil {
+		return fmt.Errorf("failed to write %s public key: %w", keyTypeName, err)
+	}
+
+	return nil
+}
+
 // NewCrypto creates a new Crypto instance
 func NewCrypto() *Crypto {
 	return &Crypto{

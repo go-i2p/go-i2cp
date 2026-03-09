@@ -1316,6 +1316,31 @@ func (session *Session) Config() *SessionConfig {
 	return session.config
 }
 
+// getTunnelConfigInt reads a directional tunnel config property as an integer.
+// Returns 0 if the session config is nil or the property is not set.
+func (session *Session) getTunnelConfigInt(inboundProp, outboundProp SessionConfigProperty, inbound bool) int {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+
+	if session.config == nil {
+		return 0
+	}
+
+	prop := outboundProp
+	if inbound {
+		prop = inboundProp
+	}
+
+	value := session.config.properties[prop]
+	if value == "" {
+		return 0
+	}
+
+	var result int
+	fmt.Sscanf(value, "%d", &result)
+	return result
+}
+
 // GetTunnelQuantity returns the number of tunnels configured for this session.
 // The inbound parameter determines which direction: true for inbound, false for outbound.
 // Returns 0 if the session is not properly initialized or the property is not set.
@@ -1333,29 +1358,7 @@ func (session *Session) Config() *SessionConfig {
 //	outboundCount := session.GetTunnelQuantity(false)
 //	fmt.Printf("Tunnels: %d inbound, %d outbound\n", inboundCount, outboundCount)
 func (session *Session) GetTunnelQuantity(inbound bool) int {
-	session.mu.RLock()
-	defer session.mu.RUnlock()
-
-	if session.config == nil {
-		return 0
-	}
-
-	var prop SessionConfigProperty
-	if inbound {
-		prop = SESSION_CONFIG_PROP_INBOUND_QUANTITY
-	} else {
-		prop = SESSION_CONFIG_PROP_OUTBOUND_QUANTITY
-	}
-
-	value := session.config.properties[prop]
-	if value == "" {
-		return 0
-	}
-
-	// Parse string to int
-	var quantity int
-	fmt.Sscanf(value, "%d", &quantity)
-	return quantity
+	return session.getTunnelConfigInt(SESSION_CONFIG_PROP_INBOUND_QUANTITY, SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, inbound)
 }
 
 // GetTunnelLength returns the hop count (length) for tunnels in this session.
@@ -1376,29 +1379,7 @@ func (session *Session) GetTunnelQuantity(inbound bool) int {
 //	fmt.Printf("Tunnel lengths: %d inbound hops, %d outbound hops\n",
 //	    inboundLength, outboundLength)
 func (session *Session) GetTunnelLength(inbound bool) int {
-	session.mu.RLock()
-	defer session.mu.RUnlock()
-
-	if session.config == nil {
-		return 0
-	}
-
-	var prop SessionConfigProperty
-	if inbound {
-		prop = SESSION_CONFIG_PROP_INBOUND_LENGTH
-	} else {
-		prop = SESSION_CONFIG_PROP_OUTBOUND_LENGTH
-	}
-
-	value := session.config.properties[prop]
-	if value == "" {
-		return 0
-	}
-
-	// Parse string to int
-	var length int
-	fmt.Sscanf(value, "%d", &length)
-	return length
+	return session.getTunnelConfigInt(SESSION_CONFIG_PROP_INBOUND_LENGTH, SESSION_CONFIG_PROP_OUTBOUND_LENGTH, inbound)
 }
 
 // GetProperty returns the value of a specific session configuration property.

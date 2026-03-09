@@ -229,29 +229,7 @@ func (kp *Ed25519KeyPair) VerifyStream(stream *Stream) (bool, error) {
 
 // WriteToStream writes the complete Ed25519 key pair to a stream
 func (kp *Ed25519KeyPair) WriteToStream(stream *Stream) error {
-	if stream == nil {
-		return fmt.Errorf("stream cannot be nil")
-	}
-
-	// Write algorithm type
-	err := stream.WriteUint32(kp.algorithmType)
-	if err != nil {
-		return fmt.Errorf("failed to write algorithm type: %w", err)
-	}
-
-	// Write private key
-	_, err = stream.Write(kp.privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to write private key: %w", err)
-	}
-
-	// Write public key
-	_, err = stream.Write(kp.publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to write public key: %w", err)
-	}
-
-	return nil
+	return writeKeyPairToStream(stream, kp.algorithmType, kp.privateKey, kp.publicKey, "Ed25519")
 }
 
 // WritePublicKeyToStream writes only the public key to a stream.

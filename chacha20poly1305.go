@@ -107,24 +107,29 @@ func (c *ChaCha20Poly1305Cipher) Encrypt(plaintext, additionalData []byte) ([]by
 	return result, nil
 }
 
-// EncryptStream encrypts data from source stream and writes to destination stream
-func (c *ChaCha20Poly1305Cipher) EncryptStream(src, dst *Stream, additionalData []byte) error {
+// transformStream applies a byte-level transformation between two streams.
+// Used by EncryptStream and DecryptStream to avoid duplicating nil-check and I/O logic.
+func (c *ChaCha20Poly1305Cipher) transformStream(src, dst *Stream, additionalData []byte, transform func([]byte, []byte) ([]byte, error), opName string) error {
 	if src == nil || dst == nil {
 		return fmt.Errorf("source and destination streams cannot be nil")
 	}
 
-	plaintext := src.Bytes()
-	ciphertext, err := c.Encrypt(plaintext, additionalData)
+	result, err := transform(src.Bytes(), additionalData)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt stream: %w", err)
+		return fmt.Errorf("failed to %s stream: %w", opName, err)
 	}
 
-	_, err = dst.Write(ciphertext)
+	_, err = dst.Write(result)
 	if err != nil {
-		return fmt.Errorf("failed to write encrypted data to stream: %w", err)
+		return fmt.Errorf("failed to write %sed data to stream: %w", opName, err)
 	}
 
 	return nil
+}
+
+// EncryptStream encrypts data from source stream and writes to destination stream
+func (c *ChaCha20Poly1305Cipher) EncryptStream(src, dst *Stream, additionalData []byte) error {
+	return c.transformStream(src, dst, additionalData, c.Encrypt, "encrypt")
 }
 
 // Decrypt decrypts ciphertext with optional associated data using ChaCha20-Poly1305
@@ -163,22 +168,7 @@ func (c *ChaCha20Poly1305Cipher) Decrypt(ciphertext, additionalData []byte) ([]b
 
 // DecryptStream decrypts data from source stream and writes to destination stream
 func (c *ChaCha20Poly1305Cipher) DecryptStream(src, dst *Stream, additionalData []byte) error {
-	if src == nil || dst == nil {
-		return fmt.Errorf("source and destination streams cannot be nil")
-	}
-
-	ciphertext := src.Bytes()
-	plaintext, err := c.Decrypt(ciphertext, additionalData)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt stream: %w", err)
-	}
-
-	_, err = dst.Write(plaintext)
-	if err != nil {
-		return fmt.Errorf("failed to write decrypted data to stream: %w", err)
-	}
-
-	return nil
+	return c.transformStream(src, dst, additionalData, c.Decrypt, "decrypt")
 }
 
 // WriteToStream writes the cipher key to a stream

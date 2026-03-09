@@ -181,29 +181,7 @@ func (kp *X25519KeyPair) GenerateSharedSecret(peerPublicKey [32]byte) ([32]byte,
 
 // WriteToStream writes the complete X25519 key pair to a stream
 func (kp *X25519KeyPair) WriteToStream(stream *Stream) error {
-	if stream == nil {
-		return fmt.Errorf("stream cannot be nil")
-	}
-
-	// Write algorithm type
-	err := stream.WriteUint32(kp.algorithmType)
-	if err != nil {
-		return fmt.Errorf("failed to write algorithm type: %w", err)
-	}
-
-	// Write private key (convert slice to bytes)
-	_, err = stream.Write(kp.privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to write X25519 private key: %w", err)
-	}
-
-	// Write public key (convert slice to bytes)
-	_, err = stream.Write(kp.publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to write X25519 public key: %w", err)
-	}
-
-	return nil
+	return writeKeyPairToStream(stream, kp.algorithmType, kp.privateKey, kp.publicKey, "X25519")
 }
 
 // WritePublicKeyToStream writes only the public key to a stream

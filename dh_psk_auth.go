@@ -328,6 +328,19 @@ func AuthenticateForBlindedDestination(scheme uint8, clientKey, serverPublicKey 
 //   - blindedSigType: Signature type used for blinding
 //   - expiration: Expiration time (seconds since epoch)
 //
+// configureBlindingAuth derives a per-client auth key and attaches it to a BlindingInfo.
+// This is the shared implementation for all Create*BlindingInfo* convenience functions.
+func configureBlindingAuth(info *BlindingInfo, scheme uint8, key1, key2 [32]byte, schemeName string) (*BlindingInfo, error) {
+	decryptionKey, err := DerivePerClientAuthKey(scheme, key1, key2)
+	if err != nil {
+		return nil, fmt.Errorf("%s authentication failed: %w", schemeName, err)
+	}
+	info.PerClientAuth = true
+	info.AuthScheme = scheme
+	info.DecryptionKey = decryptionKey[:]
+	return info, nil
+}
+
 // Returns BlindingInfo ready to send via Session.SendBlindingInfo().
 func CreateDHBlindingInfo(
 	destHash []byte,
@@ -335,24 +348,11 @@ func CreateDHBlindingInfo(
 	blindedSigType uint16,
 	expiration uint32,
 ) (*BlindingInfo, error) {
-	// Create blinding info
 	info, err := NewBlindingInfoWithHash(destHash, blindedSigType, expiration)
 	if err != nil {
 		return nil, err
 	}
-
-	// Derive DH authentication key
-	decryptionKey, err := DerivePerClientAuthKey(BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("DH authentication failed: %w", err)
-	}
-
-	// Configure per-client auth
-	info.PerClientAuth = true
-	info.AuthScheme = BLINDING_AUTH_SCHEME_DH
-	info.DecryptionKey = decryptionKey[:]
-
-	return info, nil
+	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
 }
 
 // CreatePSKBlindingInfo creates a complete BlindingInfo with PSK authentication
@@ -371,24 +371,11 @@ func CreatePSKBlindingInfo(
 	blindedSigType uint16,
 	expiration uint32,
 ) (*BlindingInfo, error) {
-	// Create blinding info
 	info, err := NewBlindingInfoWithHash(destHash, blindedSigType, expiration)
 	if err != nil {
 		return nil, err
 	}
-
-	// Derive PSK authentication key
-	decryptionKey, err := DerivePerClientAuthKey(BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{})
-	if err != nil {
-		return nil, fmt.Errorf("PSK authentication failed: %w", err)
-	}
-
-	// Configure per-client auth
-	info.PerClientAuth = true
-	info.AuthScheme = BLINDING_AUTH_SCHEME_PSK
-	info.DecryptionKey = decryptionKey[:]
-
-	return info, nil
+	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
 }
 
 // CreateDHBlindingInfoForHostname creates BlindingInfo with DH auth for a hostname endpoint.
@@ -402,17 +389,7 @@ func CreateDHBlindingInfoForHostname(
 	if err != nil {
 		return nil, err
 	}
-
-	decryptionKey, err := DerivePerClientAuthKey(BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("DH authentication failed: %w", err)
-	}
-
-	info.PerClientAuth = true
-	info.AuthScheme = BLINDING_AUTH_SCHEME_DH
-	info.DecryptionKey = decryptionKey[:]
-
-	return info, nil
+	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
 }
 
 // CreatePSKBlindingInfoForHostname creates BlindingInfo with PSK auth for a hostname endpoint.
@@ -426,17 +403,7 @@ func CreatePSKBlindingInfoForHostname(
 	if err != nil {
 		return nil, err
 	}
-
-	decryptionKey, err := DerivePerClientAuthKey(BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{})
-	if err != nil {
-		return nil, fmt.Errorf("PSK authentication failed: %w", err)
-	}
-
-	info.PerClientAuth = true
-	info.AuthScheme = BLINDING_AUTH_SCHEME_PSK
-	info.DecryptionKey = decryptionKey[:]
-
-	return info, nil
+	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
 }
 
 // VerifyDHSharedSecret verifies that a DH shared secret can be derived from the given keys.
