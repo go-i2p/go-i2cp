@@ -19,6 +19,21 @@ func getTestKeys(keyPair *Ed25519KeyPair) (publicKey [32]byte, privateKey [64]by
 	return
 }
 
+// setupBlindingTestKeys creates a destination and extracts its Ed25519 keys for blinding tests.
+func setupBlindingTestKeys(t *testing.T) (publicKey [32]byte, privateKey [64]byte, secret []byte) {
+	t.Helper()
+	crypto := NewCrypto()
+	dest, err := NewDestination(crypto)
+	if err != nil {
+		t.Fatalf("Failed to create destination: %v", err)
+	}
+	keyPair, err := dest.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("Failed to get signing key pair: %v", err)
+	}
+	return getTestKeys(keyPair)
+}
+
 // TestDeriveBlindingFactor tests the basic blinding factor derivation.
 func TestDeriveBlindingFactor(t *testing.T) {
 	secret := make([]byte, 32)
@@ -138,19 +153,7 @@ func TestDeriveBlindingFactorWithTimestamp(t *testing.T) {
 
 // TestBlindPublicKey tests public key blinding.
 func TestBlindPublicKey(t *testing.T) {
-	// Generate a test Ed25519 key pair
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, _, secret := getTestKeys(keyPair)
+	publicKey, _, secret := setupBlindingTestKeys(t)
 
 	// Derive blinding factor
 	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
@@ -181,19 +184,7 @@ func TestBlindPublicKey(t *testing.T) {
 
 // TestBlindUnblindRoundTrip tests that unblinding reverses blinding.
 func TestBlindUnblindRoundTrip(t *testing.T) {
-	// Generate a test Ed25519 key pair
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, _, secret := getTestKeys(keyPair)
+	publicKey, _, secret := setupBlindingTestKeys(t)
 
 	// Derive blinding factor
 	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
@@ -219,19 +210,7 @@ func TestBlindUnblindRoundTrip(t *testing.T) {
 
 // TestDeriveBlindingKeys tests the convenience function for deriving blinding keys.
 func TestDeriveBlindingKeys(t *testing.T) {
-	// Generate a test Ed25519 key pair
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, _, secret := getTestKeys(keyPair)
+	publicKey, _, secret := setupBlindingTestKeys(t)
 
 	// Test with explicit date
 	result, err := DeriveBlindingKeys(secret, publicKey, "2025-11-24")
@@ -267,19 +246,7 @@ func TestDeriveBlindingKeys(t *testing.T) {
 
 // TestDeriveBlindingKeysWithPrivate tests derivation including private key blinding.
 func TestDeriveBlindingKeysWithPrivate(t *testing.T) {
-	// Generate a test Ed25519 key pair
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, privateKey, secret := getTestKeys(keyPair)
+	publicKey, privateKey, secret := setupBlindingTestKeys(t)
 
 	result, err := DeriveBlindingKeysWithPrivate(secret, publicKey, privateKey, "2025-11-24")
 	if err != nil {
@@ -298,19 +265,7 @@ func TestDeriveBlindingKeysWithPrivate(t *testing.T) {
 
 // TestVerifyBlindedDestination tests blinded destination verification.
 func TestVerifyBlindedDestination(t *testing.T) {
-	// Generate a test Ed25519 key pair
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, _, secret := getTestKeys(keyPair)
+	publicKey, _, secret := setupBlindingTestKeys(t)
 
 	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
 	if err != nil {
@@ -439,20 +394,7 @@ func TestSessionStoreBlindingInfo_NilParams(t *testing.T) {
 // TestBlindingCrypto_Integration tests the full blinding workflow.
 func TestBlindingCrypto_Integration(t *testing.T) {
 	// Simulate a service creating a blinded destination
-
-	// 1. Service generates a destination
-	crypto := NewCrypto()
-	dest, err := NewDestination(crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-
-	keyPair, err := dest.SigningKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to get signing key pair: %v", err)
-	}
-
-	publicKey, privateKey, secret := getTestKeys(keyPair)
+	publicKey, privateKey, secret := setupBlindingTestKeys(t)
 	date := "2025-11-24"
 
 	// 2. Service derives blinding keys for the day
