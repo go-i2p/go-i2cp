@@ -13,8 +13,10 @@ I2CP_READY_TIMEOUT=300   # seconds to wait for I2CP session acceptance
 TUNNEL_BUILD_GRACE=30    # seconds after I2CP ready before running tests
 TEST_FLAGS="${*:---v -timeout 10m -count=1}"
 
+ROUTER_LOG="/tmp/router.log"
+
 echo "==> Starting go-i2p router on 127.0.0.1:7654..."
-go-i2p --i2cp.address=127.0.0.1:7654 &
+go-i2p --i2cp.address=127.0.0.1:7654 >"$ROUTER_LOG" 2>&1 &
 ROUTER_PID=$!
 
 # Ensure the router is stopped when the script exits
@@ -111,6 +113,38 @@ sleep "$TUNNEL_BUILD_GRACE"
 
 # --- Phase 4: run the test suite ---
 echo "==> Running go-i2cp test suite..."
+echo ""
 cd /go-i2cp
 # shellcheck disable=SC2086
-exec go test $TEST_FLAGS ./...
+go test $TEST_FLAGS ./... 2>&1 | tee /tmp/test_output.log
+TEST_EXIT=${PIPESTATUS[0]}
+
+echo ""
+echo "========================================"
+if [ "$TEST_EXIT" -eq 0 ]; then
+    echo "  RESULT: ALL TESTS PASSED"
+else
+    echo "  RESULT: TESTS FAILED (exit code $TEST_EXIT)"
+fi
+echo "========================================"
+
+# Print pass/fail summary from test output
+PASSED=$(grep -c '^--- PASS:' /tmp/test_output.log 2>/dev/null || echo 0)
+FAILED=$(grep -c '^--- FAIL:' /tmp/test_output.log 2>/dev/null || echo 0)
+SKIPPED=$(grep -c '^--- SKIP:' /tmp/test_output.log 2>/dev/null || echo 0)
+echo "  Passed:  $PASSED"
+echo "  Failed:  $FAILED"
+echo "  Skipped: $SKIPPED"
+echo "========================================"
+
+if [ "$TEST_EXIT" -ne 0 ]; then
+    echo ""
+    echo "--- Failed tests ---"
+    grep '^--- FAIL:' /tmp/test_output.log 2>/dev/null || true
+    echo ""
+    echo "--- Router log (last 30 lines) ---"
+    tail -30 "$ROUTER_LOG" 2>/dev/null || true
+    echo "--- End router log ---"
+fi
+
+exit "$TEST_EXIT"
