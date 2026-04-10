@@ -299,6 +299,9 @@ func (c *Client) readMessageHeader() (uint32, uint8, error) {
 	i, err := c.tcp.Receive(firstFive)
 	if i == 0 {
 		c.trackError("network")
+		if c.circuitBreaker != nil {
+			c.circuitBreaker.RecordFailure()
+		}
 		if c.callbacks != nil && c.callbacks.OnDisconnect != nil {
 			c.callbacks.OnDisconnect(c, "Didn't receive anything", nil)
 		}
@@ -306,6 +309,9 @@ func (c *Client) readMessageHeader() (uint32, uint8, error) {
 	}
 	if err != nil {
 		c.trackError("network")
+		if c.circuitBreaker != nil {
+			c.circuitBreaker.RecordFailure()
+		}
 		Error("Failed to receive message header: %s", err.Error())
 		return 0, 0, err
 	}

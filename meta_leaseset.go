@@ -184,6 +184,11 @@ func (c *MetaLeaseSetConfig) AddRevocation(hash [32]byte) {
 // MetaLeaseSet is used to create a "parent" LeaseSet that references multiple "child"
 // LeaseSets, enabling load balancing and redundancy across multiple destinations.
 //
+// EXPERIMENTAL: MetaLeaseSet is not yet fully supported via I2CP.
+// The contents and format are preliminary and subject to change per the I2CP specification.
+// This implementation is based on the draft specification and may require updates
+// when the format is finalized.
+//
 // Parameters:
 //   - session: The session to create the MetaLeaseSet for
 //   - config: MetaLeaseSetConfig containing MetaLeases and revocations
@@ -192,6 +197,8 @@ func (c *MetaLeaseSetConfig) AddRevocation(hash [32]byte) {
 // Returns an error if the router version doesn't support CreateLeaseSet2 or if
 // the message fails to send.
 func (c *Client) msgCreateMetaLeaseSet(session *Session, config *MetaLeaseSetConfig, queue bool) error {
+	Warning("MetaLeaseSet format is preliminary per I2CP spec and subject to change")
+
 	// Version check: CreateLeaseSet2 requires router 0.9.39+
 	if !c.SupportsVersion(VersionCreateLeaseSet2) {
 		return fmt.Errorf("router version %s does not support CreateLeaseSet2/MetaLeaseSet (requires %s+)",

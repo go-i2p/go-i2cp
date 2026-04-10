@@ -206,6 +206,14 @@ func (cb *CircuitBreaker) Reset() {
 	Debug("Circuit breaker manually reset")
 }
 
+// RecordFailure records an external failure in the circuit breaker.
+// This is used for operations not wrapped with Execute(), such as receive errors.
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.recordFailure()
+}
+
 // String returns a human-readable representation of the circuit breaker state.
 func (cb *CircuitBreaker) String() string {
 	cb.mu.Lock()

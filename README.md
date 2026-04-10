@@ -15,7 +15,7 @@ A low-level Go implementation of the I2P Client Protocol (I2CP) for building ano
 
 ## Requirements
 
-- Go 1.19+
+- Go 1.25+
 - Running I2P router with I2CP enabled (default port 7654)
 
 ## Installation
@@ -210,7 +210,7 @@ if go_i2cp.IsTemporary(err) {
 - ✅ Destination Services (DestLookup, DestReply, GetBandwidthLimits)
 - ✅ Authentication (TLS certificates, username/password, none)
 - ✅ Modern Features:
-  - LeaseSet2 support (standard, encrypted, meta types)
+  - LeaseSet2 support (standard, encrypted types; meta type is experimental/preliminary spec)
   - Blinding support (message parsing; crypto operations require application implementation)
   - Offline signing support
   - Message batching for improved throughput
@@ -223,15 +223,15 @@ if go_i2cp.IsTemporary(err) {
   - X25519 key exchange (I2CP 0.9.46+)
   - ChaCha20-Poly1305 encryption (I2CP 0.9.46+)
 - ✅ Context-Aware Operations (cancellation, timeouts, graceful shutdown)
-- ✅ Comprehensive Error Handling (20+ typed errors, 96.2% error path coverage)
+- ✅ Comprehensive Error Handling (20+ typed errors, 96.2% error-handling path coverage)
 
 **📊 Test Coverage:**
 
-- **530+ passing tests** covering all major features
+- **1290+ passing tests** covering all major features
 - **75% code coverage** across core library
 - Integration tests with real I2P router
-- 40+ benchmarks for performance validation
-- Error path coverage >96%
+- 70+ benchmarks for performance validation
+- Error-handling path coverage >96% (measured across error return branches specifically)
 
 **🔄 Future Enhancements (Phase 4):**
 
@@ -249,7 +249,7 @@ if go_i2cp.IsTemporary(err) {
 
 - **I2CP Protocol Versions:** 0.6.5 - 0.9.66
 - **Recommended I2P Router:** 2.0.0+
-- **Go Version:** 1.19+ (tested with 1.24.4)
+- **Go Version:** 1.25+
 
 ## Testing
 

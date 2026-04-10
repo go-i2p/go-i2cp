@@ -48,7 +48,7 @@ const (
 // I2CP Client Constants
 // Moved from: client.go
 const (
-	I2CP_CLIENT_VERSION                 = "0.9.33"
+	I2CP_CLIENT_VERSION                 = "0.9.66"
 	I2CP_PROTOCOL_INIT            uint8 = 0x2a
 	I2CP_MESSAGE_SIZE                   = 0xffff
 	I2CP_MAX_MESSAGE_PAYLOAD_SIZE       = 65536 // 64KB max payload per I2CP spec (spec says "about 64 KB")

@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -253,4 +254,189 @@ func TestBatchingDefaults(t *testing.T) {
 	if client.batchSizeThreshold != expectedThreshold {
 		t.Errorf("Expected default size threshold %d, got %d", expectedThreshold, client.batchSizeThreshold)
 	}
+}
+
+// TestFlushOutputQueueWithMessages verifies that flushOutputQueue sends queued messages
+// through the TCP connection and clears the queue.
+func TestFlushOutputQueueWithMessages(t *testing.T) {
+	client := NewClient(nil)
+
+	server, clientConn := net.Pipe()
+	defer server.Close()
+	defer clientConn.Close()
+
+	client.tcp.conn = clientConn
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := server.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	msg1 := NewStream([]byte{0x00, 0x00, 0x00, 0x01, 0x05, 0xAA})
+	msg2 := NewStream([]byte{0x00, 0x00, 0x00, 0x02, 0x06, 0xBB, 0xCC})
+
+	client.lock.Lock()
+	client.outputQueue = append(client.outputQueue, msg1, msg2)
+	client.lock.Unlock()
+
+	if err := client.flushOutputQueue(); err != nil {
+		t.Fatalf("flushOutputQueue() failed: %v", err)
+	}
+
+	client.lock.Lock()
+	remaining := len(client.outputQueue)
+	client.lock.Unlock()
+
+	if remaining != 0 {
+		t.Errorf("Expected empty queue after flush, got %d messages", remaining)
+	}
+}
+
+// TestFlushOutputQueueWithMetrics verifies that flushing tracks metrics correctly.
+func TestFlushOutputQueueWithMetrics(t *testing.T) {
+	client := NewClient(nil)
+	metrics := NewInMemoryMetrics()
+	client.metrics = metrics
+
+	server, clientConn := net.Pipe()
+	defer server.Close()
+	defer clientConn.Close()
+
+	client.tcp.conn = clientConn
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := server.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	msgType := uint8(I2CP_MSG_SEND_MESSAGE)
+	msg := NewStream([]byte{0x00, 0x00, 0x00, 0x01, msgType, 0xDE, 0xAD})
+
+	client.lock.Lock()
+	client.outputQueue = append(client.outputQueue, msg)
+	client.lock.Unlock()
+
+	if err := client.flushOutputQueue(); err != nil {
+		t.Fatalf("flushOutputQueue() failed: %v", err)
+	}
+
+	if sent := metrics.BytesSent(); sent != uint64(msg.Len()) {
+		t.Errorf("Expected BytesSent=%d, got %d", msg.Len(), sent)
+	}
+
+	if count := metrics.MessagesSent(msgType); count != 1 {
+		t.Errorf("Expected MessagesSent(%d)=1, got %d", msgType, count)
+	}
+}
+
+// TestExecuteFlushNoConnection verifies executeFlush handles no connection gracefully.
+func TestExecuteFlushNoConnection(t *testing.T) {
+	client := NewClient(nil)
+
+	client.lock.Lock()
+	client.outputQueue = append(client.outputQueue, NewStream([]byte{0x01, 0x02, 0x03, 0x04, 0x05}))
+	client.lock.Unlock()
+
+	// Should not panic even with no TCP connection
+	client.executeFlush()
+
+	// sendQueuedMessages sees ret==0 (conn nil), logs warning, breaks, then clearQueue runs
+	client.lock.Lock()
+	remaining := len(client.outputQueue)
+	client.lock.Unlock()
+
+	if remaining != 0 {
+		t.Errorf("Expected queue cleared after flush attempt, got %d messages", remaining)
+	}
+}
+
+// TestClearQueue verifies clearQueue resets the output queue.
+func TestClearQueue(t *testing.T) {
+	client := NewClient(nil)
+
+	client.lock.Lock()
+	client.outputQueue = append(client.outputQueue,
+		NewStream([]byte{0x01}),
+		NewStream([]byte{0x02}),
+	)
+	client.clearQueue()
+	remaining := len(client.outputQueue)
+	client.lock.Unlock()
+
+	if remaining != 0 {
+		t.Errorf("Expected empty queue after clearQueue, got %d", remaining)
+	}
+}
+
+// TestTrackMessageMetricsNilMetrics verifies trackMessageMetrics is safe with nil metrics.
+func TestTrackMessageMetricsNilMetrics(t *testing.T) {
+	client := NewClient(nil)
+	client.metrics = nil
+
+	msg := NewStream([]byte{0x00, 0x00, 0x00, 0x01, 0x05, 0xAA})
+	client.trackMessageMetrics(msg)
+}
+
+// TestTrackMessageMetricsShortMessage verifies trackMessageMetrics handles short messages.
+func TestTrackMessageMetricsShortMessage(t *testing.T) {
+	client := NewClient(nil)
+	metrics := NewInMemoryMetrics()
+	client.metrics = metrics
+
+	msg := NewStream([]byte{0x01, 0x02})
+	client.trackMessageMetrics(msg)
+
+	if sent := metrics.BytesSent(); sent != 2 {
+		t.Errorf("Expected BytesSent=2, got %d", sent)
+	}
+}
+
+// TestBatchFlushWorkerTimerFlush verifies the flush worker flushes on timer tick.
+func TestBatchFlushWorkerTimerFlush(t *testing.T) {
+	client := NewClient(nil)
+
+	server, clientConn := net.Pipe()
+	defer server.Close()
+	defer clientConn.Close()
+
+	client.tcp.conn = clientConn
+
+	received := make(chan []byte, 10)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := server.Read(buf)
+			if err != nil {
+				return
+			}
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			received <- data
+		}
+	}()
+
+	client.EnableBatching(50*time.Millisecond, 64*1024)
+
+	client.lock.Lock()
+	client.outputQueue = append(client.outputQueue, NewStream([]byte{0xDE, 0xAD}))
+	client.lock.Unlock()
+
+	select {
+	case <-received:
+		// Success
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Expected timer-based flush within 500ms")
+	}
+
+	_ = client.DisableBatching()
+	close(client.shutdown)
+	client.wg.Wait()
 }

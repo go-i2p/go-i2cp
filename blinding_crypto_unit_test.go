@@ -1007,3 +1007,155 @@ func TestOnMsgBlindingInfo_InvalidData(t *testing.T) {
 		})
 	}
 }
+
+// TestBlindPrivateKey_SignAndVerify blinds a private key and verifies the blinded
+// key's embedded public component matches the separately blinded public key.
+// Note: blinded keys use [scalar][pubkey] format and cannot be used with
+// crypto/ed25519.Sign directly (see go-i2p/crypto documentation).
+func TestBlindPrivateKey_SignAndVerify(t *testing.T) {
+	publicKey, privateKey, secret := setupBlindingTestKeys(t)
+
+	date := "2025-06-01"
+	alpha, err := DeriveBlindingFactor(secret, date)
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor failed: %v", err)
+	}
+
+	blindedPub, err := BlindPublicKey(publicKey, alpha)
+	if err != nil {
+		t.Fatalf("BlindPublicKey failed: %v", err)
+	}
+
+	blindedPriv, err := BlindPrivateKey(privateKey, alpha)
+	if err != nil {
+		t.Fatalf("BlindPrivateKey failed: %v", err)
+	}
+
+	// Blinded private key should differ from original
+	if blindedPriv == privateKey {
+		t.Error("Blinded private key should differ from original")
+	}
+
+	// Blinded private key format is [scalar(32)][pubkey(32)]
+	// The public key half must match BlindPublicKey result
+	blindedPubFromPriv := blindedPriv[32:]
+	if !bytes.Equal(blindedPub[:], blindedPubFromPriv[:]) {
+		t.Error("Blinded public key from BlindPublicKey does not match public key embedded in blinded private key")
+		t.Logf("BlindPublicKey:  %x", blindedPub)
+		t.Logf("From private:    %x", blindedPubFromPriv)
+	}
+
+	// Scalar half should be non-zero
+	var zeroScalar [32]byte
+	var scalarHalf [32]byte
+	copy(scalarHalf[:], blindedPriv[:32])
+	if scalarHalf == zeroScalar {
+		t.Error("Blinded private key scalar is all zeros")
+	}
+}
+
+// TestBlindPrivateKey_DifferentAlphaProducesDifferentKey ensures different blinding
+// factors produce different blinded private keys.
+func TestBlindPrivateKey_DifferentAlphaProducesDifferentKey(t *testing.T) {
+	_, privateKey, secret := setupBlindingTestKeys(t)
+
+	alpha1, err := DeriveBlindingFactor(secret, "2025-06-01")
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor failed: %v", err)
+	}
+	alpha2, err := DeriveBlindingFactor(secret, "2025-06-02")
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor failed: %v", err)
+	}
+
+	blinded1, err := BlindPrivateKey(privateKey, alpha1)
+	if err != nil {
+		t.Fatalf("BlindPrivateKey failed: %v", err)
+	}
+	blinded2, err := BlindPrivateKey(privateKey, alpha2)
+	if err != nil {
+		t.Fatalf("BlindPrivateKey failed: %v", err)
+	}
+
+	if blinded1 == blinded2 {
+		t.Error("Different blinding factors should produce different blinded private keys")
+	}
+}
+
+// TestDeriveBlindingKeysForDestination creates a session with a destination,
+// derives blinding keys, and verifies the blinded public key can be unblinded
+// to the original.
+func TestDeriveBlindingKeysForDestination(t *testing.T) {
+	crypto := NewCrypto()
+	client := &Client{
+		lock:     sync.Mutex{},
+		sessions: make(map[uint16]*Session),
+		crypto:   crypto,
+	}
+	session := newSession(client, SessionCallbacks{})
+
+	dest := session.Destination()
+	if dest == nil {
+		t.Fatal("Session should have a destination")
+	}
+
+	date := "2025-06-15"
+	derivation, err := session.DeriveBlindingKeysForDestination(date)
+	if err != nil {
+		t.Fatalf("DeriveBlindingKeysForDestination failed: %v", err)
+	}
+
+	// Verify derivation result is populated
+	if derivation.Date != date {
+		t.Errorf("Expected date %q, got %q", date, derivation.Date)
+	}
+	if !derivation.HasPrivateKey {
+		t.Error("DeriveBlindingKeysForDestination should set HasPrivateKey=true")
+	}
+
+	var zero32 [32]byte
+	var zero64 [64]byte
+	if derivation.Alpha == zero32 {
+		t.Error("Alpha should be non-zero")
+	}
+	if derivation.BlindedPublicKey == zero32 {
+		t.Error("BlindedPublicKey should be non-zero")
+	}
+	if derivation.BlindedPrivateKey == zero64 {
+		t.Error("BlindedPrivateKey should be non-zero")
+	}
+
+	// Verify the blinded public key can be unblinded to the original
+	keyPair, err := dest.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("Failed to get signing key pair: %v", err)
+	}
+	pubKey := keyPair.PublicKey()
+	var originalPubKey [32]byte
+	copy(originalPubKey[:], pubKey[:])
+
+	unblinded, err := UnblindPublicKey(derivation.BlindedPublicKey, derivation.Alpha)
+	if err != nil {
+		t.Fatalf("UnblindPublicKey failed: %v", err)
+	}
+	if unblinded != originalPubKey {
+		t.Error("Unblinded public key does not match original destination public key")
+	}
+}
+
+// TestDeriveBlindingKeysForDestination_NoDestination verifies the error when
+// a session has no destination.
+func TestDeriveBlindingKeysForDestination_NoDestination(t *testing.T) {
+	client := &Client{
+		lock:     sync.Mutex{},
+		sessions: make(map[uint16]*Session),
+	}
+	session := newSession(client, SessionCallbacks{})
+	// Force nil destination
+	session.config = &SessionConfig{destination: nil}
+
+	_, err := session.DeriveBlindingKeysForDestination("2025-06-15")
+	if err == nil {
+		t.Fatal("Expected error for session without destination")
+	}
+}
