@@ -163,8 +163,7 @@ func TestZeroValueSessionReturnsErrors(t *testing.T) {
 		{
 			name: "LookupDestination",
 			fn: func(s *Session) error {
-				_, err := s.LookupDestination("example.i2p", 30*time.Second)
-				return err
+				return s.LookupDestination("example.i2p", 30*time.Second)
 			},
 		},
 	}

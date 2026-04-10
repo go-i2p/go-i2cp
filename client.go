@@ -1700,24 +1700,21 @@ func (c *Client) dispatchHostReplyResult(sessionId uint16, requestId uint32, des
 	// Find session
 	c.lock.Lock()
 	sess := c.sessions[sessionId]
-	c.lock.Unlock()
-	if sess == nil {
-		Error("Session with id %d doesn't exist for HostReply", sessionId)
-		return
-	}
-
-	// Get and remove lookup entry
-	c.lock.Lock()
+	// Get and remove lookup entry (always clean up, even if session is gone)
 	if lup.address == "" {
 		lup = c.lookupReq[requestId]
 	}
 	delete(c.lookupReq, requestId)
-
 	// Store parsed service record options in lookup entry
 	if options != nil {
 		lup.options = options
 	}
 	c.lock.Unlock()
+
+	if sess == nil {
+		Error("Session with id %d doesn't exist for HostReply", sessionId)
+		return
+	}
 
 	if lup.address == "" {
 		Warning("No lookup entry found for request ID %d", requestId)

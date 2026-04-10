@@ -255,7 +255,7 @@ func TestSessionLookupDestinationEmptyAddress(t *testing.T) {
 	client := NewClient(nil)
 	session := NewSession(client, SessionCallbacks{})
 
-	_, err := session.LookupDestination("", 30*time.Second)
+	err := session.LookupDestination("", 30*time.Second)
 	if err == nil {
 		t.Fatal("expected error when address is empty, got nil")
 	}
@@ -271,7 +271,7 @@ func TestSessionLookupDestinationWithContextNilContext(t *testing.T) {
 	client := NewClient(nil)
 	session := NewSession(client, SessionCallbacks{})
 
-	_, err := session.LookupDestinationWithContext(nil, "example.i2p", 30*time.Second) //nolint:SA1012 // intentionally testing nil context handling
+	err := session.LookupDestinationWithContext(nil, "example.i2p", 30*time.Second) //nolint:SA1012 // intentionally testing nil context handling
 	if err == nil {
 		t.Fatal("expected error when context is nil, got nil")
 	}

@@ -906,11 +906,13 @@ func (session *Session) SendMessageExpiresWithContext(ctx context.Context, dest 
 	}, "expiring message send cancelled")
 }
 
-// LookupDestination performs a destination lookup using HostLookupMessage
-// per I2CP specification 0.9.11+ - implements destination and hostname resolution
-func (session *Session) LookupDestination(address string, timeout time.Duration) (*Destination, error) {
+// LookupDestination initiates an asynchronous destination lookup using HostLookupMessage
+// per I2CP specification 0.9.11+ - implements destination and hostname resolution.
+// The resolved destination is delivered via the OnDestination callback; this method
+// only returns an error if the request itself cannot be sent.
+func (session *Session) LookupDestination(address string, timeout time.Duration) error {
 	if err := session.validateLookupRequest(address); err != nil {
-		return nil, err
+		return err
 	}
 
 	requestId := session.client.crypto.Random32()
@@ -919,11 +921,11 @@ func (session *Session) LookupDestination(address string, timeout time.Duration)
 
 	lookupType, lookupDataBytes, err := session.prepareLookupData(address)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	timeoutMs := uint32(timeout.Milliseconds())
-	return nil, session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true)
+	return session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true)
 }
 
 // validateLookupRequest validates session state and address for lookup.
@@ -961,11 +963,12 @@ func (session *Session) prepareLookupData(address string) (uint8, []byte, error)
 	return 1, []byte(address), nil
 }
 
-// LookupDestinationWithContext performs a destination lookup with context support
-// per I2CP specification 0.9.11+ - implements context-aware destination resolution
-func (session *Session) LookupDestinationWithContext(ctx context.Context, address string, timeout time.Duration) (*Destination, error) {
+// LookupDestinationWithContext initiates an asynchronous destination lookup with context support
+// per I2CP specification 0.9.11+ - implements context-aware destination resolution.
+// The resolved destination is delivered via the OnDestination callback.
+func (session *Session) LookupDestinationWithContext(ctx context.Context, address string, timeout time.Duration) error {
 	if err := validateLookupContext(ctx); err != nil {
-		return nil, err
+		return err
 	}
 
 	return executeLookupWithContext(ctx, session, address, timeout)
@@ -985,24 +988,18 @@ func validateLookupContext(ctx context.Context) error {
 	}
 }
 
-// executeLookupWithContext executes the destination lookup in a goroutine with context cancellation support.
-func executeLookupWithContext(ctx context.Context, session *Session, address string, timeout time.Duration) (*Destination, error) {
-	type result struct {
-		dest *Destination
-		err  error
-	}
-
-	resultChan := make(chan result, 1)
+// executeLookupWithContext executes the destination lookup with context cancellation support.
+func executeLookupWithContext(ctx context.Context, session *Session, address string, timeout time.Duration) error {
+	resultChan := make(chan error, 1)
 	go func() {
-		dest, err := session.LookupDestination(address, timeout)
-		resultChan <- result{dest, err}
+		resultChan <- session.LookupDestination(address, timeout)
 	}()
 
 	select {
-	case res := <-resultChan:
-		return res.dest, res.err
+	case err := <-resultChan:
+		return err
 	case <-ctx.Done():
-		return nil, fmt.Errorf("destination lookup cancelled: %w", ctx.Err())
+		return fmt.Errorf("destination lookup cancelled: %w", ctx.Err())
 	}
 }
 

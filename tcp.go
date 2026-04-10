@@ -354,42 +354,11 @@ func handleReadError(tcp *Tcp, err error) bool {
 	return false
 }
 
-// canReadUnbuffered checks data availability without buffered reader.
-// This is a fallback path that consumes one byte from the stream.
+// canReadUnbuffered is a fallback for when the buffered reader is not initialized.
+// Returns false to fail safe rather than consuming data from the stream.
 func canReadUnbuffered(tcp *Tcp, conn net.Conn) bool {
-	// Set a read deadline (100ms) to check data availability without blocking
-	deadline := time.Now().Add(100 * time.Millisecond)
-	conn.SetReadDeadline(deadline)
-
-	// Try to peek at one byte
-	one := make([]byte, 1)
-	_, err := conn.Read(one)
-
-	// Always reset deadline to zero (blocking mode) for actual message reads
-	var zero time.Time
-	conn.SetReadDeadline(zero)
-
-	// Handle different error conditions
-	if err == io.EOF {
-		if tcp.address != nil {
-			Debug("%s detected closed connection", tcp.address.String())
-		}
-		defer tcp.Disconnect()
-		return false
-	}
-
-	if err != nil {
-		// Check for timeout (expected when no data available)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return false
-		}
-		Debug("CanRead error (non-timeout): %v", err)
-		return false
-	}
-
-	// Data available (but 1 byte was consumed - only in fallback path)
-	Warning("CanRead: Used fallback path that consumes data - reader not initialized")
-	return true
+	Warning("CanRead: buffered reader not initialized, failing safe to prevent data consumption")
+	return false
 }
 
 func (tcp *Tcp) Disconnect() {
