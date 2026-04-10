@@ -1,0 +1,30 @@
+# Dockerfile.testrouter
+# Builds the go-i2p router from latest git for integration testing.
+# The router provides I2CP on port 7654 inside the container.
+
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/go-i2p/go-i2p.git .
+RUN go mod download
+RUN CGO_ENABLED=0 go build --tags netgo,osusergo -o /go-i2p
+
+FROM alpine:3.21
+
+RUN adduser -D -h /home/i2p i2p
+RUN mkdir -p /home/i2p/.go-i2p/
+RUN chown -R i2p:i2p /home/i2p
+RUN chmod -R 700 /home/i2p
+
+COPY --from=builder /go-i2p /usr/local/bin/go-i2p
+
+USER i2p
+WORKDIR /home/i2p
+
+EXPOSE 7654
+
+ENV DEBUG_I2P=debug
+
+ENTRYPOINT ["go-i2p", "--i2cp.address=0.0.0.0:7654"]
