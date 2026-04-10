@@ -22,7 +22,7 @@ ROUTER_PID=$!
 # Ensure the router is stopped when the script exits
 cleanup() {
     echo "==> Stopping router (PID $ROUTER_PID)..."
-    kill "$ROUTER_PID" 2>/dev/null || true
+    kill -7 "$ROUTER_PID" 2>/dev/null || true
     wait "$ROUTER_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
