@@ -1,8 +1,17 @@
 # Dockerfile.testrouter
-# Builds the go-i2p router from latest git for integration testing.
-# The router provides I2CP on port 7654 inside the container.
+#
+# Runs the full go-i2cp test suite inside a container with a go-i2p router.
+# Nothing is exposed to the host — the router listens on 127.0.0.1:7654
+# inside the container and the tests connect to it there.
+#
+# Usage (from the go-i2cp repo root):
+#   docker build -t go-i2cp-test -f Dockerfile.testrouter .
+#   docker run --rm go-i2cp-test
+#
+# Or simply: ./run_docker_tests.sh
 
-FROM golang:1.25-alpine AS builder
+# --- Stage 1: build the go-i2p router from latest git ---
+FROM golang:1.25-alpine AS router-builder
 
 RUN apk add --no-cache git
 
@@ -11,20 +20,30 @@ RUN git clone --depth 1 https://github.com/go-i2p/go-i2p.git .
 RUN go mod download
 RUN CGO_ENABLED=0 go build --tags netgo,osusergo -o /go-i2p
 
-FROM alpine:3.21
+# --- Stage 2: prepare go-i2cp test dependencies ---
+FROM golang:1.25-alpine AS test-deps
 
-RUN adduser -D -h /home/i2p i2p
-RUN mkdir -p /home/i2p/.go-i2p/
-RUN chown -R i2p:i2p /home/i2p
-RUN chmod -R 700 /home/i2p
+WORKDIR /go-i2cp
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY --from=builder /go-i2p /usr/local/bin/go-i2p
+# --- Stage 3: test runner (router + test suite) ---
+FROM golang:1.25-alpine
 
-USER i2p
-WORKDIR /home/i2p
+RUN apk add --no-cache bash
 
-#EXPOSE 7654
+# Install the router binary
+COPY --from=router-builder /go-i2p /usr/local/bin/go-i2p
+
+# Copy go-i2cp source and cached modules
+COPY --from=test-deps /go/pkg /go/pkg
+WORKDIR /go-i2cp
+COPY . .
+
+# Copy the entrypoint that orchestrates router + tests
+COPY docker_test_entrypoint.sh /usr/local/bin/docker_test_entrypoint.sh
+RUN chmod +x /usr/local/bin/docker_test_entrypoint.sh
 
 ENV DEBUG_I2P=debug
 
-ENTRYPOINT ["go-i2p", "--i2cp.address=0.0.0.0:7654"]
+ENTRYPOINT ["/usr/local/bin/docker_test_entrypoint.sh"]

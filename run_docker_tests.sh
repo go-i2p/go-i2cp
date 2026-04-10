@@ -1,27 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
-# run_docker_tests.sh - Run the full go-i2cp test suite against a go-i2p router in Docker.
+# run_docker_tests.sh
+#
+# Build and run the full go-i2cp test suite inside a Docker container
+# alongside a go-i2p router. No ports are exposed to the host, so this
+# avoids interference with any locally-installed I2P or i2pd router.
 #
 # Usage:
-#   ./run_docker_tests.sh              # run all tests
-#   ./run_docker_tests.sh -run TestFoo # pass extra flags to go test
+#   ./run_docker_tests.sh                              # run all tests
+#   ./run_docker_tests.sh -run TestSessionLifecycle     # run specific test
+#   ./run_docker_tests.sh -v -timeout 20m              # custom flags
 #
-# This script is a convenience wrapper around:
-#   go test -tags docker -v -timeout 15m ./...
-#
-# The build tag "docker" activates a TestMain that manages the router container.
+# The container exit code is propagated as this script's exit code.
 
-EXTRA_FLAGS=("$@")
+IMAGE_NAME="go-i2cp-test-router"
 
 echo "=== go-i2cp Docker Integration Tests ==="
 echo ""
 echo "This will:"
-echo "  1. Build a go-i2p router Docker image from latest git"
-echo "  2. Start the router container with I2CP on localhost:7654"
-echo "  3. Wait for the router to bootstrap and accept I2CP sessions"
-echo "  4. Run the full test suite"
-echo "  5. Tear down the container"
+echo "  1. Build a Docker image with the go-i2p router (latest git) + go-i2cp source"
+echo "  2. Start the router inside the container on 127.0.0.1:7654"
+echo "  3. Wait for I2CP readiness"
+echo "  4. Run the full test suite inside the container"
+echo "  5. Report results and exit"
+echo ""
+echo "No ports are exposed to the host."
 echo ""
 
 # Check prerequisites
@@ -37,10 +41,10 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 
-if ! command -v go &>/dev/null; then
-    echo "ERROR: go is not installed or not in PATH" >&2
-    exit 1
-fi
+# Build the image
+echo "==> Building Docker image..."
+docker build -t "$IMAGE_NAME" -f Dockerfile.testrouter .
 
-# Run the tests with the docker build tag
-exec go test -tags docker -v -count=1 -timeout 15m ./... "${EXTRA_FLAGS[@]}"
+# Run the tests inside the container
+echo "==> Starting test container..."
+docker run --rm "$IMAGE_NAME" "$@"
