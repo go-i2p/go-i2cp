@@ -23,7 +23,7 @@ COPY --from=builder /go-i2p /usr/local/bin/go-i2p
 USER i2p
 WORKDIR /home/i2p
 
-EXPOSE 7654
+#EXPOSE 7654
 
 ENV DEBUG_I2P=debug
 
