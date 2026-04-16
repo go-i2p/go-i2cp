@@ -1,11 +1,11 @@
 package go_i2cp
 
 import (
-"context"
-"fmt"
-"strings"
+	"context"
+	"fmt"
+	"strings"
 
-"github.com/go-i2p/common/base32"
+	"github.com/go-i2p/common/base32"
 )
 
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
@@ -199,4 +199,3 @@ func (c *Client) executeAndRegisterLookup(ctx context.Context, session *Session,
 
 	return requestId, nil
 }
-

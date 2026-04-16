@@ -65,7 +65,7 @@ func newSession(client *Client, callbacks SessionCallbacks) (sess *Session) {
 	sess.callbacks = &callbacks
 	sess.ctx = context.Background() // Default context
 
-	return
+	return sess
 }
 
 // ensureInitialized checks if the Session has been properly initialized.

@@ -16,7 +16,7 @@ func getTestKeys(keyPair *Ed25519KeyPair) (publicKey [32]byte, privateKey [64]by
 	copy(publicKey[:], pubKey[:])
 	copy(privateKey[:], privKey[:])
 	secret = privKey[:32]
-	return
+	return publicKey, privateKey, secret
 }
 
 // setupBlindingTestKeys creates a destination and extracts its Ed25519 keys for blinding tests.

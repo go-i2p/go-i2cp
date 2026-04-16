@@ -52,7 +52,7 @@ func NewDestination(crypto *Crypto) (dest *Destination, err error) {
 
 	dest.generateB32()
 	dest.generateB64()
-	return
+	return dest, err
 }
 
 // readDestinationKeys reads the public key and signing key from a message stream.
@@ -247,7 +247,7 @@ func NewDestinationFromBase64(base64Str string, crypto *Crypto) (dest *Destinati
 	// see https://javadoc.freenetproject.org/freenet/support/Base64.html
 	if len(base64Str) == 0 {
 		err = errors.New("empty string")
-		return
+		return dest, err
 	}
 	// The base64 string uses freenet format (~ for /, - for +)
 	// common/base64 already uses I2P format which is the same as freenet
@@ -281,7 +281,7 @@ func (dest *Destination) Copy() (newDest Destination) {
 	newDest.b64 = dest.b64
 	newDest.digest = dest.digest
 	newDest.crypto = dest.crypto
-	return
+	return newDest
 }
 
 func (dest *Destination) WriteToFile(filename string) (err error) {

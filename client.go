@@ -156,7 +156,7 @@ func NewClient(callbacks *ClientCallBacks) (c *Client) {
 	c.outputQueue = make([]*Stream, 0)
 	c.shutdown = make(chan struct{})
 	c.tcp.Init()
-	return
+	return c
 }
 
 func (c *Client) setDefaultProperties() {
@@ -999,7 +999,7 @@ func (c *Client) msgGetBandwidthLimits(queue bool) {
 	}
 }
 
-func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary bool, queue bool, callerHoldsLock bool) error {
+func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, queue, callerHoldsLock bool) error {
 	// I2CP SPEC COMPLIANCE: Handle both spec-compliant and Java I2P router behaviors
 	// Per I2CP spec § DestroySessionMessage: "The router should respond with a SessionStatusMessage (Destroyed)"
 	// Per I2CP 0.9.67 § DestroySessionMessage Notes (Java I2P deviation):
@@ -1080,7 +1080,7 @@ func cascadeDestroySubsessions(c *Client, sess *Session, sessionID uint16, isPri
 //
 // NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry.
 // The callerHoldsLock parameter indicates if the caller already holds sess.mu.
-func cleanupDestroyedSubsession(c *Client, sess *Session, sessionID uint16, isPrimary bool, callerHoldsLock bool) {
+func cleanupDestroyedSubsession(c *Client, sess *Session, sessionID uint16, isPrimary, callerHoldsLock bool) {
 	if isPrimary {
 		// Primary sessions are cleaned up via Close(), not here
 		Debug("cleanupDestroyedSubsession: session %d is primary, skipping", sessionID)
@@ -1240,7 +1240,7 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 // sendDestroySessionMessage sends the DestroySessionMessage to the router.
 // Returns an error if the message cannot be sent.
 // NOTE: sessionID is passed as parameter to avoid mutex re-entry deadlock
-func sendDestroySessionMessage(c *Client, sessionID uint16, isPrimary bool, queue bool) error {
+func sendDestroySessionMessage(c *Client, sessionID uint16, isPrimary, queue bool) error {
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
 
 	// Thread-safe: protect messageStream access

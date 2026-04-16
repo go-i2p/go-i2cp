@@ -1,11 +1,10 @@
 package go_i2cp
 
 import (
-"context"
-"fmt"
-"time"
+	"context"
+	"fmt"
+	"time"
 )
-
 
 // Connect establishes a connection to the I2P router with context support.
 // The context can be used to cancel the connection attempt or set a timeout.
@@ -457,4 +456,3 @@ func (c *Client) attemptReconnect() error {
 
 	return nil
 }
-

@@ -69,7 +69,7 @@ func (tcp *Tcp) Init(routerAddress ...string) (err error) {
 	if err == nil {
 		tcp.address = addr
 	}
-	return
+	return err
 }
 
 // SetupTLS configures TLS for the TCP connection per I2CP 0.8.3+ specification.
@@ -255,7 +255,7 @@ func (tcp *Tcp) Send(buf *Stream) (i int, err error) {
 		return 0, fmt.Errorf("connection not established")
 	}
 	i, err = conn.Write(buf.Bytes())
-	return
+	return i, err
 }
 
 func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
@@ -271,7 +271,7 @@ func (tcp *Tcp) Receive(buf *Stream) (i int, err error) {
 	} else {
 		err = fmt.Errorf("connection not established")
 	}
-	return
+	return i, err
 }
 
 func (tcp *Tcp) CanRead() bool {

@@ -48,10 +48,10 @@ func NewCertificateFromMessage(stream *Stream) (*Certificate, error) {
 func readCertificateHeader(stream *Stream) (certType uint8, length uint16, err error) {
 	certType, err = stream.ReadByte()
 	if err != nil {
-		return
+		return certType, length, err
 	}
 	length, err = stream.ReadUint16()
-	return
+	return certType, length, err
 }
 
 // validateCertificateFormat ensures non-null certificates have non-zero length.

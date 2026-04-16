@@ -367,7 +367,7 @@ func extractI2CPFieldsFromGzip(gzipData []byte) (protocol uint8, srcPort, destPo
 	srcPort = binary.LittleEndian.Uint16(gzipData[4:6])
 	destPort = binary.LittleEndian.Uint16(gzipData[6:8])
 	protocol = gzipData[9]
-	return
+	return protocol, srcPort, destPort
 }
 
 // decompressGzipPayload decompresses gzip data and returns the payload.
@@ -1421,22 +1421,22 @@ func (c *Client) onMsgBlindingInfo(stream *Stream) {
 // readBlindingInfoFields reads all fields from a BlindingInfoMessage stream.
 func (c *Client) readBlindingInfoFields(stream *Stream) (sessionId uint16, authScheme uint8, flags uint16, blindingParams []byte, err error) {
 	if sessionId, err = c.readBlindingSessionID(stream); err != nil {
-		return
+		return sessionId, authScheme, flags, blindingParams, err
 	}
 
 	if authScheme, err = c.readBlindingAuthScheme(stream); err != nil {
-		return
+		return sessionId, authScheme, flags, blindingParams, err
 	}
 
 	if flags, err = c.readBlindingFlags(stream); err != nil {
-		return
+		return sessionId, authScheme, flags, blindingParams, err
 	}
 
 	if blindingParams, err = c.readBlindingParams(stream); err != nil {
-		return
+		return sessionId, authScheme, flags, blindingParams, err
 	}
 
-	return
+	return sessionId, authScheme, flags, blindingParams, err
 }
 
 // readBlindingSessionID reads the session ID from a BlindingInfoMessage stream.

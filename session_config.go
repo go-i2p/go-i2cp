@@ -489,7 +489,7 @@ func (config *SessionConfig) getOfflineSignatureProperties() (exp, key, sig stri
 	exp = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION)
 	key = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY)
 	sig = config.GetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE)
-	return
+	return exp, key, sig
 }
 
 // validateOfflinePropertiesPresence ensures all or none of the offline properties are set.
