@@ -108,6 +108,7 @@ func ParseConfig(s string, cb func(string, string)) {
 		}
 		return
 	}
+	defer file.Close()
 	Debug("Parsing config file '%s'", s)
 	scan := bufio.NewScanner(file)
 	for scan.Scan() {

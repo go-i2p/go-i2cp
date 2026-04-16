@@ -140,6 +140,7 @@ func NewSessionConfigFromDestinationFile(filename string, crypto *Crypto) (confi
 // loadOrCreateDestination loads a destination from file or creates a new one if loading fails.
 func loadOrCreateDestination(filename string, crypto *Crypto) *Destination {
 	if file, err := os.Open(filename); err == nil {
+		defer file.Close()
 		dest, err := NewDestinationFromFile(file, crypto)
 		if err == nil {
 			return dest

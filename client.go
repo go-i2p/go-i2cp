@@ -1348,8 +1348,12 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 func (c *Client) compressPayload(payload *Stream, protocol uint8, srcPort, destPort uint16) (*bytes.Buffer, error) {
 	out := &bytes.Buffer{}
 	compress := gzip.NewWriter(out)
-	compress.Write(payload.Bytes())
-	compress.Close()
+	if _, err := compress.Write(payload.Bytes()); err != nil {
+		return nil, fmt.Errorf("failed to compress payload: %w", err)
+	}
+	if err := compress.Close(); err != nil {
+		return nil, fmt.Errorf("failed to finalize compression: %w", err)
+	}
 	header := out.Bytes()[:10]
 	binary.LittleEndian.PutUint16(header[4:6], srcPort)
 	binary.LittleEndian.PutUint16(header[6:8], destPort)
@@ -1613,6 +1617,12 @@ func (c *Client) cleanupConnection() {
 	c.tcp.Disconnect()
 	c.connected = false
 
+	// Clear abandoned lookup entries to prevent memory leaks
+	c.lock.Lock()
+	c.lookupReq = make(map[uint32]LookupEntry)
+	c.lookup = make(map[string]uint32)
+	c.lock.Unlock()
+
 	if c.metrics != nil {
 		c.metrics.SetConnectionState("disconnected")
 		c.metrics.SetActiveSessions(0)
@@ -1624,6 +1634,9 @@ func (c *Client) Close() error {
 	if err := c.ensureInitialized(); err != nil {
 		return err
 	}
+
+	// Stop batch ticker before shutdown to prevent timer goroutine leak
+	_ = c.DisableBatching()
 
 	Info("Closing client %p", c)
 
