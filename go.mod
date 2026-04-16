@@ -7,7 +7,7 @@ require (
 	github.com/go-i2p/crypto v0.1.4-0.20260327201310-96101c044a62
 	github.com/go-i2p/logger v0.1.5
 	go.step.sm/crypto v0.77.2
-	golang.org/x/crypto v0.49.0
+	golang.org/x/crypto v0.50.0
 )
 
 require (
@@ -19,6 +19,6 @@ require (
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 )
