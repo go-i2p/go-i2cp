@@ -477,7 +477,8 @@ func (pd *ProtocolDebugger) writeCreateSessionBreakdown(ts string, data []byte, 
 
 // formatCreateSessionBreakdown formats the breakdown content for a CreateSession message.
 func formatCreateSessionBreakdown(data []byte, destSize, mappingSize int, timestamp uint64, sigSize int) string {
-	return fmt.Sprintf(`CreateSession Message Breakdown
+	return fmt.Sprintf(
+		`CreateSession Message Breakdown
 ================================
 Timestamp: %v
 Total Size: %d bytes
@@ -540,7 +541,8 @@ func (pd *ProtocolDebugger) RecordDisconnect(reason string, rawBytes []byte) {
 	ts := time.Now().Format("20060102-150405.000")
 	filename := filepath.Join(pd.dumpDir, fmt.Sprintf("Disconnect-%s.txt", ts))
 
-	content := fmt.Sprintf(`Disconnect Message
+	content := fmt.Sprintf(
+		`Disconnect Message
 ==================
 Timestamp: %v
 Reason: %s
@@ -618,7 +620,8 @@ func (pd *ProtocolDebugger) buildRecentMessagesSection() string {
 		start = 0
 	}
 	for _, msg := range pd.messageLog[start:] {
-		report += fmt.Sprintf("  [%s] %s %s (%d bytes)\n",
+		report += fmt.Sprintf(
+			"  [%s] %s %s (%d bytes)\n",
 			msg.Timestamp.Format("15:04:05.000"),
 			msg.Direction,
 			msg.TypeName,

@@ -363,7 +363,8 @@ func TestClearQueue(t *testing.T) {
 	client := NewClient(nil)
 
 	client.lock.Lock()
-	client.outputQueue = append(client.outputQueue,
+	client.outputQueue = append(
+		client.outputQueue,
 		NewStream([]byte{0x01}),
 		NewStream([]byte{0x02}),
 	)
