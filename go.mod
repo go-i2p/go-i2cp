@@ -3,9 +3,9 @@ module github.com/go-i2p/go-i2cp
 go 1.26.3
 
 require (
-	github.com/go-i2p/common v0.1.58
-	github.com/go-i2p/crypto v0.1.58
-	github.com/go-i2p/logger v0.1.58
+	github.com/go-i2p/common v0.1.59
+	github.com/go-i2p/crypto v0.1.59
+	github.com/go-i2p/logger v0.1.59
 	go.step.sm/crypto v0.82.0
 	golang.org/x/crypto v0.52.0
 )
