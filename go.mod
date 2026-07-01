@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/go-i2p/common v0.1.60000-0.20260701134558-e5f5cf65a7f5
-	github.com/go-i2p/crypto v0.1.60000-0.20260701134544-2e460c762111
+	github.com/go-i2p/crypto v0.1.60000-0.20260701135847-3ade996b68a0
 	github.com/go-i2p/logger v0.1.60000-0.20260701134448-2648c3b0e040
 	go.step.sm/crypto v0.84.1
 	golang.org/x/crypto v0.53.0
