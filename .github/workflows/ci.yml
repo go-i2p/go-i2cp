@@ -3,7 +3,7 @@ name: CI (Prebuilt I2P Router Workflow)
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
   workflow_dispatch:
 
