@@ -515,7 +515,6 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 			t.Errorf("Expected 1 session (primary only), got %d", sessionCount)
 		}
 
-		// Verify primary is still connected (check TCP connection, not data availability)
 		// Verify primary is still alive after subsession destruction.
 		// Avoid strict transport-pointer assertions; backend implementations may reconnect.
 		if primary.IsClosed() {
@@ -527,11 +526,6 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 		// Optional diagnostic only (non-fatal):
 		if client.tcp.conn == nil {
 			t.Logf("TCP connection is nil after subsession %d destruction (backend may have disconnected/reconnected)", i+1)
-		}
-		if primary.IsClosed() {
-			cancel()
-			<-ioCanceled
-			t.Fatalf("Primary closed after subsession %d destruction", i+1)
 		}
 
 		t.Logf("Subsession %d destroyed successfully", i+1)
