@@ -7,30 +7,21 @@ on:
   pull_request:
   workflow_dispatch:
 
-    # uses github.com/go-i2p/i2p-provider
+# uses github.com/go-i2p/i2p-provider
 jobs:
-  i2p-router-integration:
-    name: Reusable router workflow (${{ matrix.backend }})
-    strategy:
-      fail-fast: false
-      matrix:
-        backend:
-          - java
-          - i2pd
-    uses: go-i2p/i2p-provider/.github/workflows/i2p-router.yml@main
-    with:
-      backend: ${{ matrix.backend }}
-
   test:
     name: go-i2cp test suite (${{ matrix.backend }})
-    needs: i2p-router-integration
     strategy:
       fail-fast: false
       matrix:
         backend:
           - java
           - i2pd
+          - go-i2p
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+      options: --init
     steps:
       - uses: actions/checkout@v4
 
@@ -38,4 +29,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: go test -v -timeout 20m -count=1 ./...
+      - uses: go-i2p/i2p-provider/.github/actions/i2p-router@main
+        with:
+          backend: ${{ matrix.backend }}
+
+      - name: Run go-i2cp test suite
+        run: go test -v -timeout 20m -count=1 ./...
+
+      - uses: go-i2p/i2p-provider/.github/actions/i2p-router-stop@main
+        if: always()
