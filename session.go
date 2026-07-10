@@ -503,17 +503,6 @@ func (session *Session) cleanupResources() {
 	}
 }
 
-// finalizeClose dispatches status and marks session as closed.
-func (session *Session) finalizeClose() {
-	// Prevent duplicate DESTROYED callbacks
-	if !session.destroyedDispatched {
-		session.destroyedDispatched = true
-		session.dispatchStatusLocked(I2CP_SESSION_STATUS_DESTROYED)
-	}
-	session.closed = true
-	session.closedAt = time.Now()
-}
-
 // IsClosed returns whether the session has been closed
 func (session *Session) IsClosed() bool {
 	session.mu.RLock()
