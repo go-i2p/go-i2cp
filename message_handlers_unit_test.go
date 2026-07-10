@@ -75,36 +75,3 @@ func TestOnMessage_DeprecatedHandlers(t *testing.T) {
 	stream4 := NewStream(make([]byte, 0))
 	client.onMessage(I2CP_MSG_REPORT_ABUSE, stream4)
 }
-
-// TestMessageHandlersCoverage documents all message types
-func TestMessageHandlersCoverage(t *testing.T) {
-	messageTypes := map[uint8]string{
-		I2CP_MSG_CREATE_SESSION:            "CreateSession",
-		I2CP_MSG_RECONFIGURE_SESSION:       "ReconfigureSession",
-		I2CP_MSG_DESTROY_SESSION:           "DestroySession",
-		I2CP_MSG_CREATE_LEASE_SET:          "CreateLeaseSet",
-		I2CP_MSG_SEND_MESSAGE:              "SendMessage",
-		I2CP_MSG_RECEIVE_MESSAGE_BEGIN:     "ReceiveMessageBegin",
-		I2CP_MSG_RECEIVE_MESSAGE_END:       "ReceiveMessageEnd",
-		I2CP_MSG_GET_BANDWIDTH_LIMITS:      "GetBandwidthLimits",
-		I2CP_MSG_SESSION_STATUS:            "SessionStatus",
-		I2CP_MSG_REQUEST_LEASESET:          "RequestLeaseSet",
-		I2CP_MSG_MESSAGE_STATUS:            "MessageStatus",
-		I2CP_MSG_BANDWIDTH_LIMITS:          "BandwidthLimits",
-		I2CP_MSG_REPORT_ABUSE:              "ReportAbuse",
-		I2CP_MSG_DISCONNECT:                "Disconnect",
-		I2CP_MSG_PAYLOAD_MESSAGE:           "PayloadMessage",
-		I2CP_MSG_GET_DATE:                  "GetDate",
-		I2CP_MSG_SET_DATE:                  "SetDate",
-		I2CP_MSG_DEST_LOOKUP:               "DestLookup",
-		I2CP_MSG_DEST_REPLY:                "DestReply",
-		I2CP_MSG_SEND_MESSAGE_EXPIRES:      "SendMessageExpires",
-		I2CP_MSG_REQUEST_VARIABLE_LEASESET: "RequestVariableLeaseSet",
-		I2CP_MSG_HOST_LOOKUP:               "HostLookup",
-		I2CP_MSG_HOST_REPLY:                "HostReply",
-		I2CP_MSG_CREATE_LEASE_SET2:         "CreateLeaseSet2",
-		I2CP_MSG_BLINDING_INFO:             "BlindingInfo",
-	}
-
-	t.Logf("Message Handler Coverage: %d message types", len(messageTypes))
-}

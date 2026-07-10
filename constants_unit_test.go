@@ -230,30 +230,6 @@ func TestSessionStatusConstants(t *testing.T) {
 	}
 }
 
-// TestConstantsDocumentation verifies that key constants have proper documentation
-// by checking they compile and are accessible (compile-time verification).
-func TestConstantsDocumentation(t *testing.T) {
-	// Authentication methods - verify they exist and have correct values
-	_ = AUTH_METHOD_NONE
-	_ = AUTH_METHOD_USERNAME_PWD
-	_ = AUTH_METHOD_SSL_TLS
-	_ = AUTH_METHOD_PER_CLIENT_DH
-	_ = AUTH_METHOD_PER_CLIENT_PSK
-
-	// Blinding schemes - verify they exist
-	_ = BLINDING_AUTH_SCHEME_DH
-	_ = BLINDING_AUTH_SCHEME_PSK
-
-	// LeaseSet types - verify they exist
-	_ = LEASESET_TYPE_LEGACY
-	_ = LEASESET_TYPE_STANDARD
-	_ = LEASESET_TYPE_ENCRYPTED
-	_ = LEASESET_TYPE_META
-
-	// This test passes if the code compiles, demonstrating constants are properly defined
-	t.Log("All constants properly defined and accessible")
-}
-
 // TestTLSConfigurationApproach verifies TLS is configured via client properties,
 // not a global USE_TLS variable (which has been removed).
 func TestTLSConfigurationApproach(t *testing.T) {
