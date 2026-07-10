@@ -59,6 +59,21 @@ func (s *Stream) ReadUint64() (uint64, error) {
 	return binary.BigEndian.Uint64(bts), nil
 }
 
+// ReadExact reads exactly n bytes from the stream.
+// Returns the bytes read or an error with contextual information using fieldName.
+// Commonly used for reading length-prefixed data or fixed-size fields.
+func (s *Stream) ReadExact(n int, fieldName string) ([]byte, error) {
+	data := make([]byte, n)
+	bytesRead, err := s.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", fieldName, err)
+	}
+	if bytesRead != n {
+		return nil, fmt.Errorf("incomplete %s read: got %d bytes, expected %d", fieldName, bytesRead, n)
+	}
+	return data, nil
+}
+
 // WriteUint16 writes a big-endian uint16 to the stream.
 // This is commonly used for I2CP session IDs and length prefixes.
 func (s *Stream) WriteUint16(i uint16) error {
