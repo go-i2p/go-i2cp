@@ -1931,8 +1931,7 @@ func (c *Client) SupportsHostLookup() bool {
 func (c *Client) SupportsMultiSession() bool {
 	return withInitialized(c, false, func(c *Client) bool {
 		// Multi-session support added in I2CP 0.9.21
-		requiredVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
-		return c.router.version.compare(requiredVersion) >= 0
+		return c.router.version.compare(VersionMultiSession) >= 0
 	})
 }
 

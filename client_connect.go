@@ -236,8 +236,7 @@ func (c *Client) validateAndConfigureSubsession(sess *Session) error {
 
 // checkSubsessionRouterVersion verifies the router supports multi-session feature (I2CP 0.9.21+).
 func (c *Client) checkSubsessionRouterVersion() error {
-	minVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
-	if c.router.version.compare(minVersion) < 0 {
+	if c.router.version.compare(VersionMultiSession) < 0 {
 		return fmt.Errorf("router version %v does not support multi-session (requires >= 0.9.21)", c.router.version)
 	}
 	return nil

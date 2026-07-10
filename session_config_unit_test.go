@@ -16,8 +16,7 @@ func TestSessionConfig(t *testing.T) {
 		{
 			name: "properly initialized session has config",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				return NewSession(client, SessionCallbacks{})
+				return newTestSession(t)
 			},
 			expectNil: false,
 		},
@@ -31,8 +30,7 @@ func TestSessionConfig(t *testing.T) {
 		{
 			name: "session with custom config",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				// Config should already be created by NewSession
 				return session
 			},
@@ -69,8 +67,7 @@ func TestGetTunnelQuantity(t *testing.T) {
 		{
 			name: "session with inbound quantity set",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "5")
 				return session
 			},
@@ -80,8 +77,7 @@ func TestGetTunnelQuantity(t *testing.T) {
 		{
 			name: "session with outbound quantity set",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "3")
 				return session
 			},
@@ -91,8 +87,7 @@ func TestGetTunnelQuantity(t *testing.T) {
 		{
 			name: "session with no quantity set returns 0",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				return NewSession(client, SessionCallbacks{})
+				return newTestSession(t)
 			},
 			inbound:          true,
 			expectedQuantity: 0,
@@ -108,8 +103,7 @@ func TestGetTunnelQuantity(t *testing.T) {
 		{
 			name: "session with different inbound and outbound quantities",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "7")
 				session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "2")
 				return session
@@ -143,8 +137,7 @@ func TestGetTunnelLength(t *testing.T) {
 		{
 			name: "session with inbound length set",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_LENGTH, "4")
 				return session
 			},
@@ -154,8 +147,7 @@ func TestGetTunnelLength(t *testing.T) {
 		{
 			name: "session with outbound length set",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "2")
 				return session
 			},
@@ -165,8 +157,7 @@ func TestGetTunnelLength(t *testing.T) {
 		{
 			name: "session with no length set returns 0",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				return NewSession(client, SessionCallbacks{})
+				return newTestSession(t)
 			},
 			inbound:        true,
 			expectedLength: 0,
@@ -182,8 +173,7 @@ func TestGetTunnelLength(t *testing.T) {
 		{
 			name: "session with high anonymity length (3 hops)",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_LENGTH, "3")
 				session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_LENGTH, "3")
 				return session
@@ -217,8 +207,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get fast receive property",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
 				return session
 			},
@@ -228,8 +217,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get gzip property",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_GZIP, "false")
 				return session
 			},
@@ -239,8 +227,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get inbound nickname",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_NICKNAME, "my-tunnel")
 				return session
 			},
@@ -250,8 +237,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get unset property returns empty string",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				return NewSession(client, SessionCallbacks{})
+				return newTestSession(t)
 			},
 			property:      SESSION_CONFIG_PROP_I2CP_USERNAME,
 			expectedValue: "",
@@ -267,8 +253,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get crypto tags to send",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_CRYPTO_TAGS_TO_SEND, "40")
 				return session
 			},
@@ -278,8 +263,7 @@ func TestGetProperty(t *testing.T) {
 		{
 			name: "get outbound priority",
 			setupSession: func() *Session {
-				client := NewClient(&ClientCallBacks{})
-				session := NewSession(client, SessionCallbacks{})
+				session := newTestSession(t)
 				session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_PRIORITY, "10")
 				return session
 			},
@@ -303,8 +287,7 @@ func TestGetProperty(t *testing.T) {
 
 // TestGetPropertyInvalidRange verifies bounds checking for property index.
 func TestGetPropertyInvalidRange(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	tests := []struct {
 		name     string
@@ -337,8 +320,7 @@ func TestGetPropertyInvalidRange(t *testing.T) {
 
 // TestSessionConfigGettersThreadSafety verifies thread-safe config access.
 func TestSessionConfigGettersThreadSafety(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Set some initial values
 	session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "5")
@@ -439,8 +421,7 @@ func TestTunnelConfigurationScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewClient(&ClientCallBacks{})
-			session := NewSession(client, SessionCallbacks{})
+			session := newTestSession(t)
 
 			// Configure tunnel settings
 			session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, tt.inboundQuantity)
@@ -471,8 +452,7 @@ func TestTunnelConfigurationScenarios(t *testing.T) {
 
 // TestAllSessionConfigProperties verifies we can get/set all defined properties.
 func TestAllSessionConfigProperties(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Test all valid property constants
 	properties := []SessionConfigProperty{
@@ -516,8 +496,7 @@ func TestAllSessionConfigProperties(t *testing.T) {
 
 // BenchmarkSessionConfigGetters measures performance of config getter methods.
 func BenchmarkSessionConfigGetters(b *testing.B) {
-	client := NewClient(&ClientCallBacks{})
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(b)
 	session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "3")
 	session.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_LENGTH, "3")
 	session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")

@@ -50,9 +50,7 @@ func TestNewSession(t *testing.T) {
 
 // TestSessionDestination verifies destination access
 func TestSessionDestination(t *testing.T) {
-	client := NewClient(nil)
-	callbacks := SessionCallbacks{}
-	session := NewSession(client, callbacks)
+	session := newTestSession(t)
 
 	dest := session.Destination()
 	if dest == nil {
@@ -71,12 +69,10 @@ func TestSessionDestination(t *testing.T) {
 
 // TestSessionSendMessage verifies message sending functionality
 func TestSessionSendMessage(t *testing.T) {
-	client := NewClient(nil)
-	callbacks := SessionCallbacks{}
-	session := NewSession(client, callbacks)
+	session := newTestSession(t)
 
 	// Create test destination
-	testDest, err := NewDestination(client.crypto)
+	testDest, err := NewDestination(session.client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
@@ -238,15 +234,14 @@ func TestSessionDispatchStatus(t *testing.T) {
 
 // TestSessionWithNilCallbacks verifies graceful handling of nil callbacks
 func TestSessionWithNilCallbacks(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Test that nil callbacks don't cause panics
 	testPayload := NewStream([]byte("test"))
 
 	// These should not panic even with nil callbacks
 	// Using protocol=6 as test value (not I2CP-defined, represents application-level protocol)
-	testSrcDest, _ := NewDestination(client.crypto)
+	testSrcDest, _ := NewDestination(session.client.crypto)
 	session.dispatchMessage(testSrcDest, 6, 1, 2, testPayload)
 	session.dispatchDestination(1, "test", nil)
 	session.dispatchStatus(I2CP_SESSION_STATUS_CREATED)
@@ -254,9 +249,7 @@ func TestSessionWithNilCallbacks(t *testing.T) {
 
 // TestSessionConfigIntegration verifies session config integration
 func TestSessionConfigIntegration(t *testing.T) {
-	client := NewClient(nil)
-	callbacks := SessionCallbacks{}
-	session := NewSession(client, callbacks)
+	session := newTestSession(t)
 
 	// Test config property setting
 	session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "test-session")
@@ -276,8 +269,7 @@ func TestSessionConfigIntegration(t *testing.T) {
 
 // TestSessionID verifies session ID getter/setter operations
 func TestSessionID(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Test initial ID (should be 0)
 	if id := session.ID(); id != 0 {
@@ -303,8 +295,7 @@ func TestSessionID(t *testing.T) {
 
 // TestSessionIDAlias verifies SessionID() is an alias for ID()
 func TestSessionIDAlias(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Test initial ID with both methods
 	if session.ID() != session.SessionID() {
@@ -326,8 +317,7 @@ func TestSessionIDAlias(t *testing.T) {
 
 // TestSessionIsPrimary verifies primary session flag operations
 func TestSessionIsPrimary(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Test initial state (should be true by default)
 	if !session.IsPrimary() {
@@ -407,8 +397,7 @@ func TestSetPrimarySessionErrors(t *testing.T) {
 
 // TestSessionIDThreadSafety verifies concurrent ID operations are thread-safe
 func TestSessionIDThreadSafety(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Run concurrent reads and writes
 	done := make(chan bool, 100)
@@ -440,8 +429,7 @@ func TestSessionIDThreadSafety(t *testing.T) {
 
 // TestSessionPrimaryThreadSafety verifies concurrent primary flag operations are thread-safe
 func TestSessionPrimaryThreadSafety(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	done := make(chan bool, 100)
 
@@ -505,8 +493,7 @@ func TestSessionPrimaryReferenceThreadSafety(t *testing.T) {
 
 // TestSessionSigningKeyPair verifies SigningKeyPair() returns the correct key pair
 func TestSessionSigningKeyPair(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Get signing key pair
 	keyPair, err := session.SigningKeyPair()
@@ -542,8 +529,7 @@ func TestSessionSigningKeyPair(t *testing.T) {
 
 // TestSessionSigningKeyPairForSigning verifies SigningKeyPair() can be used for signing
 func TestSessionSigningKeyPairForSigning(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Get signing key pair
 	keyPair, err := session.SigningKeyPair()
@@ -599,8 +585,7 @@ func TestSessionSigningKeyPairNilConfig(t *testing.T) {
 
 // TestSessionSigningKeyPairNilDestination verifies error handling when destination is nil
 func TestSessionSigningKeyPairNilDestination(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Manually set destination to nil to test error handling
 	session.mu.Lock()
@@ -624,8 +609,7 @@ func TestSessionSigningKeyPairNilDestination(t *testing.T) {
 
 // TestSessionSigningKeyPairThreadSafety verifies concurrent access to SigningKeyPair()
 func TestSessionSigningKeyPairThreadSafety(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	done := make(chan bool, 100)
 
@@ -654,8 +638,7 @@ func TestSessionSigningKeyPairThreadSafety(t *testing.T) {
 
 // TestSessionSigningKeyPairConsistency verifies key pair remains consistent across calls
 func TestSessionSigningKeyPairConsistency(t *testing.T) {
-	client := NewClient(nil)
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Get key pair multiple times
 	keyPair1, err := session.SigningKeyPair()

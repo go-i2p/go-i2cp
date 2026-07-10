@@ -23,9 +23,7 @@ func configureOfflineSigning(t *testing.T, session *Session) (expiration uint32,
 // TestSession_IsOffline_NotConfigured tests that IsOffline returns false
 // when offline signing is not configured.
 func TestSession_IsOffline_NotConfigured(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	if session.IsOffline() {
 		t.Error("IsOffline() should return false for session without offline signing configured")
@@ -35,9 +33,7 @@ func TestSession_IsOffline_NotConfigured(t *testing.T) {
 // TestSession_IsOffline_Configured tests that IsOffline returns true
 // when offline signing is properly configured.
 func TestSession_IsOffline_Configured(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	configureOfflineSigning(t, session)
 
@@ -59,9 +55,7 @@ func TestSession_IsOffline_NilConfig(t *testing.T) {
 // TestSession_ValidateProtocol_Datagram1Offline tests that ValidateProtocol
 // returns an error when Datagram1 is used with an offline-signed session.
 func TestSession_ValidateProtocol_Datagram1Offline(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	configureOfflineSigning(t, session)
 
@@ -75,9 +69,7 @@ func TestSession_ValidateProtocol_Datagram1Offline(t *testing.T) {
 // TestSession_ValidateProtocol_Datagram2Offline tests that ValidateProtocol
 // accepts Datagram2 for offline-signed sessions.
 func TestSession_ValidateProtocol_Datagram2Offline(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	configureOfflineSigning(t, session)
 
@@ -91,9 +83,7 @@ func TestSession_ValidateProtocol_Datagram2Offline(t *testing.T) {
 // TestSession_ValidateProtocol_Datagram1Online tests that ValidateProtocol
 // accepts Datagram1 for regular (non-offline) sessions.
 func TestSession_ValidateProtocol_Datagram1Online(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// No offline signing configured
 	err := session.ValidateProtocol(ProtoDatagram)
@@ -105,9 +95,7 @@ func TestSession_ValidateProtocol_Datagram1Online(t *testing.T) {
 // TestSession_ValidateProtocol_AllProtocols tests ValidateProtocol for all protocol types
 // on a regular (non-offline) session.
 func TestSession_ValidateProtocol_AllProtocols(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	protocols := []uint8{
 		ProtoStreaming,
@@ -128,9 +116,7 @@ func TestSession_ValidateProtocol_AllProtocols(t *testing.T) {
 // TestSession_TransientSigningKeyPair_NotOffline tests that TransientSigningKeyPair
 // returns an error when the session is not configured for offline signing.
 func TestSession_TransientSigningKeyPair_NotOffline(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	_, err := session.TransientSigningKeyPair()
 	if err == nil {
@@ -141,9 +127,7 @@ func TestSession_TransientSigningKeyPair_NotOffline(t *testing.T) {
 // TestSession_TransientSigningKeyPair_NoKeyPairConfigured tests that TransientSigningKeyPair
 // returns an error when offline is configured but transient key pair is not set.
 func TestSession_TransientSigningKeyPair_NoKeyPairConfigured(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Configure offline signing (without transient key pair)
 	configureOfflineSigning(t, session)
@@ -157,9 +141,7 @@ func TestSession_TransientSigningKeyPair_NoKeyPairConfigured(t *testing.T) {
 // TestSession_TransientSigningKeyPair_Configured tests that TransientSigningKeyPair
 // returns the transient key pair when properly configured.
 func TestSession_TransientSigningKeyPair_Configured(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Generate transient key pair
 	transientKP, err := NewEd25519KeyPair()
@@ -201,9 +183,7 @@ func TestSession_TransientSigningKeyPair_Configured(t *testing.T) {
 // TestSession_TransientSigningKeyPair_CanSign tests that the transient key pair
 // can be used for signing.
 func TestSession_TransientSigningKeyPair_CanSign(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{crypto: crypto}
-	session := NewSession(client, SessionCallbacks{})
+	session := newTestSession(t)
 
 	// Generate and configure transient key pair
 	transientKP, err := NewEd25519KeyPair()
