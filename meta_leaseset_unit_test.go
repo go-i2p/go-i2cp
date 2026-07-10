@@ -7,6 +7,22 @@ import (
 	"time"
 )
 
+// newMetaLeaseSetTestSession creates a test client and session with destination setup.
+// Returns (*Client, *Session) with session.id=1 and destination initialized.
+func newMetaLeaseSetTestSession(t *testing.T) (*Client, *Session) {
+	client := NewClient(&ClientCallBacks{})
+	session := newSession(client, SessionCallbacks{})
+	session.id = 1
+
+	dest, err := NewDestination(client.crypto)
+	if err != nil {
+		t.Fatalf("Failed to create destination: %v", err)
+	}
+	session.config.destination = dest
+
+	return client, session
+}
+
 // TestNewMetaLease tests MetaLease creation
 func TestNewMetaLease(t *testing.T) {
 	hash := [32]byte{}
@@ -246,16 +262,7 @@ func TestMetaLeaseSetConfig_AddRevocation(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_Basic tests basic MetaLeaseSet creation
 func TestMsgCreateMetaLeaseSet_Basic(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	// Create destination
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	// Set up router version (need 0.9.39+)
 	client.router.date = 1000000
@@ -272,8 +279,7 @@ func TestMsgCreateMetaLeaseSet_Basic(t *testing.T) {
 	config.AddMetaLease(ml)
 
 	// Call msgCreateMetaLeaseSet with queue=true
-	err = client.msgCreateMetaLeaseSet(session, config, true)
-	if err != nil {
+	if err := client.msgCreateMetaLeaseSet(session, config, true); err != nil {
 		t.Fatalf("msgCreateMetaLeaseSet failed: %v", err)
 	}
 
@@ -285,12 +291,7 @@ func TestMsgCreateMetaLeaseSet_Basic(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_VersionCheck tests version requirement
 func TestMsgCreateMetaLeaseSet_VersionCheck(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, _ := NewDestination(client.crypto)
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	// Set old router version (pre-0.9.39)
 	client.router.version = Version{major: 0, minor: 9, micro: 30}
@@ -306,12 +307,7 @@ func TestMsgCreateMetaLeaseSet_VersionCheck(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_EmptyConfig tests error on empty config
 func TestMsgCreateMetaLeaseSet_EmptyConfig(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, _ := NewDestination(client.crypto)
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
 
@@ -326,12 +322,7 @@ func TestMsgCreateMetaLeaseSet_EmptyConfig(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_TooManyMetaLeases tests error on too many MetaLeases
 func TestMsgCreateMetaLeaseSet_TooManyMetaLeases(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, _ := NewDestination(client.crypto)
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
 
@@ -350,15 +341,7 @@ func TestMsgCreateMetaLeaseSet_TooManyMetaLeases(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_WithRevocations tests MetaLeaseSet with revocations
 func TestMsgCreateMetaLeaseSet_WithRevocations(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.date = 1000000
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
@@ -376,8 +359,7 @@ func TestMsgCreateMetaLeaseSet_WithRevocations(t *testing.T) {
 	config.AddRevocation(revHash1)
 	config.AddRevocation(revHash2)
 
-	err = client.msgCreateMetaLeaseSet(session, config, true)
-	if err != nil {
+	if err := client.msgCreateMetaLeaseSet(session, config, true); err != nil {
 		t.Fatalf("msgCreateMetaLeaseSet with revocations failed: %v", err)
 	}
 
@@ -388,15 +370,7 @@ func TestMsgCreateMetaLeaseSet_WithRevocations(t *testing.T) {
 
 // TestMsgCreateMetaLeaseSet_WithProperties tests MetaLeaseSet with properties
 func TestMsgCreateMetaLeaseSet_WithProperties(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.date = 1000000
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
@@ -409,23 +383,14 @@ func TestMsgCreateMetaLeaseSet_WithProperties(t *testing.T) {
 	ml := NewMetaLease(hash, META_LEASE_TYPE_LEASESET2, 0, uint32(time.Now().Add(1*time.Hour).Unix()))
 	config.AddMetaLease(ml)
 
-	err = client.msgCreateMetaLeaseSet(session, config, true)
-	if err != nil {
+	if err := client.msgCreateMetaLeaseSet(session, config, true); err != nil {
 		t.Fatalf("msgCreateMetaLeaseSet with properties failed: %v", err)
 	}
 }
 
 // TestMsgCreateMetaLeaseSet_MultipleMetaLeases tests multiple MetaLease entries
 func TestMsgCreateMetaLeaseSet_MultipleMetaLeases(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.date = 1000000
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
@@ -440,9 +405,8 @@ func TestMsgCreateMetaLeaseSet_MultipleMetaLeases(t *testing.T) {
 		config.AddMetaLease(ml)
 	}
 
-	err = client.msgCreateMetaLeaseSet(session, config, true)
-	if err != nil {
-		t.Fatalf("msgCreateMetaLeaseSet with multiple entries failed: %v", err)
+	if err := client.msgCreateMetaLeaseSet(session, config, true); err != nil {
+		t.Fatalf("msgCreateMetaLeaseSet with multiple MetaLeases failed: %v", err)
 	}
 
 	if len(client.outputQueue) == 0 {
@@ -452,15 +416,7 @@ func TestMsgCreateMetaLeaseSet_MultipleMetaLeases(t *testing.T) {
 
 // TestSession_CreateMetaLeaseSet tests the Session method
 func TestSession_CreateMetaLeaseSet(t *testing.T) {
-	client := NewClient(&ClientCallBacks{})
-	session := newSession(client, SessionCallbacks{})
-	session.id = 1
-
-	dest, err := NewDestination(client.crypto)
-	if err != nil {
-		t.Fatalf("Failed to create destination: %v", err)
-	}
-	session.config.destination = dest
+	client, session := newMetaLeaseSetTestSession(t)
 
 	client.router.date = 1000000
 	client.router.version = Version{major: 0, minor: 9, micro: 67}
@@ -471,8 +427,7 @@ func TestSession_CreateMetaLeaseSet(t *testing.T) {
 
 	// Note: This will fail because we're not actually connected
 	// but we're testing the method routing, not the full connection
-	err = session.CreateMetaLeaseSetQueued(config)
-	if err != nil {
+	if err := session.CreateMetaLeaseSetQueued(config); err != nil {
 		t.Fatalf("CreateMetaLeaseSetQueued failed: %v", err)
 	}
 }
