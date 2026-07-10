@@ -7,20 +7,9 @@ import (
 	"github.com/go-i2p/common/lease"
 )
 
-// TestNewLeaseFromStream validates creating a Lease from a Stream
-func TestNewLeaseFromStream(t *testing.T) {
-	// Create test data representing a lease
-	// [32 bytes tunnel gateway][4 bytes tunnel ID][8 bytes end date]
-	tunnelGateway := [32]byte{
-		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-		0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-	}
-	tunnelID := uint32(0x12345678)
-	endDate := uint64(0x0102030405060708)
-
-	// Construct lease bytes
+// buildLeaseBytes constructs a 44-byte lease data array from components.
+// Returns [32-byte gateway][4-byte tunnel ID][8-byte end date] in big-endian format.
+func buildLeaseBytes(tunnelGateway [32]byte, tunnelID uint32, endDate uint64) [44]byte {
 	var leaseData [44]byte
 	copy(leaseData[0:32], tunnelGateway[:])
 	leaseData[32] = byte(tunnelID >> 24)
@@ -35,6 +24,23 @@ func TestNewLeaseFromStream(t *testing.T) {
 	leaseData[41] = byte(endDate >> 16)
 	leaseData[42] = byte(endDate >> 8)
 	leaseData[43] = byte(endDate)
+	return leaseData
+}
+
+// TestNewLeaseFromStream validates creating a Lease from a Stream
+func TestNewLeaseFromStream(t *testing.T) {
+	// Create test data representing a lease
+	tunnelGateway := [32]byte{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+		0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+	}
+	tunnelID := uint32(0x12345678)
+	endDate := uint64(0x0102030405060708)
+
+	// Build lease bytes using helper
+	leaseData := buildLeaseBytes(tunnelGateway, tunnelID, endDate)
 
 	// Create stream with lease data
 	stream := NewStream(leaseData[:])
@@ -76,21 +82,8 @@ func TestLeaseRoundTrip(t *testing.T) {
 	tunnelID := uint32(0xdeadbeef)
 	endDate := uint64(0x123456789abcdef0)
 
-	// Construct lease bytes
-	var leaseData [44]byte
-	copy(leaseData[0:32], tunnelGateway[:])
-	leaseData[32] = byte(tunnelID >> 24)
-	leaseData[33] = byte(tunnelID >> 16)
-	leaseData[34] = byte(tunnelID >> 8)
-	leaseData[35] = byte(tunnelID)
-	leaseData[36] = byte(endDate >> 56)
-	leaseData[37] = byte(endDate >> 48)
-	leaseData[38] = byte(endDate >> 40)
-	leaseData[39] = byte(endDate >> 32)
-	leaseData[40] = byte(endDate >> 24)
-	leaseData[41] = byte(endDate >> 16)
-	leaseData[42] = byte(endDate >> 8)
-	leaseData[43] = byte(endDate)
+	// Build lease bytes using helper
+	leaseData := buildLeaseBytes(tunnelGateway, tunnelID, endDate)
 
 	// Read lease from stream
 	readStream := NewStream(leaseData[:])
@@ -128,21 +121,8 @@ func TestLeaseIntegrationWithCommonPackage(t *testing.T) {
 	tunnelID := uint32(0xabcdef01)
 	endDate := uint64(0xfedcba9876543210)
 
-	// Construct lease bytes
-	var leaseData [44]byte
-	copy(leaseData[0:32], tunnelGateway[:])
-	leaseData[32] = byte(tunnelID >> 24)
-	leaseData[33] = byte(tunnelID >> 16)
-	leaseData[34] = byte(tunnelID >> 8)
-	leaseData[35] = byte(tunnelID)
-	leaseData[36] = byte(endDate >> 56)
-	leaseData[37] = byte(endDate >> 48)
-	leaseData[38] = byte(endDate >> 40)
-	leaseData[39] = byte(endDate >> 32)
-	leaseData[40] = byte(endDate >> 24)
-	leaseData[41] = byte(endDate >> 16)
-	leaseData[42] = byte(endDate >> 8)
-	leaseData[43] = byte(endDate)
+	// Build lease bytes using helper
+	leaseData := buildLeaseBytes(tunnelGateway, tunnelID, endDate)
 
 	// Read lease using go-i2cp
 	stream := NewStream(leaseData[:])

@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+// buildBandwidthLimitsStream creates a stream with standard test bandwidth limits data.
+// Writes: clientInbound=1000, clientOutbound=2000, routerInbound=3000, routerInboundBurst=4000,
+// routerOutbound=5000, routerOutboundBurst=6000, burstTime=10, followed by 9 undefined fields.
+// The undefinedValue parameter (if >=0) is written for all 9 undefined fields; otherwise
+// undefined field i is written as uint32(i + 100).
+func buildBandwidthLimitsStream(undefinedValue int32) *Stream {
+	stream := NewStream(make([]byte, 0, 256))
+	stream.WriteUint32(1000)
+	stream.WriteUint32(2000)
+	stream.WriteUint32(3000)
+	stream.WriteUint32(4000)
+	stream.WriteUint32(5000)
+	stream.WriteUint32(6000)
+	stream.WriteUint32(10)
+	for i := 0; i < 9; i++ {
+		if undefinedValue >= 0 {
+			stream.WriteUint32(uint32(undefinedValue))
+		} else {
+			stream.WriteUint32(uint32(i + 100))
+		}
+	}
+	return stream
+}
+
 // TestBandwidthLimitsString tests the String() method of BandwidthLimits
 func TestBandwidthLimitsString(t *testing.T) {
 	tests := []struct {
@@ -94,17 +118,7 @@ func TestOnMsgBandwidthLimitCallback(t *testing.T) {
 	client := NewClient(callbacks)
 
 	// Create a stream with bandwidth limits message data
-	stream := NewStream(make([]byte, 0, 256))
-	stream.WriteUint32(1000) // ClientInbound
-	stream.WriteUint32(2000) // ClientOutbound
-	stream.WriteUint32(3000) // RouterInbound
-	stream.WriteUint32(4000) // RouterInboundBurst
-	stream.WriteUint32(5000) // RouterOutbound
-	stream.WriteUint32(6000) // RouterOutboundBurst
-	stream.WriteUint32(10)   // BurstTime
-	for i := 0; i < 9; i++ { // 9 undefined fields
-		stream.WriteUint32(uint32(i + 100))
-	}
+	stream := buildBandwidthLimitsStream(-1) // -1 = use (i+100) pattern
 
 	wg.Add(1)
 	client.onMsgBandwidthLimit(stream)
@@ -155,17 +169,7 @@ func TestOnMsgBandwidthLimitNoCallback(t *testing.T) {
 	client := NewClient(&ClientCallBacks{})
 
 	// Create a stream with bandwidth limits message data
-	stream := NewStream(make([]byte, 0, 256))
-	stream.WriteUint32(1000)
-	stream.WriteUint32(2000)
-	stream.WriteUint32(3000)
-	stream.WriteUint32(4000)
-	stream.WriteUint32(5000)
-	stream.WriteUint32(6000)
-	stream.WriteUint32(10)
-	for i := 0; i < 9; i++ {
-		stream.WriteUint32(uint32(i + 100))
-	}
+	stream := buildBandwidthLimitsStream(-1)
 
 	// Should not panic when callback is nil
 	client.onMsgBandwidthLimit(stream)
@@ -176,17 +180,7 @@ func TestOnMsgBandwidthLimitNilCallbacks(t *testing.T) {
 	client := NewClient(nil)
 
 	// Create a stream with bandwidth limits message data
-	stream := NewStream(make([]byte, 0, 256))
-	stream.WriteUint32(1000)
-	stream.WriteUint32(2000)
-	stream.WriteUint32(3000)
-	stream.WriteUint32(4000)
-	stream.WriteUint32(5000)
-	stream.WriteUint32(6000)
-	stream.WriteUint32(10)
-	for i := 0; i < 9; i++ {
-		stream.WriteUint32(uint32(i + 100))
-	}
+	stream := buildBandwidthLimitsStream(-1)
 
 	// Should not panic when callbacks is nil
 	client.onMsgBandwidthLimit(stream)
@@ -287,17 +281,7 @@ func TestBandwidthLimitsConcurrentCallback(t *testing.T) {
 
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			stream := NewStream(make([]byte, 0, 256))
-			stream.WriteUint32(1000)
-			stream.WriteUint32(2000)
-			stream.WriteUint32(3000)
-			stream.WriteUint32(4000)
-			stream.WriteUint32(5000)
-			stream.WriteUint32(6000)
-			stream.WriteUint32(10)
-			for j := 0; j < 9; j++ {
-				stream.WriteUint32(0)
-			}
+			stream := buildBandwidthLimitsStream(0) // 0 = use constant 0 for all undefined fields
 			client.onMsgBandwidthLimit(stream)
 		}()
 	}
