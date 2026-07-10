@@ -136,20 +136,27 @@ var (
 	ErrInvalidArgument = errors.New("i2cp: invalid argument (nil or empty value)")
 )
 
+// contextualError is the shared base for errors that wrap an underlying error
+// together with a description of the operation that failed. It is embedded by
+// MessageError and SessionError, which each add their own identifying field.
+type contextualError struct {
+	Operation string // What operation failed (e.g., "parsing", "sending")
+	Err       error  // Underlying error
+}
+
+func (e *contextualError) Unwrap() error {
+	return e.Err
+}
+
 // MessageError represents an error related to I2CP message processing.
 // It includes the message type and additional context about what failed.
 type MessageError struct {
-	MessageType uint8  // I2CP message type constant
-	Operation   string // What operation failed (e.g., "parsing", "sending")
-	Err         error  // Underlying error
+	contextualError
+	MessageType uint8 // I2CP message type constant
 }
 
 func (e *MessageError) Error() string {
 	return fmt.Sprintf("i2cp: message type %d %s failed: %v", e.MessageType, e.Operation, e.Err)
-}
-
-func (e *MessageError) Unwrap() error {
-	return e.Err
 }
 
 // NewMessageError creates a MessageError with the given parameters.
@@ -162,26 +169,20 @@ func (e *MessageError) Unwrap() error {
 //	}
 func NewMessageError(messageType uint8, operation string, err error) error {
 	return &MessageError{
-		MessageType: messageType,
-		Operation:   operation,
-		Err:         err,
+		contextualError: contextualError{Operation: operation, Err: err},
+		MessageType:     messageType,
 	}
 }
 
 // SessionError represents an error related to session operations.
 // It includes the session ID for debugging and tracing.
 type SessionError struct {
+	contextualError
 	SessionID uint16 // I2CP session ID (2-byte integer)
-	Operation string // What operation failed
-	Err       error  // Underlying error
 }
 
 func (e *SessionError) Error() string {
 	return fmt.Sprintf("i2cp: session %d %s failed: %v", e.SessionID, e.Operation, e.Err)
-}
-
-func (e *SessionError) Unwrap() error {
-	return e.Err
 }
 
 // NewSessionError creates a SessionError with the given parameters.
@@ -194,9 +195,8 @@ func (e *SessionError) Unwrap() error {
 //	}
 func NewSessionError(sessionID uint16, operation string, err error) error {
 	return &SessionError{
-		SessionID: sessionID,
-		Operation: operation,
-		Err:       err,
+		contextualError: contextualError{Operation: operation, Err: err},
+		SessionID:       sessionID,
 	}
 }
 
@@ -230,6 +230,21 @@ func NewProtocolError(message string, code int, fatal bool) error {
 	}
 }
 
+// checkTemporary type-asserts err against the standard `Temporary() bool` interface
+// implemented by many network errors. The second return value reports whether the
+// assertion succeeded; callers must apply their own default when it did not, since
+// IsTemporary and isTemporary intentionally differ (fail-closed vs. fail-open).
+func checkTemporary(err error) (isTemp bool, ok bool) {
+	type temporary interface {
+		Temporary() bool
+	}
+	te, ok := err.(temporary)
+	if !ok {
+		return false, false
+	}
+	return te.Temporary(), true
+}
+
 // IsTemporary returns true if the error is temporary and the operation can be retried.
 // This checks for specific error types that indicate transient failures.
 func IsTemporary(err error) bool {
@@ -242,12 +257,9 @@ func IsTemporary(err error) bool {
 		return true
 	}
 
-	// Check for network temporary errors
-	type temporary interface {
-		Temporary() bool
-	}
-	if te, ok := err.(temporary); ok {
-		return te.Temporary()
+	// Check for network temporary errors; default to false when Temporary() is unimplemented.
+	if isTemp, ok := checkTemporary(err); ok {
+		return isTemp
 	}
 
 	return false

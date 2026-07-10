@@ -79,17 +79,14 @@ func readDestinationKeys(stream *Stream) ([256]byte, []byte, error) {
 func createEd25519SigningKeyPair(signingKeyPadded []byte) (SignatureKeyPair, error) {
 	ed25519PubKeyBytes := signingKeyPadded[96:128]
 
-	ed25519PubKey, err := cryptoed25519.CreateEd25519PublicKeyFromBytes(ed25519PubKeyBytes)
+	ed25519KeyPair, err := createVerificationKeyPair(ed25519PubKeyBytes)
 	if err != nil {
 		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 public key: %w", err)
 	}
 
 	return SignatureKeyPair{
-		algorithmType: ED25519_SHA256,
-		ed25519KeyPair: &Ed25519KeyPair{
-			algorithmType: ED25519_SHA256,
-			publicKey:     ed25519PubKey,
-		},
+		algorithmType:  ED25519_SHA256,
+		ed25519KeyPair: ed25519KeyPair,
 	}, nil
 }
 

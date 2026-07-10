@@ -247,50 +247,44 @@ func X25519KeyPairFromPrivateKey(privateKey [32]byte) (*X25519KeyPair, error) {
 //
 // Returns the 32-byte decryption key to use in BlindingInfoMessage.
 func DerivePerClientAuthKey(scheme uint8, clientKey, serverKey [32]byte) ([32]byte, error) {
-	switch scheme {
-	case BLINDING_AUTH_SCHEME_DH:
-		auth := NewDHAuthenticator(clientKey, serverKey)
-		result, err := auth.Authenticate()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		return result.DecryptionKey, nil
-
-	case BLINDING_AUTH_SCHEME_PSK:
-		auth := NewPSKAuthenticator(clientKey)
-		result, err := auth.Authenticate()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		return result.DecryptionKey, nil
-
-	default:
-		return [32]byte{}, fmt.Errorf("unsupported auth scheme: %d", scheme)
-	}
+	return DerivePerClientAuthKeyWithOptions(scheme, clientKey, serverKey, nil, nil)
 }
 
 // DerivePerClientAuthKeyWithOptions derives the decryption key with custom HKDF parameters.
+// A nil salt or info leaves the authenticator's default value (empty salt, ELS2AuthInfo) unchanged.
 func DerivePerClientAuthKeyWithOptions(scheme uint8, clientKey, serverKey [32]byte, salt, info []byte) ([32]byte, error) {
+	var result *AuthResult
+	var err error
+
 	switch scheme {
 	case BLINDING_AUTH_SCHEME_DH:
-		auth := NewDHAuthenticator(clientKey, serverKey).WithSalt(salt).WithInfo(info)
-		result, err := auth.Authenticate()
-		if err != nil {
-			return [32]byte{}, err
+		auth := NewDHAuthenticator(clientKey, serverKey)
+		if salt != nil {
+			auth = auth.WithSalt(salt)
 		}
-		return result.DecryptionKey, nil
+		if info != nil {
+			auth = auth.WithInfo(info)
+		}
+		result, err = auth.Authenticate()
 
 	case BLINDING_AUTH_SCHEME_PSK:
-		auth := NewPSKAuthenticator(clientKey).WithSalt(salt).WithInfo(info)
-		result, err := auth.Authenticate()
-		if err != nil {
-			return [32]byte{}, err
+		auth := NewPSKAuthenticator(clientKey)
+		if salt != nil {
+			auth = auth.WithSalt(salt)
 		}
-		return result.DecryptionKey, nil
+		if info != nil {
+			auth = auth.WithInfo(info)
+		}
+		result, err = auth.Authenticate()
 
 	default:
 		return [32]byte{}, fmt.Errorf("unsupported auth scheme: %d", scheme)
 	}
+
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return result.DecryptionKey, nil
 }
 
 // Session methods for DH/PSK authentication

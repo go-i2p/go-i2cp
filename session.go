@@ -91,9 +91,10 @@ func (session *Session) ensureInitialized() error {
 	return nil
 }
 
-// SendMessage sends a basic message without expiration control
-// per I2CP specification - implements basic message delivery via SendMessageMessage (type 5)
-func (session *Session) SendMessage(destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
+// validateSendRequest performs the common validation shared by SendMessage and
+// SendMessageExpires: ensures the session was properly initialized, the destination
+// and payload are non-nil, and the session is not closed.
+func (session *Session) validateSendRequest(destination *Destination, payload *Stream) error {
 	// Ensure session was properly initialized with NewSession()
 	if err := session.ensureInitialized(); err != nil {
 		return err
@@ -105,6 +106,21 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 
 	if payload == nil {
 		return fmt.Errorf("payload cannot be nil")
+	}
+
+	// Check if session is closed
+	if session.IsClosed() {
+		return fmt.Errorf("session %d is closed", session.id)
+	}
+
+	return nil
+}
+
+// SendMessage sends a basic message without expiration control
+// per I2CP specification - implements basic message delivery via SendMessageMessage (type 5)
+func (session *Session) SendMessage(destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
+	if err := session.validateSendRequest(destination, payload); err != nil {
+		return err
 	}
 
 	// Validate message size per I2CP specification (max 64KB payload)
@@ -126,40 +142,13 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 // SendMessageWithContext sends a message with context support for timeout control
 // per I2CP specification - implements context-aware message delivery with cancellation
 func (session *Session) SendMessageWithContext(ctx context.Context, destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
-	if err := validateSendContext(ctx); err != nil {
+	if err := validateContextNotNilOrCancelled(ctx, "sending message"); err != nil {
 		return err
 	}
 
-	return executeSendWithContext(ctx, session, destination, protocol, srcPort, destPort, payload, nonce)
-}
-
-// validateSendContext validates the context is non-nil and not already cancelled.
-func validateSendContext(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("context cannot be nil")
-	}
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled before sending message: %w", ctx.Err())
-	default:
-		return nil
-	}
-}
-
-// executeSendWithContext executes the message send in a goroutine with context cancellation support.
-func executeSendWithContext(ctx context.Context, session *Session, destination *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, nonce uint32) error {
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- session.SendMessage(destination, protocol, srcPort, destPort, payload, nonce)
-	}()
-
-	select {
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return fmt.Errorf("message send cancelled: %w", ctx.Err())
-	}
+	return executeWithContext(ctx, func() error {
+		return session.SendMessage(destination, protocol, srcPort, destPort, payload, nonce)
+	}, "message send cancelled")
 }
 
 // ReconfigureSession updates session configuration with new properties
@@ -584,24 +573,9 @@ func (session *Session) dispatchMessage(srcDest *Destination, protocol uint8, sr
 	// Capture callback reference to prevent race condition if session.callbacks is modified
 	onMessage := session.callbacks.OnMessage
 
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				Error("Panic in message callback for session %d: %v", session.id, r)
-			}
-		}()
-
+	session.executeCallback(func() {
 		onMessage(session, srcDest, protocol, srcPort, destPort, payload)
-	}
-
-	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
-	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
-	}
+	}, "message")
 }
 
 // dispatchDestination dispatches destination lookup results to registered callbacks
@@ -799,24 +773,9 @@ func (session *Session) dispatchLeaseSet2(leaseSet *LeaseSet2) {
 	// Capture callback reference to prevent race condition if session.callbacks is modified
 	onLeaseSet2 := session.callbacks.OnLeaseSet2
 
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				Error("Panic in LeaseSet2 callback for session %d: %v", session.id, r)
-			}
-		}()
-
+	session.executeCallback(func() {
 		onLeaseSet2(session, leaseSet)
-	}
-
-	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
-	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
-	}
+	}, "leaseset2")
 }
 
 // dispatchBlindingInfo dispatches blinding information to the session callback
@@ -840,46 +799,17 @@ func (session *Session) dispatchBlindingInfo(blindingScheme, blindingFlags uint1
 	// Capture callback reference to prevent race condition if session.callbacks is modified
 	onBlindingInfo := session.callbacks.OnBlindingInfo
 
-	// Choose between sync and async callback execution
-	callbackFunc := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				Error("Panic in BlindingInfo callback for session %d: %v", session.id, r)
-			}
-		}()
-
+	session.executeCallback(func() {
 		onBlindingInfo(session, blindingScheme, blindingFlags, blindingParams)
-	}
-
-	if session.syncCallbacks {
-		// Synchronous execution for testing
-		callbackFunc()
-	} else {
-		// Asynchronous execution for production to prevent blocking
-		go callbackFunc()
-	}
+	}, "blindinginfo")
 }
 
 // SendMessageExpires sends a message with expiration time and flags for delivery options
 // per I2CP specification 0.7.1+ - implements SendMessageExpiresMessage (type 36) for enhanced delivery control
 // Supports per-message reliability override and tag management
 func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream, flags uint16, expirationSeconds uint64) error {
-	// Ensure session was properly initialized with NewSession()
-	if err := session.ensureInitialized(); err != nil {
+	if err := session.validateSendRequest(dest, payload); err != nil {
 		return err
-	}
-
-	if dest == nil {
-		return fmt.Errorf("destination cannot be nil")
-	}
-
-	if payload == nil {
-		return fmt.Errorf("payload cannot be nil")
-	}
-
-	// Check if session is closed
-	if session.IsClosed() {
-		return fmt.Errorf("session %d is closed", session.id)
 	}
 
 	// Generate unique nonce for message tracking
@@ -967,40 +897,13 @@ func (session *Session) prepareLookupData(address string) (uint8, []byte, error)
 // per I2CP specification 0.9.11+ - implements context-aware destination resolution.
 // The resolved destination is delivered via the OnDestination callback.
 func (session *Session) LookupDestinationWithContext(ctx context.Context, address string, timeout time.Duration) error {
-	if err := validateLookupContext(ctx); err != nil {
+	if err := validateContextNotNilOrCancelled(ctx, "destination lookup"); err != nil {
 		return err
 	}
 
-	return executeLookupWithContext(ctx, session, address, timeout)
-}
-
-// validateLookupContext validates the context is non-nil and not already cancelled.
-func validateLookupContext(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("context cannot be nil")
-	}
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled before destination lookup: %w", ctx.Err())
-	default:
-		return nil
-	}
-}
-
-// executeLookupWithContext executes the destination lookup with context cancellation support.
-func executeLookupWithContext(ctx context.Context, session *Session, address string, timeout time.Duration) error {
-	resultChan := make(chan error, 1)
-	go func() {
-		resultChan <- session.LookupDestination(address, timeout)
-	}()
-
-	select {
-	case err := <-resultChan:
-		return err
-	case <-ctx.Done():
-		return fmt.Errorf("destination lookup cancelled: %w", ctx.Err())
-	}
+	return executeWithContext(ctx, func() error {
+		return session.LookupDestination(address, timeout)
+	}, "destination lookup cancelled")
 }
 
 // Helper function to work around visibility issues

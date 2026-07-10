@@ -27,56 +27,39 @@ const (
 	subsessionOpTimeout   = 30 * time.Second
 )
 
-// TestSubsessionDestruction_IndividualCleanup verifies that destroying an individual
-// subsession properly cleans up resources without affecting the primary session.
-// Per I2CP § Destroying Subsessions: "A subsession may be destroyed with the
-// DestroySession message as usual. This will not destroy the primary session
-// or stop the I2CP connection."
-func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
-	// Connect to router
-	client := NewClient(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), subsessionTestTimeout)
-	defer cancel()
+// connectMultiSessionClient connects a fresh Client to the local I2P router within
+// the given timeout and skips the test if the router doesn't support multi-session
+// (VersionMultiSession, requires 0.9.21+). Fails the test via t.Fatalf/t.Skipf on
+// connection failure or lack of support. The returned cancel func should be
+// deferred by the caller.
+func connectMultiSessionClient(t *testing.T, timeout time.Duration) (*Client, context.Context, context.CancelFunc) {
+	t.Helper()
 
-	err := client.Connect(ctx)
-	if err != nil {
+	client := NewClient(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	if err := client.Connect(ctx); err != nil {
+		cancel()
 		t.Fatalf("Failed to connect to I2P router: %v (is I2P running on localhost:7654?)", err)
 	}
 
 	t.Log("Connected to I2P router")
 
-	// Verify router supports multi-session (0.9.21+)
 	if !client.SupportsVersion(VersionMultiSession) {
+		version := client.router.version.String()
 		client.Close()
-		t.Skipf("Router version %s does not support multi-session (requires 0.9.21+)",
-			client.router.version.String())
+		cancel()
+		t.Skipf("Router version %s does not support multi-session (requires 0.9.21+)", version)
 	}
 
-	// Create primary session
-	primaryCreated := make(chan struct{})
-	var primaryCreatedOnce sync.Once
-	primary := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			t.Logf("Primary session status: %d (ID: %d)", status, s.ID())
-			if status == I2CP_SESSION_STATUS_CREATED {
-				primaryCreatedOnce.Do(func() { close(primaryCreated) })
-			}
-		},
-	})
-	primary.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "primary-session")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "1")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "1")
+	return client, ctx, cancel
+}
 
-	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, primary)
-	opCancel()
-	if err != nil {
-		client.Close()
-		t.Fatalf("Failed to create primary session: %v", err)
-	}
-
-	// Process I/O in background with proper cancellation
+// startProcessIOLoop launches a background goroutine that repeatedly calls
+// client.ProcessIO until ctx is cancelled or the client is closed. The returned
+// channel is closed when the loop exits; callers should `<-` it after cancelling
+// ctx to ensure the goroutine has stopped before making further assertions.
+func startProcessIOLoop(ctx context.Context, client *Client) <-chan struct{} {
 	ioCanceled := make(chan struct{})
 	go func() {
 		defer close(ioCanceled)
@@ -94,16 +77,107 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 			}
 		}
 	}()
+	return ioCanceled
+}
 
-	// Wait for primary session to be created
+// waitForSessionCreated blocks until created is closed (signalling
+// I2CP_SESSION_STATUS_CREATED) or a 30 second timeout elapses. On timeout it
+// cancels ctx, drains ioCanceled, and fails the test with failMsg.
+func waitForSessionCreated(t *testing.T, cancel context.CancelFunc, ioCanceled <-chan struct{}, created <-chan struct{}, failMsg string) {
+	t.Helper()
+
 	select {
-	case <-primaryCreated:
-		t.Logf("Primary session created with ID: %d", primary.ID())
+	case <-created:
 	case <-time.After(30 * time.Second):
 		cancel()
 		<-ioCanceled
-		t.Fatal("Timeout waiting for primary session creation")
+		t.Fatal(failMsg)
 	}
+}
+
+// createAndWaitPrimarySession creates a primary session configured with the
+// standard subsession-test properties (fast receive, inbound/outbound quantity 1,
+// the given nickname), submits it, and waits for the router to confirm creation.
+func createAndWaitPrimarySession(t *testing.T, client *Client, ctx context.Context, cancel context.CancelFunc, ioCanceled <-chan struct{}, nickname string) *Session {
+	t.Helper()
+
+	created := make(chan struct{})
+	var once sync.Once
+	primary := NewSession(client, SessionCallbacks{
+		OnStatus: func(s *Session, status SessionStatus) {
+			t.Logf("Primary session status: %d (ID: %d)", status, s.ID())
+			if status == I2CP_SESSION_STATUS_CREATED {
+				once.Do(func() { close(created) })
+			}
+		},
+	})
+	primary.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+	if nickname != "" {
+		primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, nickname)
+	}
+	primary.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "1")
+	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "1")
+
+	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
+	err := client.CreateSession(opCtx, primary)
+	opCancel()
+	if err != nil {
+		cancel()
+		<-ioCanceled
+		t.Fatalf("Failed to create primary session: %v", err)
+	}
+
+	waitForSessionCreated(t, cancel, ioCanceled, created, "Timeout waiting for primary session creation")
+	t.Logf("Primary session created with ID: %d", primary.ID())
+
+	return primary
+}
+
+// createAndWaitSubsession creates a non-primary session with the given nickname,
+// submits it, and waits for the router to confirm creation.
+func createAndWaitSubsession(t *testing.T, client *Client, ctx context.Context, cancel context.CancelFunc, ioCanceled <-chan struct{}, nickname string) *Session {
+	t.Helper()
+
+	created := make(chan struct{})
+	var once sync.Once
+	subsession := NewSession(client, SessionCallbacks{
+		OnStatus: func(s *Session, status SessionStatus) {
+			if status == I2CP_SESSION_STATUS_CREATED {
+				once.Do(func() { close(created) })
+			}
+		},
+	})
+	subsession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+	if nickname != "" {
+		subsession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, nickname)
+	}
+
+	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
+	err := client.CreateSession(opCtx, subsession)
+	opCancel()
+	if err != nil {
+		cancel()
+		<-ioCanceled
+		t.Fatalf("Failed to create subsession: %v", err)
+	}
+
+	waitForSessionCreated(t, cancel, ioCanceled, created, "Timeout waiting for subsession creation")
+	t.Logf("Subsession created with ID: %d", subsession.ID())
+
+	return subsession
+}
+
+// TestSubsessionDestruction_IndividualCleanup verifies that destroying an individual
+// subsession properly cleans up resources without affecting the primary session.
+// Per I2CP § Destroying Subsessions: "A subsession may be destroyed with the
+// DestroySession message as usual. This will not destroy the primary session
+// or stop the I2CP connection."
+func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
+	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
+	defer cancel()
+
+	ioCanceled := startProcessIOLoop(ctx, client)
+	primary := createAndWaitPrimarySession(t, client, ctx, cancel, ioCanceled, "primary-session")
 
 	// Verify primary is registered
 	if !primary.IsPrimary() {
@@ -113,43 +187,7 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 	}
 
 	// Create subsession
-	subsessionCreated := make(chan struct{})
-	var subsessionCreatedOnce sync.Once
-	var subsessionIDCached uint16
-	subsession := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			// Avoid calling s.ID() during Close() - it can deadlock
-			// due to dispatchStatusLocked being called while holding the session lock
-			if status == I2CP_SESSION_STATUS_CREATED {
-				subsessionIDCached = s.ID() // Safe here, lock not held
-				t.Logf("Subsession status: %d (ID: %d)", status, subsessionIDCached)
-				subsessionCreatedOnce.Do(func() { close(subsessionCreated) })
-			} else {
-				t.Logf("Subsession status: %d", status)
-			}
-		},
-	})
-	subsession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	subsession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "subsession")
-
-	opCtx, opCancel = context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, subsession)
-	opCancel()
-	if err != nil {
-		cancel()
-		<-ioCanceled
-		t.Fatalf("Failed to create subsession: %v", err)
-	}
-
-	// Wait for subsession to be created
-	select {
-	case <-subsessionCreated:
-		t.Logf("Subsession created with ID: %d", subsession.ID())
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-ioCanceled
-		t.Fatal("Timeout waiting for subsession creation")
-	}
+	subsession := createAndWaitSubsession(t, client, ctx, cancel, ioCanceled, "subsession")
 
 	// Verify subsession is NOT primary
 	if subsession.IsPrimary() {
@@ -172,7 +210,7 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 
 	// Destroy the subsession
 	t.Log("Destroying subsession...")
-	err = subsession.Close()
+	err := subsession.Close()
 	if err != nil {
 		t.Errorf("Failed to close subsession: %v", err)
 	}
@@ -223,115 +261,16 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 // Per I2CP § Destroying Subsessions: "Destroying the primary session will, however,
 // destroy all subsessions and stop the I2CP connection."
 func TestSubsessionDestruction_PrimaryDestroysAll(t *testing.T) {
-	// Connect to router
-	client := NewClient(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), subsessionTestTimeout)
+	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
 	defer cancel()
 
-	err := client.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Failed to connect to I2P router: %v (is I2P running on localhost:7654?)", err)
-	}
-
-	t.Log("Connected to I2P router")
-
-	// Verify router supports multi-session
-	if !client.SupportsVersion(VersionMultiSession) {
-		client.Close()
-		t.Skipf("Router version %s does not support multi-session (requires 0.9.21+)",
-			client.router.version.String())
-	}
-
-	// Create primary session
-	primaryCreated := make(chan struct{})
-	var primaryCreatedOnce sync.Once
-	primary := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			t.Logf("Primary session status: %d (ID: %d)", status, s.ID())
-			if status == I2CP_SESSION_STATUS_CREATED {
-				primaryCreatedOnce.Do(func() { close(primaryCreated) })
-			}
-		},
-	})
-	primary.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "primary-cascade-test")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "1")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "1")
-
-	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, primary)
-	opCancel()
-	if err != nil {
-		client.Close()
-		t.Fatalf("Failed to create primary session: %v", err)
-	}
-
-	// Process I/O in background with proper cancellation
-	ioCanceled := make(chan struct{})
-	go func() {
-		defer close(ioCanceled)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if err := client.ProcessIO(ctx); err != nil {
-					if err == ErrClientClosed {
-						return
-					}
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}()
-
-	// Wait for primary to be created
-	select {
-	case <-primaryCreated:
-		t.Logf("Primary session created with ID: %d", primary.ID())
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-ioCanceled
-		t.Fatal("Timeout waiting for primary session creation")
-	}
+	ioCanceled := startProcessIOLoop(ctx, client)
+	primary := createAndWaitPrimarySession(t, client, ctx, cancel, ioCanceled, "primary-cascade-test")
 
 	// Create multiple subsessions
 	subsessions := make([]*Session, 2)
-	subsessionCreatedChs := make([]chan struct{}, 2)
-	var subsessionOnces [2]sync.Once
-
 	for i := 0; i < 2; i++ {
-		subsessionCreatedChs[i] = make(chan struct{})
-		idx := i
-		subsessions[i] = NewSession(client, SessionCallbacks{
-			OnStatus: func(s *Session, status SessionStatus) {
-				t.Logf("Subsession %d status: %d (ID: %d)", idx, status, s.ID())
-				if status == I2CP_SESSION_STATUS_CREATED {
-					subsessionOnces[idx].Do(func() { close(subsessionCreatedChs[idx]) })
-				}
-			},
-		})
-		subsessions[i].config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-		subsessions[i].config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "subsession-cascade-test")
-
-		opCtx, opCancel = context.WithTimeout(ctx, subsessionOpTimeout)
-		err = client.CreateSession(opCtx, subsessions[i])
-		opCancel()
-		if err != nil {
-			cancel()
-			<-ioCanceled
-			t.Fatalf("Failed to create subsession %d: %v", i, err)
-		}
-
-		// Wait for subsession to be created
-		select {
-		case <-subsessionCreatedChs[i]:
-			t.Logf("Subsession %d created with ID: %d", i, subsessions[i].ID())
-		case <-time.After(30 * time.Second):
-			cancel()
-			<-ioCanceled
-			t.Fatalf("Timeout waiting for subsession %d creation", i)
-		}
+		subsessions[i] = createAndWaitSubsession(t, client, ctx, cancel, ioCanceled, "subsession-cascade-test")
 	}
 
 	// Verify all subsessions exist
@@ -345,7 +284,7 @@ func TestSubsessionDestruction_PrimaryDestroysAll(t *testing.T) {
 
 	// Destroy the primary session - this should cascade to all subsessions
 	t.Log("Destroying primary session (should cascade to all subsessions)...")
-	err = primary.Close()
+	err := primary.Close()
 	if err != nil && err != ErrClientClosed {
 		t.Logf("Primary close returned: %v (may be expected)", err)
 	}
@@ -378,111 +317,17 @@ func TestSubsessionDestruction_PrimaryDestroysAll(t *testing.T) {
 // TestSubsessionDestruction_MultipleSequential tests creating and destroying
 // multiple subsessions sequentially while keeping the primary active.
 func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
-	// Connect to router
-	client := NewClient(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*subsessionTestTimeout)
+	client, ctx, cancel := connectMultiSessionClient(t, 2*subsessionTestTimeout)
 	defer cancel()
 
-	err := client.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Failed to connect to I2P router: %v (is I2P running on localhost:7654?)", err)
-	}
-
-	t.Log("Connected to I2P router")
-
-	// Verify router supports multi-session
-	if !client.SupportsVersion(VersionMultiSession) {
-		client.Close()
-		t.Skipf("Router version %s does not support multi-session (requires 0.9.21+)",
-			client.router.version.String())
-	}
-
-	// Create primary session
-	primaryCreated := make(chan struct{})
-	var primaryCreatedOnce sync.Once
-	primary := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			if status == I2CP_SESSION_STATUS_CREATED {
-				primaryCreatedOnce.Do(func() { close(primaryCreated) })
-			}
-		},
-	})
-	primary.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "primary-sequential-test")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "1")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "1")
-
-	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, primary)
-	opCancel()
-	if err != nil {
-		client.Close()
-		t.Fatalf("Failed to create primary session: %v", err)
-	}
-
-	// Process I/O in background with proper cancellation
-	ioCanceled := make(chan struct{})
-	go func() {
-		defer close(ioCanceled)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if err := client.ProcessIO(ctx); err != nil {
-					if err == ErrClientClosed {
-						return
-					}
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}()
-
-	// Wait for primary
-	select {
-	case <-primaryCreated:
-		t.Logf("Primary session created with ID: %d", primary.ID())
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-ioCanceled
-		t.Fatal("Timeout waiting for primary session creation")
-	}
+	ioCanceled := startProcessIOLoop(ctx, client)
+	primary := createAndWaitPrimarySession(t, client, ctx, cancel, ioCanceled, "primary-sequential-test")
 
 	// Create and destroy subsessions sequentially
 	for i := 0; i < 3; i++ {
 		t.Logf("Creating subsession %d...", i+1)
 
-		subsessionCreated := make(chan struct{})
-		var subsessionCreatedOnce sync.Once
-		subsession := NewSession(client, SessionCallbacks{
-			OnStatus: func(s *Session, status SessionStatus) {
-				if status == I2CP_SESSION_STATUS_CREATED {
-					subsessionCreatedOnce.Do(func() { close(subsessionCreated) })
-				}
-			},
-		})
-		subsession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-		subsession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "sequential-subsession")
-
-		opCtx, opCancel = context.WithTimeout(ctx, subsessionOpTimeout)
-		err = client.CreateSession(opCtx, subsession)
-		opCancel()
-		if err != nil {
-			cancel()
-			<-ioCanceled
-			t.Fatalf("Failed to create subsession %d: %v", i+1, err)
-		}
-
-		// Wait for subsession
-		select {
-		case <-subsessionCreated:
-			t.Logf("Subsession %d created with ID: %d", i+1, subsession.ID())
-		case <-time.After(30 * time.Second):
-			cancel()
-			<-ioCanceled
-			t.Fatalf("Timeout waiting for subsession %d creation", i+1)
-		}
+		subsession := createAndWaitSubsession(t, client, ctx, cancel, ioCanceled, "sequential-subsession")
 
 		// Verify session count
 		client.lock.Lock()
@@ -494,7 +339,7 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 
 		// Destroy subsession
 		t.Logf("Destroying subsession %d...", i+1)
-		err = subsession.Close()
+		err := subsession.Close()
 		if err != nil {
 			t.Errorf("Failed to close subsession %d: %v", i+1, err)
 		}
@@ -542,102 +387,12 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 // TestSubsessionCleanup_ResourceVerification verifies that subsession cleanup
 // properly releases all resources to prevent memory leaks.
 func TestSubsessionCleanup_ResourceVerification(t *testing.T) {
-	// Connect to router
-	client := NewClient(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), subsessionTestTimeout)
+	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
 	defer cancel()
 
-	err := client.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Failed to connect to I2P router: %v (is I2P running on localhost:7654?)", err)
-	}
-
-	// Verify router supports multi-session
-	if !client.SupportsVersion(VersionMultiSession) {
-		client.Close()
-		t.Skipf("Router version %s does not support multi-session (requires 0.9.21+)",
-			client.router.version.String())
-	}
-
-	// Create primary session
-	primaryCreated := make(chan struct{})
-	var primaryCreatedOnce sync.Once
-	primary := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			if status == I2CP_SESSION_STATUS_CREATED {
-				primaryCreatedOnce.Do(func() { close(primaryCreated) })
-			}
-		},
-	})
-	primary.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_INBOUND_QUANTITY, "1")
-	primary.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_QUANTITY, "1")
-
-	opCtx, opCancel := context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, primary)
-	opCancel()
-	if err != nil {
-		client.Close()
-		t.Fatalf("Failed to create primary session: %v", err)
-	}
-
-	// Process I/O in background
-	ioCanceled := make(chan struct{})
-	go func() {
-		defer close(ioCanceled)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if err := client.ProcessIO(ctx); err != nil {
-					if err == ErrClientClosed {
-						return
-					}
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}()
-
-	select {
-	case <-primaryCreated:
-		t.Logf("Primary session created with ID: %d", primary.ID())
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-ioCanceled
-		t.Fatal("Timeout waiting for primary session creation")
-	}
-
-	// Create subsession
-	subsessionCreated := make(chan struct{})
-	var subsessionCreatedOnce sync.Once
-	subsession := NewSession(client, SessionCallbacks{
-		OnStatus: func(s *Session, status SessionStatus) {
-			if status == I2CP_SESSION_STATUS_CREATED {
-				subsessionCreatedOnce.Do(func() { close(subsessionCreated) })
-			}
-		},
-	})
-	subsession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-
-	opCtx, opCancel = context.WithTimeout(ctx, subsessionOpTimeout)
-	err = client.CreateSession(opCtx, subsession)
-	opCancel()
-	if err != nil {
-		cancel()
-		<-ioCanceled
-		t.Fatalf("Failed to create subsession: %v", err)
-	}
-
-	select {
-	case <-subsessionCreated:
-		t.Logf("Subsession created with ID: %d", subsession.ID())
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-ioCanceled
-		t.Fatal("Timeout waiting for subsession creation")
-	}
+	ioCanceled := startProcessIOLoop(ctx, client)
+	primary := createAndWaitPrimarySession(t, client, ctx, cancel, ioCanceled, "")
+	subsession := createAndWaitSubsession(t, client, ctx, cancel, ioCanceled, "")
 
 	// Add some pending messages to subsession (simulating in-flight messages)
 	subsession.messageMu.Lock()
@@ -655,7 +410,7 @@ func TestSubsessionCleanup_ResourceVerification(t *testing.T) {
 	subsessionID := subsession.ID()
 
 	// Destroy subsession
-	err = subsession.Close()
+	err := subsession.Close()
 	if err != nil {
 		t.Errorf("Failed to close subsession: %v", err)
 	}

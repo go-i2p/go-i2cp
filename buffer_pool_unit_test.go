@@ -181,8 +181,8 @@ func TestBufferPoolStats(t *testing.T) {
 	defer DisableBufferPool()
 
 	// Clear stats (for test isolation)
-	atomic.StoreUint64(&globalBufferPool.gets512, 0)
-	atomic.StoreUint64(&globalBufferPool.puts512, 0)
+	atomic.StoreUint64(&globalBufferPool.classes[0].gets, 0)
+	atomic.StoreUint64(&globalBufferPool.classes[0].puts, 0)
 
 	// Perform some operations
 	buf := globalBufferPool.GetBuffer(512)

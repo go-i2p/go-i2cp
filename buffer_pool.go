@@ -5,63 +5,58 @@ import (
 	"sync/atomic"
 )
 
-// bufferPool manages reusable byte slices to reduce GC pressure.
-// Uses sync.Pool with size-based buckets for efficient allocation.
-//
+// bufferSizeClass is a single pooled bucket for a fixed buffer capacity, along
+// with atomic get/put counters for that bucket.
+type bufferSizeClass struct {
+	size int
+	pool sync.Pool
+	gets uint64
+	puts uint64
+}
+
+// bufferSizeClasses defines the pooled bucket capacities, smallest first.
 // Size classes (power of 2 for efficient growth):
 //   - 512 bytes:  Small messages (typical I2CP control messages)
 //   - 1024 bytes: Medium messages (session creation, leasesets)
 //   - 4096 bytes: Large messages (destination creation, large payloads)
 //   - 16384 bytes: Extra large messages (bulk data transfer)
+var bufferSizeClasses = [4]int{512, 1024, 4096, 16384}
+
+// bufferPool manages reusable byte slices to reduce GC pressure.
+// Uses sync.Pool with size-based buckets for efficient allocation.
 type bufferPool struct {
-	pool512 sync.Pool
-	pool1K  sync.Pool
-	pool4K  sync.Pool
-	pool16K sync.Pool
+	classes [4]*bufferSizeClass
 	enabled bool
 	mu      sync.RWMutex
 
-	// Metrics for monitoring pool effectiveness (optional)
-	// Using uint64 for atomic operations
-	gets512       uint64
-	gets1K        uint64
-	gets4K        uint64
-	gets16K       uint64
+	// getsOversized counts GetBuffer calls for sizes larger than any size class.
 	getsOversized uint64
-	puts512       uint64
-	puts1K        uint64
-	puts4K        uint64
-	puts16K       uint64
+}
+
+// newBufferPool constructs a bufferPool with a sync.Pool per size class.
+func newBufferPool() *bufferPool {
+	bp := &bufferPool{}
+	for i, size := range bufferSizeClasses {
+		size := size // capture for the New closure
+		bp.classes[i] = &bufferSizeClass{
+			size: size,
+			pool: sync.Pool{
+				New: func() interface{} {
+					buf := make([]byte, 0, size)
+					return &buf
+				},
+			},
+		}
+	}
+	return bp
 }
 
 // Global buffer pool instance
-var globalBufferPool = &bufferPool{
-	pool512: sync.Pool{
-		New: func() interface{} {
-			buf := make([]byte, 0, 512)
-			return &buf
-		},
-	},
-	pool1K: sync.Pool{
-		New: func() interface{} {
-			buf := make([]byte, 0, 1024)
-			return &buf
-		},
-	},
-	pool4K: sync.Pool{
-		New: func() interface{} {
-			buf := make([]byte, 0, 4096)
-			return &buf
-		},
-	},
-	pool16K: sync.Pool{
-		New: func() interface{} {
-			buf := make([]byte, 0, 16384)
-			return &buf
-		},
-	},
-	enabled: false, // Disabled by default for backward compatibility
-}
+var globalBufferPool = func() *bufferPool {
+	bp := newBufferPool()
+	bp.enabled = false // Disabled by default for backward compatibility
+	return bp
+}()
 
 // EnableBufferPool enables global buffer pooling for Stream allocations.
 // This reduces GC pressure by reusing byte slices across Stream instances.
@@ -81,85 +76,74 @@ func DisableBufferPool() {
 
 // IsBufferPoolEnabled returns whether buffer pooling is currently enabled.
 func IsBufferPoolEnabled() bool {
-	globalBufferPool.mu.RLock()
-	defer globalBufferPool.mu.RUnlock()
-	return globalBufferPool.enabled
+	return globalBufferPool.isEnabled()
+}
+
+// isEnabled reports whether this pool is currently enabled.
+func (bp *bufferPool) isEnabled() bool {
+	bp.mu.RLock()
+	defer bp.mu.RUnlock()
+	return bp.enabled
+}
+
+// bucketFor returns the size class that fits the requested size (smallest
+// class with size >= requested), or nil if no class is large enough.
+func (bp *bufferPool) bucketFor(size int) *bufferSizeClass {
+	for _, c := range bp.classes {
+		if size <= c.size {
+			return c
+		}
+	}
+	return nil
 }
 
 // GetBuffer retrieves a buffer from the appropriate pool based on requested size.
 // Returns a buffer with capacity >= size. The buffer's length is 0.
 func (bp *bufferPool) GetBuffer(size int) []byte {
-	bp.mu.RLock()
-	enabled := bp.enabled
-	bp.mu.RUnlock()
-
-	if !enabled {
+	if !bp.isEnabled() {
 		return make([]byte, 0, size)
 	}
 
-	// Select pool based on size (find smallest bucket that fits)
-	var bufPtr *[]byte
-	switch {
-	case size <= 512:
-		atomic.AddUint64(&bp.gets512, 1)
-		bufPtr = bp.pool512.Get().(*[]byte)
-	case size <= 1024:
-		atomic.AddUint64(&bp.gets1K, 1)
-		bufPtr = bp.pool1K.Get().(*[]byte)
-	case size <= 4096:
-		atomic.AddUint64(&bp.gets4K, 1)
-		bufPtr = bp.pool4K.Get().(*[]byte)
-	case size <= 16384:
-		atomic.AddUint64(&bp.gets16K, 1)
-		bufPtr = bp.pool16K.Get().(*[]byte)
-	default:
+	class := bp.bucketFor(size)
+	if class == nil {
 		// Size too large for pooling - allocate directly
 		atomic.AddUint64(&bp.getsOversized, 1)
 		return make([]byte, 0, size)
 	}
 
+	atomic.AddUint64(&class.gets, 1)
+	bufPtr := class.pool.Get().(*[]byte)
+
 	// Reset buffer to empty but preserve capacity
-	buf := (*bufPtr)[:0]
-	return buf
+	return (*bufPtr)[:0]
 }
 
 // PutBuffer returns a buffer to the appropriate pool for reuse.
 // The buffer will be reset to length 0 before being returned to the pool.
 func (bp *bufferPool) PutBuffer(buf []byte) {
-	bp.mu.RLock()
-	enabled := bp.enabled
-	bp.mu.RUnlock()
-
-	if !enabled {
+	if !bp.isEnabled() {
 		return // Let GC handle it
 	}
 
 	// Don't pool buffers that are too large or nil
-	if buf == nil || cap(buf) > 16384 {
+	capacity := cap(buf)
+	if buf == nil || capacity > bufferSizeClasses[len(bufferSizeClasses)-1] {
 		return
 	}
 
 	// Reset buffer to empty (preserve capacity)
 	buf = buf[:0]
 
-	// Return to appropriate pool based on capacity
-	switch cap(buf) {
-	case 512:
-		atomic.AddUint64(&bp.puts512, 1)
-		bp.pool512.Put(&buf)
-	case 1024:
-		atomic.AddUint64(&bp.puts1K, 1)
-		bp.pool1K.Put(&buf)
-	case 4096:
-		atomic.AddUint64(&bp.puts4K, 1)
-		bp.pool4K.Put(&buf)
-	case 16384:
-		atomic.AddUint64(&bp.puts16K, 1)
-		bp.pool16K.Put(&buf)
-	default:
-		// Non-standard capacity - let GC handle it
-		// This can happen if buffer grew beyond original pool size
+	// Return to the pool whose size class exactly matches this buffer's capacity
+	for _, class := range bp.classes {
+		if class.size == capacity {
+			atomic.AddUint64(&class.puts, 1)
+			class.pool.Put(&buf)
+			return
+		}
 	}
+	// Non-standard capacity - let GC handle it
+	// This can happen if buffer grew beyond original pool size
 }
 
 // BufferPoolStats returns statistics about buffer pool usage.
@@ -179,23 +163,21 @@ type BufferPoolStats struct {
 // GetBufferPoolStats returns current buffer pool statistics.
 // Returns nil if buffer pooling is disabled.
 func GetBufferPoolStats() *BufferPoolStats {
-	globalBufferPool.mu.RLock()
-	defer globalBufferPool.mu.RUnlock()
-
-	if !globalBufferPool.enabled {
+	if !globalBufferPool.isEnabled() {
 		return nil
 	}
 
+	classes := globalBufferPool.classes
 	return &BufferPoolStats{
-		Gets512:       atomic.LoadUint64(&globalBufferPool.gets512),
-		Gets1K:        atomic.LoadUint64(&globalBufferPool.gets1K),
-		Gets4K:        atomic.LoadUint64(&globalBufferPool.gets4K),
-		Gets16K:       atomic.LoadUint64(&globalBufferPool.gets16K),
+		Gets512:       atomic.LoadUint64(&classes[0].gets),
+		Gets1K:        atomic.LoadUint64(&classes[1].gets),
+		Gets4K:        atomic.LoadUint64(&classes[2].gets),
+		Gets16K:       atomic.LoadUint64(&classes[3].gets),
 		GetsOversized: atomic.LoadUint64(&globalBufferPool.getsOversized),
-		Puts512:       atomic.LoadUint64(&globalBufferPool.puts512),
-		Puts1K:        atomic.LoadUint64(&globalBufferPool.puts1K),
-		Puts4K:        atomic.LoadUint64(&globalBufferPool.puts4K),
-		Puts16K:       atomic.LoadUint64(&globalBufferPool.puts16K),
+		Puts512:       atomic.LoadUint64(&classes[0].puts),
+		Puts1K:        atomic.LoadUint64(&classes[1].puts),
+		Puts4K:        atomic.LoadUint64(&classes[2].puts),
+		Puts16K:       atomic.LoadUint64(&classes[3].puts),
 	}
 }
 

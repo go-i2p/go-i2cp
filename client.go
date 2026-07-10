@@ -212,6 +212,27 @@ func (c *Client) sendMessage(typ uint8, stream *Stream, queue bool) (err error) 
 	return c.sendMessageDirect(typ, send)
 }
 
+// sendSimpleMessage owns the common scaffold shared by most I2CP message senders:
+// locking messageStreamMu, resetting the shared message stream, invoking build to
+// write the message-specific fields (and perform any field-dependent validation),
+// then sending the result. name is used for error logging/wrapping.
+func (c *Client) sendSimpleMessage(msgType uint8, name string, build func(*Stream) error, queue bool) error {
+	// Thread-safe: protect messageStream access
+	c.messageStreamMu.Lock()
+	defer c.messageStreamMu.Unlock()
+
+	c.messageStream.Reset()
+	if err := build(c.messageStream); err != nil {
+		return err
+	}
+
+	if err := c.sendMessage(msgType, c.messageStream, queue); err != nil {
+		Error("Error while sending %s: %v", name, err)
+		return fmt.Errorf("failed to send %s: %w", name, err)
+	}
+	return nil
+}
+
 // buildMessageFrame constructs the wire-format message frame with length prefix and type.
 func (c *Client) buildMessageFrame(typ uint8, stream *Stream) *Stream {
 	send := NewStream(make([]byte, 0, stream.Len()+4+1))
@@ -522,16 +543,11 @@ func (c *Client) getAuthenticationMethod() uint8 {
 func (c *Client) msgGetDate(queue bool) {
 	Debug("Sending GetDateMessage")
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.messageStream.Reset()
-	c.messageStream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
-
-	c.writeAuthenticationMapping()
-
-	if err := c.sendMessage(I2CP_MSG_GET_DATE, c.messageStream, queue); err != nil {
+	if err := c.sendSimpleMessage(I2CP_MSG_GET_DATE, "GetDateMessage", func(stream *Stream) error {
+		stream.WriteLenPrefixedString(I2CP_CLIENT_VERSION)
+		c.writeAuthenticationMapping()
+		return nil
+	}, queue); err != nil {
 		Error("Error while sending GetDateMessage")
 	}
 }
@@ -989,12 +1005,9 @@ func (session *Session) SendBlindingInfo(info *BlindingInfo) error {
 func (c *Client) msgGetBandwidthLimits(queue bool) {
 	Debug("Sending GetBandwidthLimitsMessage.")
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.messageStream.Reset()
-	if err := c.sendMessage(I2CP_MSG_GET_BANDWIDTH_LIMITS, c.messageStream, queue); err != nil {
+	if err := c.sendSimpleMessage(I2CP_MSG_GET_BANDWIDTH_LIMITS, "GetBandwidthLimitsMessage", func(stream *Stream) error {
+		return nil
+	}, queue); err != nil {
 		Error("Error while sending GetBandwidthLimitsMessage")
 	}
 }
@@ -1243,18 +1256,10 @@ func (c *Client) removeSubsessionsFromMap(primaryID uint16) {
 func sendDestroySessionMessage(c *Client, sessionID uint16, isPrimary, queue bool) error {
 	Debug("Sending DestroySessionMessage for session %d (primary: %v)", sessionID, isPrimary)
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.messageStream.Reset()
-	c.messageStream.WriteUint16(sessionID)
-
-	if err := c.sendMessage(I2CP_MSG_DESTROY_SESSION, c.messageStream, queue); err != nil {
-		Error("Error while sending DestroySessionMessage: %v", err)
-		return err
-	}
-	return nil
+	return c.sendSimpleMessage(I2CP_MSG_DESTROY_SESSION, "DestroySessionMessage", func(stream *Stream) error {
+		stream.WriteUint16(sessionID)
+		return nil
+	}, queue)
 }
 
 // waitForDestroyConfirmation waits for session destruction confirmation or timeout.
@@ -1290,26 +1295,14 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 		return err
 	}
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.messageStream.Reset()
-	c.messageStream.WriteUint16(sess.id)
-	dest.WriteToMessage(c.messageStream)
-	c.messageStream.WriteUint32(uint32(compressedPayload.Len()))
-	c.messageStream.Write(compressedPayload.Bytes())
-	c.messageStream.WriteUint32(nonce)
-
-	if err := c.validateMessageSize(compressedPayload.Len()); err != nil {
-		return err
-	}
-
-	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE, c.messageStream, queue); err != nil {
-		Error("Error while sending SendMessageMessage: %v", err)
-		return fmt.Errorf("failed to send SendMessageMessage: %w", err)
-	}
-	return nil
+	return c.sendSimpleMessage(I2CP_MSG_SEND_MESSAGE, "SendMessageMessage", func(stream *Stream) error {
+		stream.WriteUint16(sess.id)
+		dest.WriteToMessage(stream)
+		stream.WriteUint32(uint32(compressedPayload.Len()))
+		stream.Write(compressedPayload.Bytes())
+		stream.WriteUint32(nonce)
+		return c.validateMessageSize(compressedPayload.Len())
+	}, queue)
 }
 
 // msgSendMessageExpires sends SendMessageExpiresMessage (type 36) for enhanced delivery control
@@ -1327,21 +1320,10 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 		return err
 	}
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.buildSendMessageStream(sess, dest, compressedPayload, nonce, flags, expirationSeconds)
-
-	if err := c.validateMessageSize(compressedPayload.Len()); err != nil {
-		return err
-	}
-
-	if err := c.sendMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, c.messageStream, queue); err != nil {
-		Error("Error while sending SendMessageExpiresMessage: %v", err)
-		return fmt.Errorf("failed to send SendMessageExpiresMessage: %w", err)
-	}
-	return nil
+	return c.sendSimpleMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, "SendMessageExpiresMessage", func(stream *Stream) error {
+		c.buildSendMessageStream(sess, dest, compressedPayload, nonce, flags, expirationSeconds)
+		return c.validateMessageSize(compressedPayload.Len())
+	}, queue)
 }
 
 // compressPayload compresses the payload and adds protocol header information.

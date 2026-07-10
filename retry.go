@@ -134,13 +134,10 @@ func handleRetryFailure(ctx context.Context, err error, attempt, maxRetries int,
 // isTemporary checks if an error is temporary and should be retried.
 // It checks for errors implementing the Temporary() bool interface.
 func isTemporary(err error) bool {
-	// Check if error implements Temporary() interface
-	type temporary interface {
-		Temporary() bool
-	}
-
-	if temp, ok := err.(temporary); ok {
-		return temp.Temporary()
+	// Check if error implements Temporary() interface; default to true (retry) when
+	// Temporary() is unimplemented - a conservative approach distinct from IsTemporary's default.
+	if isTemp, ok := checkTemporary(err); ok {
+		return isTemp
 	}
 
 	// If no Temporary() method, assume it's temporary

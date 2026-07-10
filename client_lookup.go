@@ -11,13 +11,10 @@ import (
 func (c *Client) msgDestLookup(hash []byte, queue bool) {
 	Debug("Sending DestLookupMessage.")
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	c.messageStream.Reset()
-	c.messageStream.Write(hash)
-	if err := c.sendMessage(I2CP_MSG_DEST_LOOKUP, c.messageStream, queue); err != nil {
+	if err := c.sendSimpleMessage(I2CP_MSG_DEST_LOOKUP, "DestLookupMessage", func(stream *Stream) error {
+		stream.Write(hash)
+		return nil
+	}, queue); err != nil {
 		Error("Error while sending DestLookupMessage.")
 	}
 }
@@ -29,39 +26,32 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 			c.router.version.String(), VersionHostLookup.String())
 	}
 
-	// Thread-safe: protect messageStream access
-	c.messageStreamMu.Lock()
-	defer c.messageStreamMu.Unlock()
-
-	var sessionId uint16
 	Debug("Sending HostLookupMessage.")
-	c.messageStream.Reset()
 
-	// CRITICAL FIX: Handle session ID 0xFFFF special case per I2CP spec
-	// Per I2CP § Session ID: "Session ID 0xffff is used to indicate 'no session',
-	// for example for hostname lookups."
-	if sess == nil {
-		sessionId = I2CP_SESSION_ID_NONE
-		Debug("Using I2CP_SESSION_ID_NONE (0xFFFF) for lookup without session")
-	} else {
-		sessionId = sess.id
-		// Validate session ID is not the reserved value
-		if sessionId == I2CP_SESSION_ID_NONE {
-			return fmt.Errorf("session ID cannot be 0xFFFF (reserved for no-session operations)")
+	return c.sendSimpleMessage(I2CP_MSG_HOST_LOOKUP, "HostLookupMessage", func(stream *Stream) error {
+		// CRITICAL FIX: Handle session ID 0xFFFF special case per I2CP spec
+		// Per I2CP § Session ID: "Session ID 0xffff is used to indicate 'no session',
+		// for example for hostname lookups."
+		var sessionId uint16
+		if sess == nil {
+			sessionId = I2CP_SESSION_ID_NONE
+			Debug("Using I2CP_SESSION_ID_NONE (0xFFFF) for lookup without session")
+		} else {
+			sessionId = sess.id
+			// Validate session ID is not the reserved value
+			if sessionId == I2CP_SESSION_ID_NONE {
+				return fmt.Errorf("session ID cannot be 0xFFFF (reserved for no-session operations)")
+			}
 		}
-	}
-	c.messageStream.WriteUint16(sessionId)
-	c.messageStream.WriteUint32(requestId)
-	c.messageStream.WriteUint32(timeout)
-	c.messageStream.WriteByte(typ)
-	if typ == HOST_LOOKUP_TYPE_HASH {
-		c.messageStream.Write(data)
-	}
-	if err := c.sendMessage(I2CP_MSG_HOST_LOOKUP, c.messageStream, queue); err != nil {
-		Error("Error while sending HostLookupMessage: %v", err)
-		return fmt.Errorf("failed to send HostLookupMessage: %w", err)
-	}
-	return nil
+		stream.WriteUint16(sessionId)
+		stream.WriteUint32(requestId)
+		stream.WriteUint32(timeout)
+		stream.WriteByte(typ)
+		if typ == HOST_LOOKUP_TYPE_HASH {
+			stream.Write(data)
+		}
+		return nil
+	}, queue)
 }
 
 // msgReconfigureSession sends ReconfigureSessionMessage (type 2) for dynamic session updates
