@@ -192,13 +192,13 @@ func TestIsTemporaryForRetry(t *testing.T) {
 	}
 
 	// Test with temporary error
-	tempErr := &temporaryErrorRetry{temporary: true}
+	tempErr := newTemporaryError("", true)
 	if !isTemporary(tempErr) {
 		t.Error("temporaryError{true} should be temporary")
 	}
 
 	// Test with non-temporary error
-	fatalErr := &temporaryErrorRetry{temporary: false}
+	fatalErr := newTemporaryError("", false)
 	if isTemporary(fatalErr) {
 		t.Error("temporaryError{false} should not be temporary")
 	}
@@ -207,10 +207,7 @@ func TestIsTemporaryForRetry(t *testing.T) {
 // TestRetryWithBackoffFatalError tests that fatal errors stop retries
 func TestRetryWithBackoffFatalError(t *testing.T) {
 	callCount := 0
-	fatalErr := &temporaryErrorRetry{
-		err:       errors.New("fatal error"),
-		temporary: false,
-	}
+	fatalErr := newTemporaryError("fatal error", false)
 
 	err := RetryWithBackoff(context.Background(), 5, time.Millisecond, func() error {
 		callCount++
@@ -225,18 +222,4 @@ func TestRetryWithBackoffFatalError(t *testing.T) {
 	if callCount != 1 {
 		t.Errorf("Expected 1 call for fatal error, got %d", callCount)
 	}
-}
-
-// temporaryErrorRetry is a test error type that implements Temporary()
-type temporaryErrorRetry struct {
-	err       error
-	temporary bool
-}
-
-func (e *temporaryErrorRetry) Error() string {
-	return e.err.Error()
-}
-
-func (e *temporaryErrorRetry) Temporary() bool {
-	return e.temporary
 }

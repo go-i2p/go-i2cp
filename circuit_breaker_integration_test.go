@@ -53,7 +53,7 @@ func TestCircuitBreakerReset2(t *testing.T) {
 	// Manually trigger failures to test reset
 	for i := 0; i < 5; i++ {
 		client.circuitBreaker.Execute(func() error {
-			return &temporaryError{msg: "test failure"}
+			return newTemporaryError("test failure", true)
 		})
 	}
 
@@ -108,7 +108,7 @@ func TestCircuitBreakerStateTransitions(t *testing.T) {
 	// Trigger failures to open circuit (default is 5 failures)
 	for i := 0; i < 5; i++ {
 		err := client.circuitBreaker.Execute(func() error {
-			return &temporaryError{msg: "router connection failed"}
+			return newTemporaryError("router connection failed", true)
 		})
 		if err == nil {
 			t.Error("expected error from Execute with failing function")
@@ -161,7 +161,7 @@ func TestCircuitBreakerProtectsSendOperations(t *testing.T) {
 	// Force circuit open by triggering failures
 	for i := 0; i < 5; i++ {
 		client.circuitBreaker.Execute(func() error {
-			return &temporaryError{msg: "test failure"}
+			return newTemporaryError("test failure", true)
 		})
 	}
 
@@ -244,7 +244,7 @@ func TestCircuitBreakerResetUnderLoad(t *testing.T) {
 	// Force circuit open
 	for i := 0; i < 5; i++ {
 		client.circuitBreaker.Execute(func() error {
-			return &temporaryError{msg: "test failure"}
+			return newTemporaryError("test", true)
 		})
 	}
 
@@ -290,7 +290,7 @@ func TestCircuitBreakerMultipleSendPaths(t *testing.T) {
 	// Force circuit open first
 	for i := 0; i < 5; i++ {
 		client.circuitBreaker.Execute(func() error {
-			return &temporaryError{msg: "test"}
+			return newTemporaryError("test", true)
 		})
 	}
 
@@ -315,13 +315,4 @@ func TestCircuitBreakerMultipleSendPaths(t *testing.T) {
 
 	// The important verification is that code compiles and circuit breaker
 	// is properly initialized, which is confirmed by previous tests
-}
-
-// temporaryError is a test helper that implements the error interface
-type temporaryError struct {
-	msg string
-}
-
-func (e *temporaryError) Error() string {
-	return e.msg
 }
