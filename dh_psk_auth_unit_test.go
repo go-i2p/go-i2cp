@@ -282,15 +282,7 @@ func TestX25519KeyPairFromPrivateKey(t *testing.T) {
 
 // TestCreateDHBlindingInfo tests creating BlindingInfo with DH auth.
 func TestCreateDHBlindingInfo(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	destHash := make([]byte, 32)
 	for i := range destHash {
@@ -349,15 +341,7 @@ func TestCreatePSKBlindingInfo(t *testing.T) {
 
 // TestCreateDHBlindingInfoForHostname tests hostname-based DH blinding info.
 func TestCreateDHBlindingInfoForHostname(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	info, err := CreateDHBlindingInfoForHostname("test.b32.i2p", clientKeyPair.PrivateKey(), serverKeyPair.PublicKey(), 7, 1000)
 	if err != nil {
@@ -400,15 +384,7 @@ func TestCreatePSKBlindingInfoForHostname(t *testing.T) {
 
 // TestVerifyDHSharedSecret tests DH shared secret verification.
 func TestVerifyDHSharedSecret(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	valid, err := VerifyDHSharedSecret(clientKeyPair.PrivateKey(), serverKeyPair.PublicKey())
 	if err != nil {
@@ -437,15 +413,7 @@ func TestVerifyPSKDerivation(t *testing.T) {
 
 // TestAuthenticateForBlindedDestination_DH tests the session helper for DH.
 func TestAuthenticateForBlindedDestination_DH(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	config, err := AuthenticateForBlindedDestination(BLINDING_AUTH_SCHEME_DH, clientKeyPair.PrivateKey(), serverKeyPair.PublicKey())
 	if err != nil {
