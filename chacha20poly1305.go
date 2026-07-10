@@ -56,16 +56,9 @@ func NewChaCha20Poly1305CipherWithKey(key [32]byte) (*ChaCha20Poly1305Cipher, er
 
 // ChaCha20Poly1305CipherFromStream reads a ChaCha20-Poly1305 cipher from a stream
 func ChaCha20Poly1305CipherFromStream(stream *Stream) (*ChaCha20Poly1305Cipher, error) {
-	var algorithmType uint32
-	var err error
-
-	algorithmType, err = stream.ReadUint32()
+	_, err := readAlgorithmType(stream, CHACHA20_POLY1305, "ChaCha20-Poly1305")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read algorithm type: %w", err)
-	}
-
-	if algorithmType != CHACHA20_POLY1305 {
-		return nil, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
+		return nil, err
 	}
 
 	var key [32]byte

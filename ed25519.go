@@ -56,36 +56,13 @@ func NewEd25519KeyPair() (*Ed25519KeyPair, error) {
 // readEd25519AlgorithmType reads and validates the algorithm type from the stream.
 // Returns the algorithm type if valid for Ed25519, error otherwise.
 func readEd25519AlgorithmType(stream *Stream) (uint32, error) {
-	algorithmType, err := stream.ReadUint32()
-	if err != nil {
-		return 0, fmt.Errorf("failed to read algorithm type: %w", err)
-	}
-
-	if algorithmType != ED25519_SHA256 {
-		return 0, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
-	}
-
-	return algorithmType, nil
+	return readAlgorithmType(stream, ED25519_SHA256, "Ed25519")
 }
 
 // readEd25519KeyBytes reads private and public key bytes from the stream.
 // Returns private key bytes, public key bytes, and any error encountered.
 func readEd25519KeyBytes(stream *Stream) ([]byte, []byte, error) {
-	// Read private key (64 bytes for Ed25519)
-	privateKeyBytes := make([]byte, ed25519.PrivateKeySize)
-	_, err := stream.Read(privateKeyBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read private key: %w", err)
-	}
-
-	// Read public key (32 bytes for Ed25519)
-	publicKeyBytes := make([]byte, ed25519.PublicKeySize)
-	_, err = stream.Read(publicKeyBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read public key: %w", err)
-	}
-
-	return privateKeyBytes, publicKeyBytes, nil
+	return readKeyPairBytes(stream, ed25519.PrivateKeySize, ed25519.PublicKeySize, "Ed25519")
 }
 
 // createEd25519KeyPairFromBytes constructs crypto package keys from raw bytes.
@@ -233,18 +210,9 @@ func (kp *Ed25519KeyPair) WriteToStream(stream *Stream) error {
 }
 
 // WritePublicKeyToStream writes only the public key to a stream.
-// Uses crypto package's Bytes() method for key serialization.
+// Uses the shared writePublicKeyToStream helper for consistent error handling.
 func (kp *Ed25519KeyPair) WritePublicKeyToStream(stream *Stream) error {
-	if stream == nil {
-		return fmt.Errorf("stream cannot be nil")
-	}
-
-	_, err := stream.Write(kp.publicKey.Bytes())
-	if err != nil {
-		return fmt.Errorf("failed to write Ed25519 public key: %w", err)
-	}
-
-	return nil
+	return writePublicKeyToStream(stream, kp.publicKey.Bytes(), "Ed25519")
 }
 
 // PublicKey returns the public key as stdlib ed25519.PublicKey for backward compatibility.

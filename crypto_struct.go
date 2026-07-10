@@ -33,6 +33,7 @@
 package go_i2cp
 
 import (
+	"fmt"
 	"io"
 )
 
@@ -56,4 +57,57 @@ import (
 //   - X25519KeyExchangeKeygen(): X25519 key exchange
 type Crypto struct {
 	rng io.Reader // Random number generator (crypto/rand.Reader)
+}
+
+// readAlgorithmType reads and validates an algorithm type from the stream.
+// It verifies that the read value matches the expected constant.
+// Returns the algorithm type if valid, or an error if the read fails or the type doesn't match.
+func readAlgorithmType(stream *Stream, expected uint32, name string) (uint32, error) {
+	algorithmType, err := stream.ReadUint32()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %s algorithm type: %w", name, err)
+	}
+
+	if algorithmType != expected {
+		return 0, fmt.Errorf("unsupported %s algorithm type: %d (expected %d)", name, algorithmType, expected)
+	}
+
+	return algorithmType, nil
+}
+
+// readKeyPairBytes reads private and public key bytes from the stream.
+// It reads privateKeySize bytes for the private key and publicKeySize bytes for the public key.
+// Returns private key bytes, public key bytes, and any error encountered.
+func readKeyPairBytes(stream *Stream, privateKeySize, publicKeySize int, name string) ([]byte, []byte, error) {
+	// Read private key
+	privateKeyBytes := make([]byte, privateKeySize)
+	_, err := stream.Read(privateKeyBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read %s private key: %w", name, err)
+	}
+
+	// Read public key
+	publicKeyBytes := make([]byte, publicKeySize)
+	_, err = stream.Read(publicKeyBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read %s public key: %w", name, err)
+	}
+
+	return privateKeyBytes, publicKeyBytes, nil
+}
+
+// writePublicKeyToStream writes a public key to the stream.
+// Validates that the stream is not nil before writing.
+// Returns an error if stream is nil or if the write operation fails.
+func writePublicKeyToStream(stream *Stream, publicKey []byte, keyTypeName string) error {
+	if stream == nil {
+		return fmt.Errorf("stream cannot be nil")
+	}
+
+	_, err := stream.Write(publicKey)
+	if err != nil {
+		return fmt.Errorf("failed to write %s public key: %w", keyTypeName, err)
+	}
+
+	return nil
 }

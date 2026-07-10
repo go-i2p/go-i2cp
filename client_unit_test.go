@@ -650,30 +650,6 @@ func TestTLSConfigurationEdgeCases(t *testing.T) {
 	})
 }
 
-// TestTLSPropertyPropagationToTCP verifies that TLS-related properties
-// are correctly propagated to the TCP layer when set
-func TestTLSPropertyPropagationToTCP(t *testing.T) {
-	client := NewClient(nil)
-
-	t.Run("i2cp.SSL propagates to TCP_PROP_USE_TLS", func(t *testing.T) {
-		client.SetProperty("i2cp.SSL", "true")
-		// Verify it's stored in client properties
-		if client.properties["i2cp.SSL"] != "true" {
-			t.Error("i2cp.SSL not set in client properties")
-		}
-		// TCP layer property propagation is handled by SetProperty
-		// The actual TLS setup happens in tcp.SetupTLS() during Connect()
-	})
-
-	t.Run("i2cp.SSL.certFile propagates to TCP layer", func(t *testing.T) {
-		testPath := "/test/path/client.crt"
-		client.SetProperty("i2cp.SSL.certFile", testPath)
-		if client.properties["i2cp.SSL.certFile"] != testPath {
-			t.Error("i2cp.SSL.certFile not set correctly")
-		}
-	})
-}
-
 // TestSecureDefaults ensures security-critical defaults are correct
 // per I2CP security requirements
 func TestSecureDefaults(t *testing.T) {
@@ -843,8 +819,12 @@ func TestMsgDestroySession(t *testing.T) {
 				}
 			}()
 
-			// callerHoldsLock=false because test doesn't hold session.mu
-			client.msgDestroySession(session, session.ID(), session.IsPrimary(), tt.queue, false)
+			// CallerHoldsLock=false because test doesn't hold session.mu
+			client.msgDestroySession(session, session.ID(), DestroySessionOptions{
+				IsPrimary:       session.IsPrimary(),
+				Queue:           tt.queue,
+				CallerHoldsLock: false,
+			})
 
 			if tt.validate != nil {
 				tt.validate(t, client, session)

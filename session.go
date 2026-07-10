@@ -482,8 +482,12 @@ func (session *Session) sendDestroyMessage() bool {
 		if session.id != 0 {
 			Debug("sendDestroyMessage: calling msgDestroySession for session %d", session.id)
 			// Pass sessionID and isPrimary directly to avoid lock re-entry (caller holds session.mu)
-			// callerHoldsLock=true because Session.Close() holds session.mu
-			session.client.msgDestroySession(session, session.idLocked(), session.isPrimaryLocked(), false, true)
+			// CallerHoldsLock=true because Session.Close() holds session.mu
+			session.client.msgDestroySession(session, session.idLocked(), DestroySessionOptions{
+				IsPrimary:       session.isPrimaryLocked(),
+				Queue:           false,
+				CallerHoldsLock: true,
+			})
 			Debug("Sent DestroySession message for session %d", session.id)
 			return true
 		}

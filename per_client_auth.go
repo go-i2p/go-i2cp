@@ -310,13 +310,7 @@ func (s *Session) SendBlindingInfoForHash(
 		return err
 	}
 
-	if authConfig != nil {
-		if err := info.SetPerClientAuth(authConfig); err != nil {
-			return fmt.Errorf("failed to set per-client auth: %w", err)
-		}
-	}
-
-	return s.SendBlindingInfo(info)
+	return s.applyAuthAndSend(info, authConfig)
 }
 
 // SendBlindingInfoForHostname is a convenience method to send BlindingInfo for a hostname.
@@ -331,6 +325,13 @@ func (s *Session) SendBlindingInfoForHostname(
 		return err
 	}
 
+	return s.applyAuthAndSend(info, authConfig)
+}
+
+// applyAuthAndSend applies optional per-client auth to BlindingInfo and sends it.
+// If authConfig is not nil, applies auth before sending.
+// Returns any error from auth application or sending.
+func (s *Session) applyAuthAndSend(info *BlindingInfo, authConfig *PerClientAuthConfig) error {
 	if authConfig != nil {
 		if err := info.SetPerClientAuth(authConfig); err != nil {
 			return fmt.Errorf("failed to set per-client auth: %w", err)

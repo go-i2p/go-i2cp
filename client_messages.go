@@ -710,37 +710,17 @@ func readClientBandwidthLimits(stream *Stream) (uint32, uint32, error) {
 // readRouterBandwidthLimits reads router bandwidth limits and burst parameters from the stream.
 // Returns inbound, inbound burst, outbound, outbound burst, burst time, or an error.
 func readRouterBandwidthLimits(stream *Stream) (uint32, uint32, uint32, uint32, uint32, error) {
-	routerInbound, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router inbound limit: %v", err)
-		return 0, 0, 0, 0, 0, err
+	fields := make([]uint32, 5)
+	fieldNames := []string{"router inbound limit", "router inbound burst", "router outbound limit", "router outbound burst", "burst time"}
+	for i := 0; i < 5; i++ {
+		val, err := stream.ReadUint32()
+		if err != nil {
+			Error("Failed to read %s: %v", fieldNames[i], err)
+			return 0, 0, 0, 0, 0, err
+		}
+		fields[i] = val
 	}
-
-	routerInboundBurst, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router inbound burst: %v", err)
-		return 0, 0, 0, 0, 0, err
-	}
-
-	routerOutbound, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router outbound limit: %v", err)
-		return 0, 0, 0, 0, 0, err
-	}
-
-	routerOutboundBurst, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read router outbound burst: %v", err)
-		return 0, 0, 0, 0, 0, err
-	}
-
-	burstTime, err := stream.ReadUint32()
-	if err != nil {
-		Error("Failed to read burst time: %v", err)
-		return 0, 0, 0, 0, 0, err
-	}
-
-	return routerInbound, routerInboundBurst, routerOutbound, routerOutboundBurst, burstTime, nil
+	return fields[0], fields[1], fields[2], fields[3], fields[4], nil
 }
 
 // readUndefinedBandwidthFields reads the 9 reserved/undefined uint32 fields from the stream.

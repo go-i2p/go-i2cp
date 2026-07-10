@@ -47,11 +47,8 @@ type DHAuthenticator struct {
 	// This is typically extracted from the blinded b32 address
 	ServerPublicKey [32]byte
 
-	// Salt is optional salt for HKDF derivation (can be nil)
-	Salt []byte
-
-	// Info is contextual info for HKDF (I2P uses "ELS2_L1K" for per-client auth)
-	Info []byte
+	// Embedded authParams for Salt and Info fields
+	authParams
 }
 
 // PSKAuthenticator performs PSK-based authentication for encrypted LeaseSets.
@@ -60,11 +57,8 @@ type PSKAuthenticator struct {
 	// PreSharedKey is the 32-byte secret shared between client and server
 	PreSharedKey [32]byte
 
-	// Salt is optional salt for HKDF derivation (can be nil)
-	Salt []byte
-
-	// Info is contextual info for HKDF (I2P uses "ELS2_L1K" for per-client auth)
-	Info []byte
+	// Embedded authParams for Salt and Info fields
+	authParams
 }
 
 // AuthResult holds the result of DH or PSK authentication.
@@ -91,6 +85,17 @@ const (
 	ELS2AuthSalt = ""
 )
 
+// authParams holds common HKDF parameters (Salt and Info) shared by both
+// DHAuthenticator and PSKAuthenticator. Embedded in each authenticator type
+// to enable code reuse for WithSalt and WithInfo methods.
+type authParams struct {
+	// Salt is optional salt for HKDF derivation (can be nil)
+	Salt []byte
+
+	// Info is contextual info for HKDF (I2P uses "ELS2_L1K" for per-client auth)
+	Info []byte
+}
+
 // NewDHAuthenticator creates a new DH authenticator with the given keys.
 // The clientPrivateKey is your X25519 private key.
 // The serverPublicKey is extracted from the blinded destination.
@@ -98,7 +103,9 @@ func NewDHAuthenticator(clientPrivateKey, serverPublicKey [32]byte) *DHAuthentic
 	return &DHAuthenticator{
 		ClientPrivateKey: clientPrivateKey,
 		ServerPublicKey:  serverPublicKey,
-		Info:             []byte(ELS2AuthInfo),
+		authParams: authParams{
+			Info: []byte(ELS2AuthInfo),
+		},
 	}
 }
 
@@ -106,7 +113,9 @@ func NewDHAuthenticator(clientPrivateKey, serverPublicKey [32]byte) *DHAuthentic
 func NewPSKAuthenticator(preSharedKey [32]byte) *PSKAuthenticator {
 	return &PSKAuthenticator{
 		PreSharedKey: preSharedKey,
-		Info:         []byte(ELS2AuthInfo),
+		authParams: authParams{
+			Info: []byte(ELS2AuthInfo),
+		},
 	}
 }
 

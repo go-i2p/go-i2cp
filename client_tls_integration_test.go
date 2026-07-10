@@ -75,45 +75,53 @@ func TestClient_Connect_TLSInsecureMode(t *testing.T) {
 	}
 }
 
-// TestClient_Connect_WithContext tests context cancellation during TLS setup
+// TestClient_Connect_WithContext tests context cancellation and timeout with TLS
 func TestClient_Connect_WithContext(t *testing.T) {
-	client := NewClient(nil)
-	client.SetProperty("i2cp.SSL", "true")
-
-	// Create a context that's already cancelled
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// Connect should fail with context error
-	err := client.Connect(ctx)
-	if err == nil {
-		t.Error("Expected error when context is cancelled")
+	tests := []struct {
+		name        string
+		setupClient func(*Client)
+		setupCtx    func() context.Context
+		expectErr   bool
+	}{
+		{
+			name: "cancelled context with TLS",
+			setupClient: func(c *Client) {
+				c.SetProperty("i2cp.SSL", "true")
+			},
+			setupCtx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel() // Cancel immediately
+				return ctx
+			},
+			expectErr: true,
+		},
+		{
+			name: "timeout context with TLS",
+			setupClient: func(c *Client) {
+				c.SetProperty("i2cp.SSL", "true")
+				c.SetProperty("i2cp.SSL.insecure", "true")
+			},
+			setupCtx: func() context.Context {
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+				defer cancel()
+				time.Sleep(10 * time.Millisecond) // Ensure timeout occurs
+				return ctx
+			},
+			expectErr: true,
+		},
 	}
 
-	// Error should mention context cancellation
-	if err != nil && err.Error() != "context cancelled before connect: context canceled" {
-		// Expected behavior - context checked before TLS setup
-		t.Logf("Got expected context error: %v", err)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient(nil)
+			tt.setupClient(client)
+			ctx := tt.setupCtx()
 
-// TestClient_Connect_WithTimeout tests connection timeout with TLS
-func TestClient_Connect_WithTimeout(t *testing.T) {
-	client := NewClient(nil)
-	client.SetProperty("i2cp.SSL", "true")
-	client.SetProperty("i2cp.SSL.insecure", "true")
-
-	// Create a context with very short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
-
-	// Give context time to expire
-	time.Sleep(10 * time.Millisecond)
-
-	// Connect should fail with context deadline exceeded
-	err := client.Connect(ctx)
-	if err == nil {
-		t.Error("Expected error when context times out")
+			err := client.Connect(ctx)
+			if tt.expectErr && err == nil {
+				t.Error("Expected error but got nil")
+			}
+		})
 	}
 }
 

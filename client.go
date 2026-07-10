@@ -26,6 +26,14 @@ const (
 	NR_OF_I2CP_CLIENT_PROPERTIES
 )
 
+// messageHandlers maps I2CP message types to their handler functions.
+// Handlers for deprecated message types include warning logs via wrapper functions.
+// Lazily initialized on first use to avoid circular dependency with handler methods.
+var (
+	messageHandlers map[uint8]func(*Client, *Stream)
+	initOnce        sync.Once
+)
+
 var defaultProperties = map[string]string{
 	"i2cp.password":                  "",
 	"i2cp.username":                  "",
@@ -450,53 +458,58 @@ func (c *Client) processReceivedMessage(msgType uint8, length uint32, stream *St
 
 func (c *Client) onMessage(msgType uint8, stream *Stream) {
 	Debug("Dispatching I2CP message type %d (%s) to handler", msgType, getMessageTypeName(msgType))
-	switch msgType {
-	case I2CP_MSG_SET_DATE:
-		c.onMsgSetDate(stream)
-	case I2CP_MSG_DISCONNECT:
-		c.onMsgDisconnect(stream)
-	case I2CP_MSG_RECEIVE_MESSAGE_BEGIN:
-		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.4+
-		Warning("Received deprecated RECEIVE_MESSAGE_BEGIN (type 6) - not used in fastReceive mode (default since 0.9.4)")
-		c.onMsgReceiveMessageBegin(stream)
-	case I2CP_MSG_RECEIVE_MESSAGE_END:
-		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.4+
-		Warning("Received deprecated RECEIVE_MESSAGE_END (type 7) - not used in fastReceive mode (default since 0.9.4)")
-		c.onMsgReceiveMessageEnd(stream)
-	case I2CP_MSG_PAYLOAD_MESSAGE:
-		c.onMsgPayload(stream)
-	case I2CP_MSG_MESSAGE_STATUS:
-		c.onMsgStatus(stream)
-	case I2CP_MSG_DEST_REPLY:
-		c.onMsgDestReply(stream)
-	case I2CP_MSG_REQUEST_LEASESET:
-		// MINOR FIX: Warn about deprecated message type per I2CP spec 0.9.7+
-		Warning("Received deprecated REQUEST_LEASESET (type 21) - router should send REQUEST_VARIABLE_LEASESET (type 37)")
-		c.onMsgRequestLeaseSet(stream)
-	case I2CP_MSG_BANDWIDTH_LIMITS:
-		c.onMsgBandwidthLimit(stream)
-	case I2CP_MSG_SESSION_STATUS:
-		c.onMsgSessionStatus(stream)
-	case I2CP_MSG_REPORT_ABUSE:
-		// MINOR FIX: Handle deprecated REPORT_ABUSE message per I2CP spec
-		// This message type exists in the spec but was never fully implemented in Java I2P
-		Warning("Received deprecated REPORT_ABUSE (type 29) - UNUSED, UNSUPPORTED, treating as no-op")
-	case I2CP_MSG_REQUEST_VARIABLE_LEASESET:
-		c.onMsgReqVariableLease(stream)
-	case I2CP_MSG_HOST_REPLY:
-		c.onMsgHostReply(stream)
-	case I2CP_MSG_RECONFIGURE_SESSION:
-		c.onMsgReconfigureSession(stream)
-	// I2CP_MSG_CREATE_LEASE_SET2 (type 41) is CLIENT→ROUTER only per Java I2P reference.
-	// Routers do NOT send this message to clients. The correct router→client message
-	// for LeaseSet updates is RequestVariableLeaseSetMessage (type 37).
-	// Handler preserved below for testing but not dispatched for protocol conformance.
-	// See AUDIT.md Critical Issue #1 for details.
-	case I2CP_MSG_BLINDING_INFO:
-		c.onMsgBlindingInfo(stream)
-	default:
+
+	// Lazily initialize the message handlers map on first use
+	initOnce.Do(func() {
+		messageHandlers = map[uint8]func(*Client, *Stream){
+			I2CP_MSG_SET_DATE:                  func(c *Client, s *Stream) { c.onMsgSetDate(s) },
+			I2CP_MSG_DISCONNECT:                func(c *Client, s *Stream) { c.onMsgDisconnect(s) },
+			I2CP_MSG_RECEIVE_MESSAGE_BEGIN:     handleMsgReceiveMessageBegin,
+			I2CP_MSG_RECEIVE_MESSAGE_END:       handleMsgReceiveMessageEnd,
+			I2CP_MSG_PAYLOAD_MESSAGE:           func(c *Client, s *Stream) { c.onMsgPayload(s) },
+			I2CP_MSG_MESSAGE_STATUS:            func(c *Client, s *Stream) { c.onMsgStatus(s) },
+			I2CP_MSG_DEST_REPLY:                func(c *Client, s *Stream) { c.onMsgDestReply(s) },
+			I2CP_MSG_REQUEST_LEASESET:          handleMsgRequestLeaseSet,
+			I2CP_MSG_BANDWIDTH_LIMITS:          func(c *Client, s *Stream) { c.onMsgBandwidthLimit(s) },
+			I2CP_MSG_SESSION_STATUS:            func(c *Client, s *Stream) { c.onMsgSessionStatus(s) },
+			I2CP_MSG_REPORT_ABUSE:              handleMsgReportAbuse,
+			I2CP_MSG_REQUEST_VARIABLE_LEASESET: func(c *Client, s *Stream) { c.onMsgReqVariableLease(s) },
+			I2CP_MSG_HOST_REPLY:                func(c *Client, s *Stream) { c.onMsgHostReply(s) },
+			I2CP_MSG_RECONFIGURE_SESSION:       func(c *Client, s *Stream) { c.onMsgReconfigureSession(s) },
+			I2CP_MSG_BLINDING_INFO:             func(c *Client, s *Stream) { c.onMsgBlindingInfo(s) },
+		}
+	})
+
+	handler, ok := messageHandlers[msgType]
+	if !ok {
 		Info("%s", "recieved unhandled i2cp message.")
+		return
 	}
+
+	handler(c, stream)
+}
+
+// Wrapper function for deprecated RECEIVE_MESSAGE_BEGIN (type 6)
+func handleMsgReceiveMessageBegin(c *Client, stream *Stream) {
+	Warning("Received deprecated RECEIVE_MESSAGE_BEGIN (type 6) - not used in fastReceive mode (default since 0.9.4)")
+	c.onMsgReceiveMessageBegin(stream)
+}
+
+// Wrapper function for deprecated RECEIVE_MESSAGE_END (type 7)
+func handleMsgReceiveMessageEnd(c *Client, stream *Stream) {
+	Warning("Received deprecated RECEIVE_MESSAGE_END (type 7) - not used in fastReceive mode (default since 0.9.4)")
+	c.onMsgReceiveMessageEnd(stream)
+}
+
+// Wrapper function for deprecated REQUEST_LEASESET (type 21)
+func handleMsgRequestLeaseSet(c *Client, stream *Stream) {
+	Warning("Received deprecated REQUEST_LEASESET (type 21) - router should send REQUEST_VARIABLE_LEASESET (type 37)")
+	c.onMsgRequestLeaseSet(stream)
+}
+
+// Wrapper function for deprecated REPORT_ABUSE (type 29)
+func handleMsgReportAbuse(c *Client, stream *Stream) {
+	Warning("Received deprecated REPORT_ABUSE (type 29) - UNUSED, UNSUPPORTED, treating as no-op")
 }
 
 // initializeLeaseSetStream creates and initializes the lease set stream with null bytes.
@@ -1016,7 +1029,14 @@ func (c *Client) msgGetBandwidthLimits(queue bool) error {
 	return nil
 }
 
-func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, queue, callerHoldsLock bool) error {
+// DestroySessionOptions contains options for destroying a session
+type DestroySessionOptions struct {
+	IsPrimary       bool // Whether the session being destroyed is primary
+	Queue           bool // Whether to queue the message
+	CallerHoldsLock bool // Whether the caller already holds the session lock
+}
+
+func (c *Client) msgDestroySession(sess *Session, sessionID uint16, opts DestroySessionOptions) error {
 	// I2CP SPEC COMPLIANCE: Handle both spec-compliant and Java I2P router behaviors
 	// Per I2CP spec § DestroySessionMessage: "The router should respond with a SessionStatusMessage (Destroyed)"
 	// Per I2CP 0.9.67 § DestroySessionMessage Notes (Java I2P deviation):
@@ -1026,12 +1046,12 @@ func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, q
 
 	// NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry deadlock
 	// when called from Session.Close() which already holds session.mu
-	// callerHoldsLock indicates if the caller already holds sess.mu
-	wasPrimary := isPrimary
-	Debug("msgDestroySession called for session %d (isPrimary: %v, callerHoldsLock: %v)", sessionID, wasPrimary, callerHoldsLock)
+	// opts.CallerHoldsLock indicates if the caller already holds sess.mu
+	wasPrimary := opts.IsPrimary
+	Debug("msgDestroySession called for session %d (isPrimary: %v, callerHoldsLock: %v)", sessionID, wasPrimary, opts.CallerHoldsLock)
 	cascadeDestroySubsessions(c, sess, sessionID, wasPrimary)
 
-	if err := sendDestroySessionMessage(c, sessionID, wasPrimary, queue); err != nil {
+	if err := sendDestroySessionMessage(c, sessionID, wasPrimary, opts.Queue); err != nil {
 		return err
 	}
 
@@ -1049,9 +1069,25 @@ func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, q
 	// message as usual. This will not destroy the primary session or stop the I2CP connection."
 	// We must clean up the subsession's local state and remove it from the sessions map.
 	Debug("Calling cleanupDestroyedSubsession for session %d", sessionID)
-	cleanupDestroyedSubsession(c, sess, sessionID, isPrimary, callerHoldsLock)
+	cleanupDestroyedSubsession(c, sess, sessionID, opts.IsPrimary, opts.CallerHoldsLock)
 
 	return nil
+}
+
+// snapshotSessions returns a copy of sessions matching the given filter.
+// The filter function receives each session and should return true to include it.
+// snapshotSessions acquires the client lock, ensuring a consistent snapshot.
+func (c *Client) snapshotSessions(filter func(*Session) bool) []*Session {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	var result []*Session
+	for _, sess := range c.sessions {
+		if filter(sess) {
+			result = append(result, sess)
+		}
+	}
+	return result
 }
 
 // cascadeDestroySubsessions destroys all subsessions when a primary session is destroyed.
@@ -1059,28 +1095,39 @@ func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, q
 // NOTE: sessionID and isPrimary are passed as parameters to avoid mutex re-entry deadlock
 func cascadeDestroySubsessions(c *Client, sess *Session, sessionID uint16, isPrimary bool) {
 	// COMPLIANCE FIX: Cascade destroy subsessions when primary is destroyed (I2CP § Multisession Notes)
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
 	// NOTE: isPrimary is passed as parameter to avoid mutex re-entry deadlock
 	if !isPrimary {
 		return
 	}
 
 	Debug("Destroying primary session %d - cascading to all subsessions per I2CP spec", sessionID)
+
+	// Snapshot subsessions to destroy (released from lock during destruction)
+	subsessions := c.snapshotSessions(func(sess *Session) bool {
+		return sess.id != sessionID && !sess.IsPrimary() // Thread-safe getter
+	})
+
 	// Destroy all subsessions first
-	for id, s := range c.sessions {
-		if id != sessionID && !s.IsPrimary() { // Thread-safe getter (different session, safe to call)
-			Debug("Auto-destroying subsession %d (primary %d being destroyed)", id, sessionID)
-			// Recursive call for subsessions - subsession's isPrimary is false, use s.ID() which is safe
-			// callerHoldsLock=false because we don't hold the subsession's lock
-			c.lock.Unlock()
-			c.msgDestroySession(s, s.ID(), false, false, false)
-			c.lock.Lock()
-			delete(c.sessions, id)
-		}
+	for _, s := range subsessions {
+		Debug("Auto-destroying subsession %d (primary %d being destroyed)", s.id, sessionID)
+		// Recursive call for subsessions - subsession's isPrimary is false, use s.ID() which is safe
+		// CallerHoldsLock=false because we don't hold the subsession's lock
+		c.msgDestroySession(s, s.ID(), DestroySessionOptions{
+			IsPrimary:       false,
+			Queue:           false,
+			CallerHoldsLock: false,
+		})
+
+		// Remove from sessions map
+		c.lock.Lock()
+		delete(c.sessions, s.id)
+		c.lock.Unlock()
 	}
+
+	// Clear primary session ID
+	c.lock.Lock()
 	c.primarySessionID = nil
+	c.lock.Unlock()
 }
 
 // cleanupDestroyedSubsession performs complete cleanup of a destroyed subsession.
@@ -1210,16 +1257,9 @@ func (c *Client) cascadeCloseSubsessions(primaryID uint16) {
 
 // collectSubsessions gathers all subsessions associated with a primary session.
 func (c *Client) collectSubsessions(primaryID uint16) []*Session {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	var subsessions []*Session
-	for id, sess := range c.sessions {
-		if id != primaryID && !sess.IsPrimary() { // Thread-safe getter
-			subsessions = append(subsessions, sess)
-		}
-	}
-	return subsessions
+	return c.snapshotSessions(func(sess *Session) bool {
+		return sess.id != primaryID && !sess.IsPrimary() // Thread-safe getter
+	})
 }
 
 // closeSubsessionList marks each subsession as closed and dispatches status.
@@ -1300,11 +1340,7 @@ func (c *Client) msgSendMessage(sess *Session, dest *Destination, protocol uint8
 	}
 
 	return c.sendSimpleMessage(I2CP_MSG_SEND_MESSAGE, "SendMessageMessage", func(stream *Stream) error {
-		stream.WriteUint16(sess.id)
-		dest.WriteToMessage(stream)
-		stream.WriteUint32(uint32(compressedPayload.Len()))
-		stream.Write(compressedPayload.Bytes())
-		stream.WriteUint32(nonce)
+		c.buildSendMessageStream(stream, sess, dest, compressedPayload, nonce)
 		return c.validateMessageSize(compressedPayload.Len())
 	}, queue)
 }
@@ -1325,7 +1361,9 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 	}
 
 	return c.sendSimpleMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, "SendMessageExpiresMessage", func(stream *Stream) error {
-		c.buildSendMessageStream(sess, dest, compressedPayload, nonce, flags, expirationSeconds)
+		c.buildSendMessageStream(stream, sess, dest, compressedPayload, nonce)
+		stream.WriteUint16(flags)
+		stream.WriteUint64(expirationSeconds)
 		return c.validateMessageSize(compressedPayload.Len())
 	}, queue)
 }
@@ -1347,16 +1385,15 @@ func (c *Client) compressPayload(payload *Stream, protocol uint8, srcPort, destP
 	return out, nil
 }
 
-// buildSendMessageStream constructs the message stream for SendMessageExpires.
-func (c *Client) buildSendMessageStream(sess *Session, dest *Destination, compressedPayload *bytes.Buffer, nonce uint32, flags uint16, expirationSeconds uint64) {
-	c.messageStream.Reset()
-	c.messageStream.WriteUint16(sess.id)
-	dest.WriteToMessage(c.messageStream)
-	c.messageStream.WriteUint32(uint32(compressedPayload.Len()))
-	c.messageStream.Write(compressedPayload.Bytes())
-	c.messageStream.WriteUint32(nonce)
-	c.messageStream.WriteUint16(flags)
-	c.messageStream.WriteUint64(expirationSeconds)
+// buildSendMessageStream constructs the base message stream for SendMessage and SendMessageExpires.
+// It writes the common fields (session ID, destination, payload length, payload, and nonce) to the provided stream.
+// Callers can add additional fields (flags, expiration) after calling this function.
+func (c *Client) buildSendMessageStream(stream *Stream, sess *Session, dest *Destination, compressedPayload *bytes.Buffer, nonce uint32) {
+	stream.WriteUint16(sess.id)
+	dest.WriteToMessage(stream)
+	stream.WriteUint32(uint32(compressedPayload.Len()))
+	stream.Write(compressedPayload.Bytes())
+	stream.WriteUint32(nonce)
 }
 
 // validateMessageSize validates the total message size against I2CP limits.
@@ -1546,12 +1583,9 @@ func (c *Client) destroyAllSessions() {
 	}
 
 	// Collect sessions to destroy while holding lock
-	c.lock.Lock()
-	sessionsToDestroy := make([]*Session, 0, len(c.sessions))
-	for _, sess := range c.sessions {
-		sessionsToDestroy = append(sessionsToDestroy, sess)
-	}
-	c.lock.Unlock()
+	sessionsToDestroy := c.snapshotSessions(func(sess *Session) bool {
+		return true // Include all sessions
+	})
 
 	// Destroy sessions without holding lock to avoid deadlock with cascadeDestroySubsessions
 	for _, sess := range sessionsToDestroy {
@@ -1574,8 +1608,12 @@ func (c *Client) destroyAllSessions() {
 		}
 
 		Debug("Destroying session %d during shutdown", sessionID)
-		// callerHoldsLock=false because we released the session's lock above
-		if err := c.msgDestroySession(sess, sessionID, isPrimary, false, false); err != nil {
+		// CallerHoldsLock=false because we released the session's lock above
+		if err := c.msgDestroySession(sess, sessionID, DestroySessionOptions{
+			IsPrimary:       isPrimary,
+			Queue:           false,
+			CallerHoldsLock: false,
+		}); err != nil {
 			Warning("Failed to destroy session %d during shutdown: %v", sessionID, err)
 		}
 	}

@@ -5,6 +5,30 @@ import (
 	"time"
 )
 
+// buildBlindingInfoMessageBytes builds the wire format of a BlindingInfoMessage for testing.
+// Resets the client's message stream, writes the complete message with all optional fields,
+// and returns the bytes. Handles DecryptionKey and LookupPassword based on info fields.
+func buildBlindingInfoMessageBytes(client *Client, session *Session, info *BlindingInfo) []byte {
+	client.messageStream.Reset()
+	client.messageStream.WriteUint16(session.id)
+	flags := client.buildBlindingFlags(info)
+	client.messageStream.WriteByte(flags)
+	client.messageStream.WriteByte(info.EndpointType)
+	client.messageStream.WriteUint16(info.BlindedSigType)
+	client.messageStream.WriteUint32(info.Expiration)
+	client.writeBlindingEndpoint(info)
+
+	// Handle optional fields
+	if info.PerClientAuth {
+		client.messageStream.Write(info.DecryptionKey)
+	}
+	if len(info.LookupPassword) > 0 {
+		client.messageStream.WriteLenPrefixedString(info.LookupPassword)
+	}
+
+	return client.messageStream.Bytes()
+}
+
 // TestMsgBlindingInfo_Validation tests BlindingInfoMessage validation logic.
 func TestMsgBlindingInfo_Validation(t *testing.T) {
 	client := NewClient(nil)
@@ -294,16 +318,7 @@ func TestBlindingInfoMessageFormat(t *testing.T) {
 		t.Fatalf("validation failed: %v", err)
 	}
 
-	client.messageStream.Reset()
-	client.messageStream.WriteUint16(session.id)
-	flags := client.buildBlindingFlags(info)
-	client.messageStream.WriteByte(flags)
-	client.messageStream.WriteByte(info.EndpointType)
-	client.messageStream.WriteUint16(info.BlindedSigType)
-	client.messageStream.WriteUint32(info.Expiration)
-	client.writeBlindingEndpoint(info)
-
-	data := client.messageStream.Bytes()
+	data := buildBlindingInfoMessageBytes(client, session, info)
 
 	// Verify message format
 	// Session ID (2 bytes)
@@ -379,18 +394,8 @@ func TestBlindingInfoWithPerClientAuth(t *testing.T) {
 		t.Fatalf("validation failed: %v", err)
 	}
 
-	// Build the message manually to verify format
-	client.messageStream.Reset()
-	client.messageStream.WriteUint16(session.id)
-	flags := client.buildBlindingFlags(info)
-	client.messageStream.WriteByte(flags)
-	client.messageStream.WriteByte(info.EndpointType)
-	client.messageStream.WriteUint16(info.BlindedSigType)
-	client.messageStream.WriteUint32(info.Expiration)
-	client.writeBlindingEndpoint(info)
-	client.messageStream.Write(info.DecryptionKey)
-
-	data := client.messageStream.Bytes()
+	// Build the message using helper
+	data := buildBlindingInfoMessageBytes(client, session, info)
 
 	// Flags should have per-client bit and PSK auth scheme
 	expectedFlags := uint8(0x03) // Bit 0 + PSK in bits 3-1
@@ -439,18 +444,8 @@ func TestBlindingInfoWithLookupPassword(t *testing.T) {
 		t.Fatalf("validation failed: %v", err)
 	}
 
-	// Build the message
-	client.messageStream.Reset()
-	client.messageStream.WriteUint16(session.id)
-	flags := client.buildBlindingFlags(info)
-	client.messageStream.WriteByte(flags)
-	client.messageStream.WriteByte(info.EndpointType)
-	client.messageStream.WriteUint16(info.BlindedSigType)
-	client.messageStream.WriteUint32(info.Expiration)
-	client.writeBlindingEndpoint(info)
-	client.messageStream.WriteLenPrefixedString(info.LookupPassword)
-
-	data := client.messageStream.Bytes()
+	// Build the message using helper
+	data := buildBlindingInfoMessageBytes(client, session, info)
 
 	// Flags should have secret bit set
 	expectedFlags := uint8(0x10) // Bit 4 only

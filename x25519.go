@@ -48,36 +48,13 @@ func NewX25519KeyPair() (*X25519KeyPair, error) {
 // readX25519AlgorithmType reads and validates the algorithm type from the stream.
 // Returns the algorithm type if valid for X25519, error otherwise.
 func readX25519AlgorithmType(stream *Stream) (uint32, error) {
-	algorithmType, err := stream.ReadUint32()
-	if err != nil {
-		return 0, fmt.Errorf("failed to read algorithm type: %w", err)
-	}
-
-	if algorithmType != X25519 {
-		return 0, fmt.Errorf("unsupported algorithm type: %d", algorithmType)
-	}
-
-	return algorithmType, nil
+	return readAlgorithmType(stream, X25519, "X25519")
 }
 
 // readX25519KeyBytes reads private and public key bytes from the stream.
 // Returns private key bytes, public key bytes, and any error encountered.
 func readX25519KeyBytes(stream *Stream) ([]byte, []byte, error) {
-	// Read private key (32 bytes)
-	privKeyBytes := make([]byte, 32)
-	_, err := stream.Read(privKeyBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read X25519 private key: %w", err)
-	}
-
-	// Read public key (32 bytes)
-	pubKeyBytes := make([]byte, 32)
-	_, err = stream.Read(pubKeyBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read X25519 public key: %w", err)
-	}
-
-	return privKeyBytes, pubKeyBytes, nil
+	return readKeyPairBytes(stream, 32, 32, "X25519")
 }
 
 // validateX25519KeyPair verifies that the public key corresponds to the private key.
@@ -185,17 +162,9 @@ func (kp *X25519KeyPair) WriteToStream(stream *Stream) error {
 }
 
 // WritePublicKeyToStream writes only the public key to a stream
+// Uses the shared writePublicKeyToStream helper for consistent error handling.
 func (kp *X25519KeyPair) WritePublicKeyToStream(stream *Stream) error {
-	if stream == nil {
-		return fmt.Errorf("stream cannot be nil")
-	}
-
-	_, err := stream.Write(kp.publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to write X25519 public key: %w", err)
-	}
-
-	return nil
+	return writePublicKeyToStream(stream, kp.publicKey[:], "X25519")
 }
 
 // PublicKey returns a copy of the public key as [32]byte for backward compatibility
