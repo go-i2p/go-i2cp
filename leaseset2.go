@@ -222,13 +222,9 @@ func readLeaseCount(stream *Stream) (uint8, error) {
 
 // readSingleLease reads and parses a single Lease2 from the stream.
 func readSingleLease(stream *Stream, index uint8) (*lease.Lease2, error) {
-	leaseData := make([]byte, 40)
-	n, err := stream.Read(leaseData)
+	leaseData, err := stream.ReadExact(40, fmt.Sprintf("LeaseSet2 lease %d", index))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read LeaseSet2 lease %d: %w", index, err)
-	}
-	if n != 40 {
-		return nil, fmt.Errorf("incomplete Lease2 read: got %d bytes, expected 40", n)
+		return nil, err
 	}
 
 	l2, _, err := lease.ReadLease2(leaseData)
@@ -293,16 +289,7 @@ func readLengthPrefixedData(stream *Stream, fieldName string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read %s length: %w", fieldName, err)
 	}
 
-	data := make([]byte, dataLen)
-	n, err := stream.Read(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", fieldName, err)
-	}
-	if n != int(dataLen) {
-		return nil, fmt.Errorf("incomplete %s read: got %d bytes, expected %d", fieldName, n, dataLen)
-	}
-
-	return data, nil
+	return stream.ReadExact(int(dataLen), fieldName)
 }
 
 // readOfflineSignatureKey reads a key type and its associated key data from the stream.

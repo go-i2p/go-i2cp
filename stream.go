@@ -208,16 +208,7 @@ func readMappingData(stream *Stream) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	mappingData := make([]byte, mappingLength)
-	n, err := stream.Read(mappingData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read mapping data: %w", err)
-	}
-	if n != int(mappingLength) {
-		return nil, fmt.Errorf("incomplete mapping data: expected %d bytes, got %d", mappingLength, n)
-	}
-
-	return mappingData, nil
+	return stream.ReadExact(int(mappingLength), "mapping data")
 }
 
 // parseMappingData parses raw mapping bytes into a map of key-value pairs.

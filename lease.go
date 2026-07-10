@@ -18,13 +18,11 @@ func NewLeaseFromStream(stream *Stream) (*Lease, error) {
 	var leaseBytes [44]byte
 
 	// Read tunnel gateway (32 bytes)
-	n, err := stream.Read(leaseBytes[:32])
+	gatewayBytes, err := stream.ReadExact(32, "tunnel gateway hash")
 	if err != nil {
 		return nil, err
 	}
-	if n != 32 {
-		return nil, fmt.Errorf("failed to read complete tunnel gateway hash: got %d bytes, expected 32", n)
-	}
+	copy(leaseBytes[:32], gatewayBytes)
 
 	// Read tunnel ID (4 bytes)
 	tunnelId, err := stream.ReadUint32()

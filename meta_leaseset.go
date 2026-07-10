@@ -103,13 +103,11 @@ func ReadMetaLeaseFromStream(stream *Stream) (*MetaLease, error) {
 
 // readMetaLeaseHash reads the 32-byte hash from the stream.
 func readMetaLeaseHash(stream *Stream, ml *MetaLease) error {
-	n, err := stream.Read(ml.Hash[:])
+	hashBytes, err := stream.ReadExact(32, "MetaLease hash")
 	if err != nil {
-		return fmt.Errorf("failed to read MetaLease hash: %w", err)
+		return err
 	}
-	if n != 32 {
-		return fmt.Errorf("incomplete MetaLease hash: got %d bytes, expected 32", n)
-	}
+	copy(ml.Hash[:], hashBytes)
 	return nil
 }
 
