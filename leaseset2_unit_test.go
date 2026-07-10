@@ -8,6 +8,41 @@ import (
 	"github.com/go-i2p/common/lease"
 )
 
+// buildLeaseSet2Stream writes the common LeaseSet2 preamble shared by most parsing
+// tests: type byte, destination, published/expires timestamps (now/+10m), flags,
+// properties mapping, and leaseCount sequentially-keyed Lease2 entries (40 bytes
+// each: 32-byte gateway filled with the lease index, tunnel ID 1000+i, end date
+// now+5m). It does NOT append an offline-signature block or the final signature —
+// callers append those themselves since tests vary in what belongs there (a
+// zero-filled signature, a real Ed25519 signature, an offline-signature block, or
+// nothing at all). Returns the stream along with the published/expires timestamps
+// actually written, for tests that assert against them.
+func buildLeaseSet2Stream(dest *Destination, leaseSetType uint8, flags uint16, properties map[string]string, leaseCount int) (stream *Stream, published, expires uint32) {
+	stream = NewStream(make([]byte, 0, 2048))
+	stream.WriteByte(leaseSetType)
+	dest.WriteToStream(stream)
+
+	published = uint32(time.Now().Unix())
+	expires = uint32(time.Now().Add(10 * time.Minute).Unix())
+	stream.WriteUint32(published)
+	stream.WriteUint32(expires)
+	stream.WriteUint16(flags)
+	stream.WriteMapping(properties)
+
+	stream.WriteByte(byte(leaseCount))
+	for i := 0; i < leaseCount; i++ {
+		gateway := make([]byte, 32)
+		for j := range gateway {
+			gateway[j] = byte(i)
+		}
+		stream.Write(gateway)
+		stream.WriteUint32(uint32(1000 + i))
+		stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
+	}
+
+	return stream, published, expires
+}
+
 // TestLeaseSet2Parsing_Standard tests parsing of a standard LeaseSet2 (type 3)
 func TestLeaseSet2Parsing_Standard(t *testing.T) {
 	crypto := NewCrypto()
@@ -18,44 +53,8 @@ func TestLeaseSet2Parsing_Standard(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	// Build a LeaseSet2 message in stream format
-	stream := NewStream(make([]byte, 0, 1024))
-
-	// Write LeaseSet type (3 = standard)
-	stream.WriteByte(LEASESET_TYPE_STANDARD)
-
-	// Write destination
-	dest.WriteToStream(stream)
-
-	// Write timestamps
-	published := uint32(time.Now().Unix())
-	expires := uint32(time.Now().Add(10 * time.Minute).Unix())
-	stream.WriteUint32(published)
-	stream.WriteUint32(expires)
-
-	// Write flags (0 = no offline signature)
-	stream.WriteUint16(0)
-
-	// Write empty properties
-	stream.WriteMapping(map[string]string{})
-
-	// Write 2 leases
-	stream.WriteByte(2)
-
-	// Create test Lease2 structures
-	for i := 0; i < 2; i++ {
-		gateway := make([]byte, 32)
-		for j := range gateway {
-			gateway[j] = byte(i)
-		}
-		tunnelID := uint32(1000 + i)
-		endDate := uint32(time.Now().Add(5 * time.Minute).Unix())
-
-		// Write Lease2 (40 bytes: 32 gateway + 4 tunnel ID + 4 end date)
-		stream.Write(gateway)
-		stream.WriteUint32(tunnelID)
-		stream.WriteUint32(endDate)
-	}
+	// Build a LeaseSet2 message with 2 leases (no offline signature)
+	stream, published, expires := buildLeaseSet2Stream(dest, LEASESET_TYPE_STANDARD, 0, map[string]string{}, 2)
 
 	// Write signature (64 bytes for Ed25519)
 	signature := make([]byte, 64)
@@ -109,31 +108,12 @@ func TestLeaseSet2Parsing_Encrypted(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 1024))
-
-	// Write encrypted LeaseSet type
-	stream.WriteByte(LEASESET_TYPE_ENCRYPTED)
-	dest.WriteToStream(stream)
-
-	published := uint32(time.Now().Unix())
-	expires := uint32(time.Now().Add(10 * time.Minute).Unix())
-	stream.WriteUint32(published)
-	stream.WriteUint32(expires)
-	stream.WriteUint16(0) // flags
-
 	// Add some properties
 	properties := map[string]string{
 		"encryption": "chacha20-poly1305",
 		"version":    "2",
 	}
-	stream.WriteMapping(properties)
-
-	// 1 lease
-	stream.WriteByte(1)
-	gateway := make([]byte, 32)
-	stream.Write(gateway)
-	stream.WriteUint32(2000)
-	stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
+	stream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_ENCRYPTED, 0, properties, 1)
 
 	// Signature
 	signature := make([]byte, 64)
@@ -164,27 +144,8 @@ func TestLeaseSet2Parsing_WithOfflineSignature(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 2048))
-
-	stream.WriteByte(LEASESET_TYPE_STANDARD)
-	dest.WriteToStream(stream)
-
-	published := uint32(time.Now().Unix())
-	expires := uint32(time.Now().Add(10 * time.Minute).Unix())
-	stream.WriteUint32(published)
-	stream.WriteUint32(expires)
-
-	// Set bit 0 in flags to indicate offline signature present
-	stream.WriteUint16(0x0001)
-
-	stream.WriteMapping(map[string]string{})
-
-	// 1 lease
-	stream.WriteByte(1)
-	gateway := make([]byte, 32)
-	stream.Write(gateway)
-	stream.WriteUint32(1500)
-	stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
+	// Set bit 0 in flags to indicate offline signature present, with 1 lease
+	stream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_STANDARD, 0x0001, map[string]string{}, 1)
 
 	// Write offline signature
 	stream.WriteUint16(7)  // signing key type (Ed25519)
@@ -318,14 +279,7 @@ func TestLeaseSet2_VerifySignature(t *testing.T) {
 	}
 
 	// Create LeaseSet2 data (everything before signature)
-	dataStream := NewStream(make([]byte, 0, 1024))
-	dataStream.WriteByte(LEASESET_TYPE_STANDARD)
-	dest.WriteToStream(dataStream)
-	dataStream.WriteUint32(uint32(time.Now().Unix()))
-	dataStream.WriteUint32(uint32(time.Now().Add(10 * time.Minute).Unix()))
-	dataStream.WriteUint16(0)
-	dataStream.WriteMapping(map[string]string{})
-	dataStream.WriteByte(0) // 0 leases
+	dataStream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_STANDARD, 0, map[string]string{}, 0)
 
 	// Sign the data using the destination's signing key (appends signature to stream)
 	err = dest.sgk.ed25519KeyPair.SignStream(dataStream)
@@ -365,22 +319,7 @@ func TestLeaseSet2_String(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 1024))
-	stream.WriteByte(LEASESET_TYPE_ENCRYPTED)
-	dest.WriteToStream(stream)
-
-	published := uint32(time.Now().Unix())
-	expires := uint32(time.Now().Add(10 * time.Minute).Unix())
-	stream.WriteUint32(published)
-	stream.WriteUint32(expires)
-	stream.WriteUint16(0)
-	stream.WriteMapping(map[string]string{})
-	stream.WriteByte(1) // 1 lease
-
-	gateway := make([]byte, 32)
-	stream.Write(gateway)
-	stream.WriteUint32(3000)
-	stream.WriteUint32(uint32(time.Now().Add(5 * time.Minute).Unix()))
+	stream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_ENCRYPTED, 0, map[string]string{}, 1)
 
 	signature := make([]byte, 64)
 	stream.Write(signature)
@@ -413,14 +352,7 @@ func TestLeaseSet2_EmptyProperties(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 1024))
-	stream.WriteByte(LEASESET_TYPE_STANDARD)
-	dest.WriteToStream(stream)
-	stream.WriteUint32(uint32(time.Now().Unix()))
-	stream.WriteUint32(uint32(time.Now().Add(10 * time.Minute).Unix()))
-	stream.WriteUint16(0)
-	stream.WriteMapping(map[string]string{}) // Empty properties
-	stream.WriteByte(0)
+	stream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_STANDARD, 0, map[string]string{}, 0)
 
 	signature := make([]byte, 64)
 	stream.Write(signature)
@@ -448,14 +380,7 @@ func TestLeaseSet2_MetaType(t *testing.T) {
 		t.Fatalf("Failed to create destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 1024))
-	stream.WriteByte(LEASESET_TYPE_META)
-	dest.WriteToStream(stream)
-	stream.WriteUint32(uint32(time.Now().Unix()))
-	stream.WriteUint32(uint32(time.Now().Add(10 * time.Minute).Unix()))
-	stream.WriteUint16(0)
-	stream.WriteMapping(map[string]string{"meta": "true"})
-	stream.WriteByte(0)
+	stream, _, _ := buildLeaseSet2Stream(dest, LEASESET_TYPE_META, 0, map[string]string{"meta": "true"}, 0)
 
 	signature := make([]byte, 64)
 	stream.Write(signature)
