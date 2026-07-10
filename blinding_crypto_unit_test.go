@@ -842,12 +842,7 @@ func TestOnMsgBlindingInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			crypto := NewCrypto()
-			client := &Client{
-				lock:     sync.Mutex{},
-				sessions: make(map[uint16]*Session),
-				crypto:   crypto,
-			}
+			client := newTestBlindingClient(t)
 
 			var session *Session
 			if tt.sessionExists {
@@ -962,12 +957,7 @@ func TestOnMsgBlindingInfo_InvalidData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			crypto := NewCrypto()
-			client := &Client{
-				lock:     sync.Mutex{},
-				sessions: make(map[uint16]*Session),
-				crypto:   crypto,
-			}
+			client := newTestBlindingClient(t)
 
 			// Create session
 			session := newSession(client, SessionCallbacks{
@@ -1066,13 +1056,7 @@ func TestBlindPrivateKey_DifferentAlphaProducesDifferentKey(t *testing.T) {
 // derives blinding keys, and verifies the blinded public key can be unblinded
 // to the original.
 func TestDeriveBlindingKeysForDestination(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{})
+	_, session := newTestClientAndSession(t, SessionCallbacks{})
 
 	dest := session.Destination()
 	if dest == nil {

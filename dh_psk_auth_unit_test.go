@@ -5,19 +5,27 @@ import (
 	"testing"
 )
 
-// TestDHAuthenticator_Basic tests basic DH authentication.
-func TestDHAuthenticator_Basic(t *testing.T) {
-	// Generate client key pair
-	clientKeyPair, err := NewX25519KeyPair()
+// newClientServerX25519KeyPairs generates a fresh client and server X25519 key
+// pair for DH authentication tests, failing the test immediately on error.
+func newClientServerX25519KeyPairs(t *testing.T) (client, server *X25519KeyPair) {
+	t.Helper()
+
+	client, err := NewX25519KeyPair()
 	if err != nil {
 		t.Fatalf("Failed to generate client key pair: %v", err)
 	}
 
-	// Generate server key pair
-	serverKeyPair, err := NewX25519KeyPair()
+	server, err = NewX25519KeyPair()
 	if err != nil {
 		t.Fatalf("Failed to generate server key pair: %v", err)
 	}
+
+	return client, server
+}
+
+// TestDHAuthenticator_Basic tests basic DH authentication.
+func TestDHAuthenticator_Basic(t *testing.T) {
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	// Create DH authenticator
 	auth := NewDHAuthenticator(clientKeyPair.PrivateKey(), serverKeyPair.PublicKey())
@@ -44,15 +52,7 @@ func TestDHAuthenticator_Basic(t *testing.T) {
 
 // TestDHAuthenticator_Deterministic tests that DH produces consistent results.
 func TestDHAuthenticator_Deterministic(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	auth1 := NewDHAuthenticator(clientKeyPair.PrivateKey(), serverKeyPair.PublicKey())
 	result1, err := auth1.Authenticate()
@@ -93,15 +93,7 @@ func TestDHAuthenticator_InvalidServerKey(t *testing.T) {
 
 // TestDHAuthenticator_WithSaltAndInfo tests custom salt and info.
 func TestDHAuthenticator_WithSaltAndInfo(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	salt := []byte("custom-salt")
 	info := []byte("custom-info")
@@ -224,15 +216,7 @@ func TestPSKAuthenticator_WithSaltAndInfo(t *testing.T) {
 
 // TestDerivePerClientAuthKey_DH tests the convenience function for DH.
 func TestDerivePerClientAuthKey_DH(t *testing.T) {
-	clientKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate client key pair: %v", err)
-	}
-
-	serverKeyPair, err := NewX25519KeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate server key pair: %v", err)
-	}
+	clientKeyPair, serverKeyPair := newClientServerX25519KeyPairs(t)
 
 	key, err := DerivePerClientAuthKey(BLINDING_AUTH_SCHEME_DH, clientKeyPair.PrivateKey(), serverKeyPair.PublicKey())
 	if err != nil {
