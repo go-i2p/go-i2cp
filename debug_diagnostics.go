@@ -5,9 +5,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// reportBuilder is a helper for constructing diagnostic reports with consistent formatting.
+type reportBuilder struct {
+	buf *strings.Builder
+}
+
+// newReportBuilder creates a new report builder.
+func newReportBuilder() *reportBuilder {
+	return &reportBuilder{
+		buf: &strings.Builder{},
+	}
+}
+
+// Section writes a formatted section to the report with a newline appended.
+func (rb *reportBuilder) Section(format string, args ...interface{}) {
+	fmt.Fprintf(rb.buf, format+"\n", args...)
+}
+
+// Append appends raw content to the report without formatting.
+func (rb *reportBuilder) Append(content string) {
+	rb.buf.WriteString(content)
+}
+
+// String returns the accumulated report as a string.
+func (rb *reportBuilder) String() string {
+	return rb.buf.String()
+}
 
 // SessionState represents the lifecycle state of an I2CP session.
 // This helps diagnose where in the protocol flow issues occur.
@@ -250,66 +278,44 @@ func (sst *SessionStateTracker) DiagnosticReport() string {
 		return "Session state tracking is disabled"
 	}
 
-	report := "=== Session State Diagnostic Report ===\n"
+	rb := newReportBuilder()
+	rb.Section("=== Session State Diagnostic Report ===")
 
 	if len(sst.states) == 0 {
-		report += "No sessions tracked\n"
-		return report
+		rb.Section("No sessions tracked")
+		return rb.String()
 	}
 
 	for sessionID, state := range sst.states {
-		report += formatSessionDiagnostic(sessionID, state)
-		report += formatStateTimestamps(sst, sessionID)
-		report += formatStateHistory(sst, sessionID)
+		rb.Section("\nSession %d: %s", sessionID, state)
+
+		// Add state timestamps
+		if timestamps, exists := sst.stateTimestamps[sessionID]; exists {
+			rb.Section("  State Timeline:")
+			for s, ts := range timestamps {
+				rb.Section("    %s: %v", s, ts.Format(time.RFC3339))
+			}
+		}
+
+		// Add state history
+		if history, exists := sst.stateHistory[sessionID]; exists && len(history) > 0 {
+			rb.Section("  Transition History:")
+			for _, trans := range history {
+				if trans.From == trans.To && trans.From == 0 {
+					rb.Section("    -> %s (%s) at %v",
+						trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
+				} else {
+					rb.Section("    %s -> %s (%s) at %v",
+						trans.From, trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
+				}
+			}
+		}
 	}
 
 	// Add LeaseSet wait info
-	report += "\n" + sst.GetLeaseSetWaitDiagnostics()
+	rb.Append("\n" + sst.GetLeaseSetWaitDiagnostics())
 
-	return report
-}
-
-// formatSessionDiagnostic formats the basic session information for diagnostic report.
-func formatSessionDiagnostic(sessionID uint16, state SessionState) string {
-	return fmt.Sprintf("\nSession %d: %s\n", sessionID, state)
-}
-
-// formatStateTimestamps formats state timestamps for a session in the diagnostic report.
-func formatStateTimestamps(sst *SessionStateTracker, sessionID uint16) string {
-	timestamps, exists := sst.stateTimestamps[sessionID]
-	if !exists {
-		return ""
-	}
-
-	report := "  State Timeline:\n"
-	for s, ts := range timestamps {
-		report += fmt.Sprintf("    %s: %v\n", s, ts.Format(time.RFC3339))
-	}
-	return report
-}
-
-// formatStateHistory formats state transition history for a session in the diagnostic report.
-func formatStateHistory(sst *SessionStateTracker, sessionID uint16) string {
-	history, exists := sst.stateHistory[sessionID]
-	if !exists || len(history) == 0 {
-		return ""
-	}
-
-	report := "  Transition History:\n"
-	for _, trans := range history {
-		report += formatTransition(trans)
-	}
-	return report
-}
-
-// formatTransition formats a single state transition for the diagnostic report.
-func formatTransition(trans StateTransition) string {
-	if trans.From == trans.To && trans.From == 0 {
-		return fmt.Sprintf("    -> %s (%s) at %v\n",
-			trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
-	}
-	return fmt.Sprintf("    %s -> %s (%s) at %v\n",
-		trans.From, trans.To, trans.Reason, trans.Timestamp.Format(time.RFC3339Nano))
+	return rb.String()
 }
 
 // ProtocolDebugger provides enhanced protocol debugging capabilities.
@@ -596,68 +602,49 @@ func (pd *ProtocolDebugger) DiagnosticReport() string {
 		return "Protocol debugging is disabled"
 	}
 
-	report := pd.buildReportHeader()
-	report += pd.buildRecentMessagesSection()
-	report += pd.buildCreateSessionSection()
-	report += pd.buildDisconnectSection()
+	rb := newReportBuilder()
+	rb.Section("=== Protocol Debug Report ===")
+	rb.Section("Dump directory: %s", pd.dumpDir)
+	rb.Section("Messages logged: %d", len(pd.messageLog))
+	rb.Section("")
 
-	return report
-}
-
-// buildReportHeader constructs the header section of the diagnostic report.
-func (pd *ProtocolDebugger) buildReportHeader() string {
-	report := "=== Protocol Debug Report ===\n"
-	report += fmt.Sprintf("Dump directory: %s\n", pd.dumpDir)
-	report += fmt.Sprintf("Messages logged: %d\n\n", len(pd.messageLog))
-	return report
-}
-
-// buildRecentMessagesSection constructs the recent messages summary section.
-func (pd *ProtocolDebugger) buildRecentMessagesSection() string {
-	report := "Recent Messages (last 20):\n"
+	// Recent Messages section
+	rb.Section("Recent Messages (last 20):")
 	start := len(pd.messageLog) - 20
 	if start < 0 {
 		start = 0
 	}
 	for _, msg := range pd.messageLog[start:] {
-		report += fmt.Sprintf(
-			"  [%s] %s %s (%d bytes)\n",
+		rb.Section("  [%s] %s %s (%d bytes)",
 			msg.Timestamp.Format("15:04:05.000"),
 			msg.Direction,
 			msg.TypeName,
 			msg.Size,
 		)
 	}
-	return report
-}
 
-// buildCreateSessionSection constructs the CreateSession dumps section.
-func (pd *ProtocolDebugger) buildCreateSessionSection() string {
-	if len(pd.createSessionDumps) == 0 {
-		return ""
+	// CreateSession Dumps section
+	if len(pd.createSessionDumps) > 0 {
+		rb.Section("\nCreateSession Dumps:")
+		for i, dump := range pd.createSessionDumps {
+			rb.Section("  %d. %v - %d bytes (dest:%d, map:%d, sig:%d)",
+				i+1, dump.Timestamp.Format(time.RFC3339),
+				dump.TotalSize, dump.DestinationSize, dump.MappingSize, dump.SignatureSize)
+			rb.Section("     File: %s", dump.FilePath)
+		}
 	}
-	report := "\nCreateSession Dumps:\n"
-	for i, dump := range pd.createSessionDumps {
-		report += fmt.Sprintf("  %d. %v - %d bytes (dest:%d, map:%d, sig:%d)\n",
-			i+1, dump.Timestamp.Format(time.RFC3339),
-			dump.TotalSize, dump.DestinationSize, dump.MappingSize, dump.SignatureSize)
-		report += fmt.Sprintf("     File: %s\n", dump.FilePath)
-	}
-	return report
-}
 
-// buildDisconnectSection constructs the disconnect information section.
-func (pd *ProtocolDebugger) buildDisconnectSection() string {
-	if pd.disconnectInfo == nil {
-		return ""
+	// Last Disconnect section
+	if pd.disconnectInfo != nil {
+		rb.Section("\nLast Disconnect:")
+		rb.Section("  Time: %v", pd.disconnectInfo.Timestamp.Format(time.RFC3339))
+		rb.Section("  Reason: %s", pd.disconnectInfo.Reason)
+		if len(pd.disconnectInfo.RawBytes) > 0 {
+			rb.Section("  Raw: %x", pd.disconnectInfo.RawBytes)
+		}
 	}
-	report := fmt.Sprintf("\nLast Disconnect:\n")
-	report += fmt.Sprintf("  Time: %v\n", pd.disconnectInfo.Timestamp.Format(time.RFC3339))
-	report += fmt.Sprintf("  Reason: %s\n", pd.disconnectInfo.Reason)
-	if len(pd.disconnectInfo.RawBytes) > 0 {
-		report += fmt.Sprintf("  Raw: %x\n", pd.disconnectInfo.RawBytes)
-	}
-	return report
+
+	return rb.String()
 }
 
 // DebugConfig holds debugging configuration options.
@@ -696,50 +683,37 @@ func (c *Client) EnableDebugging(config *DebugConfig) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	enableMessageStats(c, config.EnableMessageStats)
-	enableStateTracking(c, config.EnableStateTracking)
-	enableProtocolDebug(c, config.EnableProtocolDebug, config.DumpDirectory)
+	// Enable message statistics tracking if requested
+	if config.EnableMessageStats {
+		if c.messageStats == nil {
+			c.messageStats = NewMessageStats()
+		}
+		c.messageStats.Enable()
+	}
+
+	// Enable session state tracking if requested
+	if config.EnableStateTracking {
+		if c.stateTracker == nil {
+			c.stateTracker = NewSessionStateTracker()
+		}
+		c.stateTracker.Enable()
+	}
+
+	// Enable protocol debugging if requested
+	if config.EnableProtocolDebug {
+		if c.protocolDebugger == nil {
+			c.protocolDebugger = NewProtocolDebugger()
+		}
+		if config.DumpDirectory != "" {
+			c.protocolDebugger.SetDumpDir(config.DumpDirectory)
+		}
+		c.protocolDebugger.Enable()
+	}
 
 	Info("I2CP debugging enabled: stats=%v, state=%v, protocol=%v",
 		config.EnableMessageStats, config.EnableStateTracking, config.EnableProtocolDebug)
 
 	return nil
-}
-
-// enableMessageStats enables or prepares message statistics tracking.
-func enableMessageStats(c *Client, enable bool) {
-	if !enable {
-		return
-	}
-	if c.messageStats == nil {
-		c.messageStats = NewMessageStats()
-	}
-	c.messageStats.Enable()
-}
-
-// enableStateTracking enables or prepares session state tracking.
-func enableStateTracking(c *Client, enable bool) {
-	if !enable {
-		return
-	}
-	if c.stateTracker == nil {
-		c.stateTracker = NewSessionStateTracker()
-	}
-	c.stateTracker.Enable()
-}
-
-// enableProtocolDebug enables or prepares protocol debugging with optional dump directory.
-func enableProtocolDebug(c *Client, enable bool, dumpDir string) {
-	if !enable {
-		return
-	}
-	if c.protocolDebugger == nil {
-		c.protocolDebugger = NewProtocolDebugger()
-	}
-	if dumpDir != "" {
-		c.protocolDebugger.SetDumpDir(dumpDir)
-	}
-	c.protocolDebugger.Enable()
 }
 
 // DisableAllDebugging disables all debugging features.

@@ -413,34 +413,3 @@ func TestTcpConnectErrorPaths(t *testing.T) {
 		})
 	}
 }
-
-// TestErrorPathCoverage provides a summary test to ensure all critical paths are covered
-func TestErrorPathCoverage(t *testing.T) {
-	t.Run("Summary", func(t *testing.T) {
-		tests := []struct {
-			function string
-			covered  bool
-		}{
-			{"onMsgPayload", true},
-			{"onMsgStatus", true},
-			{"onMsgSessionStatus", true},
-			{"onMsgReqVariableLease", true},
-			{"onMsgHostReply", true},
-			{"tcp.Connect", true},
-		}
-
-		allCovered := true
-		for _, tt := range tests {
-			if !tt.covered {
-				allCovered = false
-				t.Errorf("Function %s not covered by error path tests", tt.function)
-			} else {
-				t.Logf("✓ Function %s covered by error path tests", tt.function)
-			}
-		}
-
-		if allCovered {
-			t.Log("✓ All 6 fixed functions have comprehensive error path test coverage")
-		}
-	})
-}

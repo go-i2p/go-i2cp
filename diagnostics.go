@@ -168,69 +168,51 @@ func (ms *MessageStats) DiagnosticReport() string {
 		return "Message statistics tracking is disabled. Enable with client.EnableMessageStats()"
 	}
 
+	rb := newReportBuilder()
 	duration := time.Since(ms.startTime)
-	report := fmt.Sprintf("=== I2CP Diagnostic Report (tracking for %v) ===\n\n", duration)
+	rb.Section("=== I2CP Diagnostic Report (tracking for %v) ===\n", duration)
 
-	report += formatCreateSessionDiagnostic(ms)
-	report += formatSessionStatusDiagnostic(ms)
-	report += formatMessageFlowDiagnostic(ms)
-
-	return report
-}
-
-// formatCreateSessionDiagnostic formats diagnostic information about CreateSession messages.
-func formatCreateSessionDiagnostic(ms *MessageStats) string {
+	// CreateSession diagnostic
 	createSent := ms.sent[I2CP_MSG_CREATE_SESSION]
 	if createSent == 0 {
-		return "❌ ISSUE: No CreateSession message sent\n" +
-			"   → CreateSession must be sent before expecting SessionCreated response\n\n"
+		rb.Section("❌ ISSUE: No CreateSession message sent")
+		rb.Section("   → CreateSession must be sent before expecting SessionCreated response\n")
+	} else {
+		rb.Section("✓ CreateSession sent: %d time(s)", createSent)
+		if lastSent, exists := ms.lastSent[I2CP_MSG_CREATE_SESSION]; exists {
+			rb.Section("  Last sent: %v (%v ago)", lastSent.Format(time.RFC3339), time.Since(lastSent))
+		}
+		rb.Section("")
 	}
 
-	report := fmt.Sprintf("✓ CreateSession sent: %d time(s)\n", createSent)
-	if lastSent, exists := ms.lastSent[I2CP_MSG_CREATE_SESSION]; exists {
-		report += fmt.Sprintf("  Last sent: %v (%v ago)\n", lastSent.Format(time.RFC3339), time.Since(lastSent))
-	}
-	report += "\n"
-	return report
-}
-
-// formatSessionStatusDiagnostic formats diagnostic information about SessionStatus messages.
-func formatSessionStatusDiagnostic(ms *MessageStats) string {
-	createSent := ms.sent[I2CP_MSG_CREATE_SESSION]
+	// SessionStatus diagnostic
 	statusReceived := ms.received[I2CP_MSG_SESSION_STATUS]
-
 	if createSent > 0 && statusReceived == 0 {
-		return "❌ ISSUE: SessionStatus response not received\n" +
-			"   Possible causes:\n" +
-			"   1. Router not responding (check router logs)\n" +
-			"   2. ProcessIO not running (must be started before CreateSession)\n" +
-			"   3. Network/connection issue\n" +
-			"   4. Router rejected session (would show in router logs)\n\n"
+		rb.Section("❌ ISSUE: SessionStatus response not received")
+		rb.Section("   Possible causes:")
+		rb.Section("   1. Router not responding (check router logs)")
+		rb.Section("   2. ProcessIO not running (must be started before CreateSession)")
+		rb.Section("   3. Network/connection issue")
+		rb.Section("   4. Router rejected session (would show in router logs)\n")
+	} else if statusReceived > 0 {
+		rb.Section("✓ SessionStatus received: %d time(s)", statusReceived)
+		if lastRecv, exists := ms.lastReceived[I2CP_MSG_SESSION_STATUS]; exists {
+			rb.Section("  Last received: %v (%v ago)", lastRecv.Format(time.RFC3339), time.Since(lastRecv))
+		}
+		rb.Section("")
 	}
 
-	if statusReceived == 0 {
-		return ""
-	}
-
-	report := fmt.Sprintf("✓ SessionStatus received: %d time(s)\n", statusReceived)
-	if lastRecv, exists := ms.lastReceived[I2CP_MSG_SESSION_STATUS]; exists {
-		report += fmt.Sprintf("  Last received: %v (%v ago)\n", lastRecv.Format(time.RFC3339), time.Since(lastRecv))
-	}
-	report += "\n"
-	return report
-}
-
-// formatMessageFlowDiagnostic formats diagnostic information about overall message flow.
-func formatMessageFlowDiagnostic(ms *MessageStats) string {
-	report := fmt.Sprintf("Message Flow:\n")
-	report += fmt.Sprintf("  Sent:     %d messages (%d bytes)\n", ms.totalSent(), ms.bytesSent)
-	report += fmt.Sprintf("  Received: %d messages (%d bytes)\n", ms.totalReceived(), ms.bytesReceived)
+	// Message flow diagnostic
+	rb.Section("Message Flow:")
+	rb.Section("  Sent:     %d messages (%d bytes)", ms.totalSent(), ms.bytesSent)
+	rb.Section("  Received: %d messages (%d bytes)", ms.totalReceived(), ms.bytesReceived)
 
 	if ms.totalSent() > 0 && ms.totalReceived() == 0 {
-		report += "\n❌ WARNING: Messages sent but none received - ProcessIO may not be running\n"
+		rb.Section("")
+		rb.Section("❌ WARNING: Messages sent but none received - ProcessIO may not be running")
 	}
 
-	return report
+	return rb.String()
 }
 
 // totalSent returns the total number of sent messages.
