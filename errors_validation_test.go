@@ -7,13 +7,43 @@ import (
 	"testing"
 )
 
+// streamHandlerTest is a table-driven test case for a Client message handler
+// that operates on a raw Stream. setupClient is optional: when non-nil, it
+// customizes the Client returned by the newClient factory before the handler runs.
+type streamHandlerTest struct {
+	name        string
+	setupStream func() *Stream
+	setupClient func(*Client)
+	description string
+}
+
+// newTestClient creates a Client with the given sessions map for message-handler
+// error-path tests.
+func newTestClient(sessions map[uint16]*Session) *Client {
+	return &Client{sessions: sessions}
+}
+
+// runStreamHandlerTests runs each streamHandlerTest as a subtest: it builds a
+// fresh Client via newClient, applies the test case's optional setupClient,
+// builds the input stream, and invokes handler.
+func runStreamHandlerTests(t *testing.T, tests []streamHandlerTest, newClient func() *Client, handler func(*Client, *Stream)) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newClient()
+			if tt.setupClient != nil {
+				tt.setupClient(client)
+			}
+			stream := tt.setupStream()
+			handler(client, stream)
+			t.Logf("Test scenario: %s", tt.description)
+		})
+	}
+}
+
 // TestOnMsgPayloadErrorPaths tests error handling in onMsgPayload message handler
 func TestOnMsgPayloadErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupStream func() *Stream
-		description string
-	}{
+	tests := []streamHandlerTest{
 		{
 			name: "empty stream - sessionId read fails",
 			setupStream: func() *Stream {
@@ -73,37 +103,18 @@ func TestOnMsgPayloadErrorPaths(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create client with minimal setup
-			client := &Client{
-				sessions: make(map[uint16]*Session),
-			}
-
-			// Create a session for sessionId 1
-			sess := &Session{
-				id:        1,
-				callbacks: &SessionCallbacks{},
-			}
-			client.sessions[1] = sess
-
-			stream := tt.setupStream()
-
-			// Call the handler - it logs errors internally
-			client.onMsgPayload(stream)
-
-			t.Logf("Test scenario: %s", tt.description)
-		})
-	}
+	runStreamHandlerTests(t, tests, func() *Client {
+		client := newTestClient(make(map[uint16]*Session))
+		client.sessions[1] = &Session{id: 1, callbacks: &SessionCallbacks{}}
+		return client
+	}, func(c *Client, stream *Stream) {
+		c.onMsgPayload(stream)
+	})
 }
 
 // TestOnMsgStatusErrorPaths tests error handling in onMsgStatus message handler
 func TestOnMsgStatusErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupStream func() *Stream
-		description string
-	}{
+	tests := []streamHandlerTest{
 		{
 			name: "empty stream",
 			setupStream: func() *Stream {
@@ -147,34 +158,18 @@ func TestOnMsgStatusErrorPaths(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{
-				sessions: make(map[uint16]*Session),
-			}
-
-			// Create a session for sessionId 1
-			sess := &Session{
-				id:        1,
-				callbacks: &SessionCallbacks{},
-			}
-			client.sessions[1] = sess
-
-			stream := tt.setupStream()
-			client.onMsgStatus(stream)
-
-			t.Logf("Test scenario: %s", tt.description)
-		})
-	}
+	runStreamHandlerTests(t, tests, func() *Client {
+		client := newTestClient(make(map[uint16]*Session))
+		client.sessions[1] = &Session{id: 1, callbacks: &SessionCallbacks{}}
+		return client
+	}, func(c *Client, stream *Stream) {
+		c.onMsgStatus(stream)
+	})
 }
 
 // TestOnMsgSessionStatusErrorPaths tests error handling in onMsgSessionStatus handler
 func TestOnMsgSessionStatusErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupStream func() *Stream
-		description string
-	}{
+	tests := []streamHandlerTest{
 		{
 			name: "empty stream",
 			setupStream: func() *Stream {
@@ -213,27 +208,16 @@ func TestOnMsgSessionStatusErrorPaths(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{
-				sessions: make(map[uint16]*Session),
-			}
-
-			stream := tt.setupStream()
-			client.onMsgSessionStatus(stream)
-
-			t.Logf("Test scenario: %s", tt.description)
-		})
-	}
+	runStreamHandlerTests(t, tests, func() *Client {
+		return newTestClient(make(map[uint16]*Session))
+	}, func(c *Client, stream *Stream) {
+		c.onMsgSessionStatus(stream)
+	})
 }
 
 // TestOnMsgReqVariableLeaseErrorPaths tests error handling in onMsgReqVariableLease
 func TestOnMsgReqVariableLeaseErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupStream func() *Stream
-		description string
-	}{
+	tests := []streamHandlerTest{
 		{
 			name: "empty stream",
 			setupStream: func() *Stream {
@@ -276,28 +260,16 @@ func TestOnMsgReqVariableLeaseErrorPaths(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{
-				sessions: make(map[uint16]*Session),
-			}
-
-			stream := tt.setupStream()
-			client.onMsgReqVariableLease(stream)
-
-			t.Logf("Test scenario: %s", tt.description)
-		})
-	}
+	runStreamHandlerTests(t, tests, func() *Client {
+		return newTestClient(make(map[uint16]*Session))
+	}, func(c *Client, stream *Stream) {
+		c.onMsgReqVariableLease(stream)
+	})
 }
 
 // TestOnMsgHostReplyErrorPaths tests error handling in onMsgHostReply handler
 func TestOnMsgHostReplyErrorPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupStream func() *Stream
-		setupClient func(*Client)
-		description string
-	}{
+	tests := []streamHandlerTest{
 		{
 			name: "empty stream",
 			setupStream: func() *Stream {
@@ -370,21 +342,14 @@ func TestOnMsgHostReplyErrorPaths(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{
-				sessions:  make(map[uint16]*Session),
-				lookupReq: make(map[uint32]LookupEntry),
-				crypto:    NewCrypto(),
-			}
-
-			tt.setupClient(client)
-			stream := tt.setupStream()
-			client.onMsgHostReply(stream)
-
-			t.Logf("Test scenario: %s", tt.description)
-		})
-	}
+	runStreamHandlerTests(t, tests, func() *Client {
+		client := newTestClient(make(map[uint16]*Session))
+		client.lookupReq = make(map[uint32]LookupEntry)
+		client.crypto = NewCrypto()
+		return client
+	}, func(c *Client, stream *Stream) {
+		c.onMsgHostReply(stream)
+	})
 }
 
 // TestTcpConnectErrorPaths tests error handling in tcp.Connect function

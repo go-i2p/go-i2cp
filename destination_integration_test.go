@@ -6,6 +6,32 @@ import (
 	"github.com/go-i2p/common/base32"
 )
 
+// newTestDestReplyClient creates a Client with the maps required for DestReply
+// message-handling tests (sessions/lookup/lookupReq/crypto), plus a Session
+// registered under id 1 and wired to the given callbacks.
+func newTestDestReplyClient(callbacks SessionCallbacks) (*Client, *Session) {
+	client := &Client{
+		sessions:  make(map[uint16]*Session),
+		lookup:    make(map[string]uint32),
+		lookupReq: make(map[uint32]LookupEntry),
+		crypto:    NewCrypto(),
+	}
+	session := NewSession(client, callbacks)
+	session.id = 1
+	client.sessions[1] = session
+	return client, session
+}
+
+// writeDestToStream serializes dest into a new Stream, failing the test on error.
+func writeDestToStream(t *testing.T, dest *Destination) *Stream {
+	t.Helper()
+	stream := NewStream(make([]byte, 0, 4096))
+	if err := dest.WriteToMessage(stream); err != nil {
+		t.Fatalf("Failed to write destination to stream: %v", err)
+	}
+	return stream
+}
+
 // TestOnMsgDestReply_SuccessfulLookup tests the happy path where a destination
 // is successfully resolved and dispatched to the session callback.
 //
@@ -14,14 +40,6 @@ import (
 //   - If the hash was not found, the message contains only the 32-byte hash
 //   - This message is deprecated in favor of HostReply since 0.9.11
 func TestOnMsgDestReply_SuccessfulLookup(t *testing.T) {
-	// Create client with required maps
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	// Track callback invocation
 	var callbackInvoked bool
 	var receivedRequestId uint32
@@ -37,10 +55,7 @@ func TestOnMsgDestReply_SuccessfulLookup(t *testing.T) {
 		},
 	}
 
-	// Create session
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	// Create a test destination
 	testDest, err := NewDestination(client.crypto)
@@ -49,10 +64,7 @@ func TestOnMsgDestReply_SuccessfulLookup(t *testing.T) {
 	}
 
 	// Write destination to stream (simulating router's DestReply)
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination to stream: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	// Setup lookup tracking - use the destination's b32 address
 	requestId := uint32(12345)
@@ -97,13 +109,6 @@ func TestOnMsgDestReply_SuccessfulLookup(t *testing.T) {
 // TestOnMsgDestReply_FailedLookup tests the case where a destination lookup fails.
 // When the destination cannot be found, the router sends only the 32-byte hash.
 func TestOnMsgDestReply_FailedLookup(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	var callbackInvoked bool
 	var receivedDest *Destination
 
@@ -114,9 +119,7 @@ func TestOnMsgDestReply_FailedLookup(t *testing.T) {
 		},
 	}
 
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	// Create a 32-byte hash (simulating failed lookup response)
 	hash := make([]byte, 32)
@@ -163,12 +166,7 @@ func TestOnMsgDestReply_FailedLookup(t *testing.T) {
 // TestOnMsgDestReply_NoPendingLookup tests the case where a DestReply
 // arrives but there's no pending lookup for the address.
 func TestOnMsgDestReply_NoPendingLookup(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
+	client, _ := newTestDestReplyClient(SessionCallbacks{})
 
 	// Create test destination (destination exists but no pending lookup)
 	testDest, err := NewDestination(client.crypto)
@@ -176,10 +174,7 @@ func TestOnMsgDestReply_NoPendingLookup(t *testing.T) {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	// Don't set up any lookup entries - simulate unsolicited reply
 
@@ -193,22 +188,14 @@ func TestOnMsgDestReply_NoPendingLookup(t *testing.T) {
 // TestOnMsgDestReply_NoLookupEntry tests the case where the lookup map
 // has the address but lookupReq is missing the request ID.
 func TestOnMsgDestReply_NoLookupEntry(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
+	client, _ := newTestDestReplyClient(SessionCallbacks{})
 
 	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	// Setup partial lookup - address exists but no matching LookupEntry
 	requestId := uint32(11111)
@@ -227,22 +214,14 @@ func TestOnMsgDestReply_NoLookupEntry(t *testing.T) {
 // TestOnMsgDestReply_NilSession tests the case where the LookupEntry
 // exists but has a nil session pointer.
 func TestOnMsgDestReply_NilSession(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
+	client, _ := newTestDestReplyClient(SessionCallbacks{})
 
 	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	// Setup lookup with nil session
 	requestId := uint32(22222)
@@ -281,13 +260,6 @@ func TestOnMsgDestReply_MalformedDestination(t *testing.T) {
 // TestOnMsgDestReply_ExactHash32Bytes tests the exact boundary case
 // of a 32-byte message (the hash-only response).
 func TestOnMsgDestReply_ExactHash32Bytes(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	var callbackInvoked bool
 	var receivedDest *Destination
 
@@ -298,9 +270,7 @@ func TestOnMsgDestReply_ExactHash32Bytes(t *testing.T) {
 		},
 	}
 
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	// Exactly 32 bytes - hash only response
 	hash := make([]byte, 32)
@@ -336,13 +306,6 @@ func TestOnMsgDestReply_ExactHash32Bytes(t *testing.T) {
 // TestOnMsgDestReply_ViaOnMessage tests that the DestReply message is properly
 // routed through the main onMessage dispatcher.
 func TestOnMsgDestReply_ViaOnMessage(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	var callbackInvoked bool
 
 	callbacks := SessionCallbacks{
@@ -351,19 +314,14 @@ func TestOnMsgDestReply_ViaOnMessage(t *testing.T) {
 		},
 	}
 
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	requestId := uint32(44444)
 	client.lookup[testDest.b32] = requestId
@@ -383,13 +341,6 @@ func TestOnMsgDestReply_ViaOnMessage(t *testing.T) {
 // TestOnMsgDestReply_MultipleConsecutiveLookups tests that multiple
 // lookups can be processed correctly in sequence.
 func TestOnMsgDestReply_MultipleConsecutiveLookups(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	var callbackCount int
 	var lastAddress string
 
@@ -400,9 +351,7 @@ func TestOnMsgDestReply_MultipleConsecutiveLookups(t *testing.T) {
 		},
 	}
 
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	// Process 3 consecutive lookups
 	for i := 0; i < 3; i++ {
@@ -411,10 +360,7 @@ func TestOnMsgDestReply_MultipleConsecutiveLookups(t *testing.T) {
 			t.Fatalf("Failed to create test destination %d: %v", i, err)
 		}
 
-		stream := NewStream(make([]byte, 0, 4096))
-		if err := testDest.WriteToMessage(stream); err != nil {
-			t.Fatalf("Failed to write destination %d: %v", i, err)
-		}
+		stream := writeDestToStream(t, testDest)
 
 		requestId := uint32(55555 + i)
 		client.lookup[testDest.b32] = requestId
@@ -444,13 +390,6 @@ func TestOnMsgDestReply_MultipleConsecutiveLookups(t *testing.T) {
 // TestOnMsgDestReply_DestinationB32Match tests that the destination's b32 address
 // correctly matches the lookup key when processing a successful reply.
 func TestOnMsgDestReply_DestinationB32Match(t *testing.T) {
-	client := &Client{
-		sessions:  make(map[uint16]*Session),
-		lookup:    make(map[string]uint32),
-		lookupReq: make(map[uint32]LookupEntry),
-		crypto:    NewCrypto(),
-	}
-
 	var receivedB32 string
 
 	callbacks := SessionCallbacks{
@@ -461,19 +400,14 @@ func TestOnMsgDestReply_DestinationB32Match(t *testing.T) {
 		},
 	}
 
-	session := NewSession(client, callbacks)
-	session.id = 1
-	client.sessions[1] = session
+	client, session := newTestDestReplyClient(callbacks)
 
 	testDest, err := NewDestination(client.crypto)
 	if err != nil {
 		t.Fatalf("Failed to create test destination: %v", err)
 	}
 
-	stream := NewStream(make([]byte, 0, 4096))
-	if err := testDest.WriteToMessage(stream); err != nil {
-		t.Fatalf("Failed to write destination: %v", err)
-	}
+	stream := writeDestToStream(t, testDest)
 
 	requestId := uint32(66666)
 	client.lookup[testDest.b32] = requestId
