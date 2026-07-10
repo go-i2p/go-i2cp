@@ -41,7 +41,7 @@ func buildLeaseSetData(leaseSet *Stream, dest *Destination, sgk *SignatureKeyPai
 	return nil
 }
 
-func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) {
+func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels uint8, leases []*Lease, queue bool) error {
 	Debug("Sending CreateLeaseSetMessage")
 
 	// Thread-safe: protect messageStream access
@@ -56,18 +56,20 @@ func (c *Client) msgCreateLeaseSet(sessionId uint16, session *Session, tunnels u
 
 	if err := buildLeaseSetData(leaseSet, dest, sgk, tunnels, leases); err != nil {
 		Error("%v", err)
-		return
+		return err
 	}
 
 	if err := sgk.ed25519KeyPair.SignStream(leaseSet); err != nil {
 		Error("Failed to sign CreateLeaseSet: %v", err)
-		return
+		return err
 	}
 
 	c.messageStream.Write(leaseSet.Bytes())
 	if err := c.sendMessage(I2CP_MSG_CREATE_LEASE_SET, c.messageStream, queue); err != nil {
 		Error("Error while sending CreateLeaseSet")
+		return err
 	}
+	return nil
 }
 
 // msgCreateLeaseSet2 sends CreateLeaseSet2Message (type 41) for modern LeaseSet creation

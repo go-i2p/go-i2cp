@@ -34,6 +34,27 @@ func setupBlindingTestKeys(t *testing.T) (publicKey [32]byte, privateKey [64]byt
 	return getTestKeys(keyPair)
 }
 
+// newTestBlindingClient creates a minimal *Client with a fresh Crypto instance and
+// an initialized sessions map, suitable for blinding-related unit tests that only
+// need a Client (e.g. to construct a session later or pass to a handler).
+func newTestBlindingClient(t *testing.T) *Client {
+	t.Helper()
+	return &Client{
+		lock:     sync.Mutex{},
+		sessions: make(map[uint16]*Session),
+		crypto:   NewCrypto(),
+	}
+}
+
+// newTestClientAndSession creates a *Client (via newTestBlindingClient) and a
+// *Session bound to it with the given callbacks, for blinding-related unit tests.
+func newTestClientAndSession(t *testing.T, callbacks SessionCallbacks) (*Client, *Session) {
+	t.Helper()
+	client := newTestBlindingClient(t)
+	session := newSession(client, callbacks)
+	return client, session
+}
+
 // TestDeriveBlindingFactor tests the basic blinding factor derivation.
 func TestDeriveBlindingFactor(t *testing.T) {
 	secret := make([]byte, 32)
@@ -336,13 +357,7 @@ func TestFormatDateForBlinding(t *testing.T) {
 
 // TestSessionStoreBlindingInfo tests storing blinding info in a session.
 func TestSessionStoreBlindingInfo(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{})
+	_, session := newTestClientAndSession(t, SessionCallbacks{})
 
 	// Store blinding info
 	params := []byte{0x01, 0x02, 0x03, 0x04}
@@ -369,13 +384,7 @@ func TestSessionStoreBlindingInfo(t *testing.T) {
 
 // TestSessionStoreBlindingInfo_NilParams tests storing nil params.
 func TestSessionStoreBlindingInfo_NilParams(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{})
+	_, session := newTestClientAndSession(t, SessionCallbacks{})
 
 	// Store with non-nil params first
 	session.StoreBlindingInfo(1, 0x0001, []byte{0x01, 0x02})
@@ -481,13 +490,7 @@ func BenchmarkDeriveBlindingKeys(b *testing.B) {
 // TestSession_BlindingGettersSetters tests the blinding field getter/setter methods
 // per I2CP specification 0.9.43+
 func TestSession_BlindingGettersSetters(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{})
+	_, session := newTestClientAndSession(t, SessionCallbacks{})
 
 	// Test initial state (blinding disabled)
 	if session.BlindingScheme() != 0 {
@@ -566,13 +569,7 @@ func TestSession_BlindingGettersSetters(t *testing.T) {
 // TestSession_BlindingConcurrency tests thread-safety of blinding operations
 // per I2CP specification 0.9.43+
 func TestSession_BlindingConcurrency(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{})
+	_, session := newTestClientAndSession(t, SessionCallbacks{})
 
 	var wg sync.WaitGroup
 	iterations := 100
@@ -701,13 +698,7 @@ func TestDispatchBlindingInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			crypto := NewCrypto()
-			client := &Client{
-				lock:     sync.Mutex{},
-				sessions: make(map[uint16]*Session),
-				crypto:   crypto,
-			}
-			session := newSession(client, SessionCallbacks{})
+			_, session := newTestClientAndSession(t, SessionCallbacks{})
 			tt.setupCallback(session)
 
 			session.dispatchBlindingInfo(tt.blindingScheme, tt.blindingFlags, tt.blindingParams)
@@ -721,13 +712,7 @@ func TestDispatchBlindingInfo(t *testing.T) {
 // TestDispatchBlindingInfo_CallbackPanic tests panic recovery in blinding callback
 // per I2CP specification 0.9.43+
 func TestDispatchBlindingInfo_CallbackPanic(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
-	session := newSession(client, SessionCallbacks{
+	_, session := newTestClientAndSession(t, SessionCallbacks{
 		OnBlindingInfo: func(session *Session, scheme, flags uint16, params []byte) {
 			panic("intentional test panic")
 		},
@@ -745,12 +730,7 @@ func TestDispatchBlindingInfo_CallbackPanic(t *testing.T) {
 // TestDispatchBlindingInfo_AsyncCallback tests asynchronous callback execution
 // per I2CP specification 0.9.43+
 func TestDispatchBlindingInfo_AsyncCallback(t *testing.T) {
-	crypto := NewCrypto()
-	client := &Client{
-		lock:     sync.Mutex{},
-		sessions: make(map[uint16]*Session),
-		crypto:   crypto,
-	}
+	client := newTestBlindingClient(t)
 
 	callbackCalled := make(chan bool, 1)
 	session := newSession(client, SessionCallbacks{

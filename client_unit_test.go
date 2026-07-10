@@ -480,8 +480,12 @@ func TestMsgGetDate_UsernamePasswordMappingContent(t *testing.T) {
 
 // TestTLSConfigurationDefaults verifies that TLS configuration properties
 // are correctly initialized with secure defaults per PLAN.md Phase 1.1.1
-func TestTLSConfigurationDefaults(t *testing.T) {
-	client := NewClient(nil)
+// assertDefaultTLSProperties verifies that a freshly created Client has secure,
+// backward-compatible TLS defaults: TLS disabled, no cert/key/CA files configured,
+// and insecure mode disabled. Shared by TestTLSConfigurationDefaults,
+// TestSecureDefaults, and TestClient_TLSDefaultValues.
+func assertDefaultTLSProperties(t *testing.T, client *Client) {
+	t.Helper()
 
 	tests := []struct {
 		name          string
@@ -527,6 +531,10 @@ func TestTLSConfigurationDefaults(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTLSConfigurationDefaults(t *testing.T) {
+	assertDefaultTLSProperties(t, NewClient(nil))
 }
 
 // TestSetTLSProperties verifies that TLS properties can be set at runtime
@@ -669,33 +677,7 @@ func TestTLSPropertyPropagationToTCP(t *testing.T) {
 // TestSecureDefaults ensures security-critical defaults are correct
 // per I2CP security requirements
 func TestSecureDefaults(t *testing.T) {
-	client := NewClient(nil)
-
-	t.Run("TLS disabled by default for backward compatibility", func(t *testing.T) {
-		if client.properties["i2cp.SSL"] != "false" {
-			t.Error("TLS should be disabled by default to maintain backward compatibility")
-		}
-	})
-
-	t.Run("Insecure mode disabled by default", func(t *testing.T) {
-		if client.properties["i2cp.SSL.insecure"] != "false" {
-			t.Error("Insecure mode must be disabled by default for security")
-		}
-	})
-
-	t.Run("No default certificate files for security", func(t *testing.T) {
-		// Certificate files should be empty by default to prevent
-		// accidental use of hardcoded/embedded certificates
-		if client.properties["i2cp.SSL.certFile"] != "" {
-			t.Error("Default cert file should be empty")
-		}
-		if client.properties["i2cp.SSL.keyFile"] != "" {
-			t.Error("Default key file should be empty")
-		}
-		if client.properties["i2cp.SSL.caFile"] != "" {
-			t.Error("Default CA file should be empty")
-		}
-	})
+	assertDefaultTLSProperties(t, NewClient(nil))
 }
 
 // --- merged from client_message_error_test.go ---

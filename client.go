@@ -540,7 +540,7 @@ func (c *Client) getAuthenticationMethod() uint8 {
 //
 // NOTE: Per-client DH/PSK (methods 3-4) are NOT session auth methods.
 // They are for encrypted LeaseSet access via BlindingInfoMessage.
-func (c *Client) msgGetDate(queue bool) {
+func (c *Client) msgGetDate(queue bool) error {
 	Debug("Sending GetDateMessage")
 
 	if err := c.sendSimpleMessage(I2CP_MSG_GET_DATE, "GetDateMessage", func(stream *Stream) error {
@@ -549,7 +549,9 @@ func (c *Client) msgGetDate(queue bool) {
 		return nil
 	}, queue); err != nil {
 		Error("Error while sending GetDateMessage")
+		return err
 	}
+	return nil
 }
 
 // writeAuthenticationMapping writes the authentication mapping to the message stream.
@@ -1002,14 +1004,16 @@ func (session *Session) SendBlindingInfo(info *BlindingInfo) error {
 	return session.client.msgBlindingInfo(session, info, false)
 }
 
-func (c *Client) msgGetBandwidthLimits(queue bool) {
+func (c *Client) msgGetBandwidthLimits(queue bool) error {
 	Debug("Sending GetBandwidthLimitsMessage.")
 
 	if err := c.sendSimpleMessage(I2CP_MSG_GET_BANDWIDTH_LIMITS, "GetBandwidthLimitsMessage", func(stream *Stream) error {
 		return nil
 	}, queue); err != nil {
 		Error("Error while sending GetBandwidthLimitsMessage")
+		return err
 	}
+	return nil
 }
 
 func (c *Client) msgDestroySession(sess *Session, sessionID uint16, isPrimary, queue, callerHoldsLock bool) error {
@@ -1727,16 +1731,25 @@ func (c *Client) SetMetrics(metrics MetricsCollector) {
 	}
 }
 
-// GetMetrics returns the current metrics collector, or nil if disabled.
-func (c *Client) GetMetrics() MetricsCollector {
-	// Return nil if not initialized
+// withInitialized returns zero when the client has not been properly initialized
+// (via ensureInitialized); otherwise it acquires c.lock and returns get(c). This
+// centralizes the "not-initialized => zero value" guard shared by simple exported
+// accessors that read a single field under c.lock.
+func withInitialized[T any](c *Client, zero T, get func(*Client) T) T {
 	if err := c.ensureInitialized(); err != nil {
-		return nil
+		return zero
 	}
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	return c.metrics
+	return get(c)
+}
+
+// GetMetrics returns the current metrics collector, or nil if disabled.
+func (c *Client) GetMetrics() MetricsCollector {
+	return withInitialized(c, MetricsCollector(nil), func(c *Client) MetricsCollector {
+		return c.metrics
+	})
 }
 
 // GetCircuitBreakerState returns the current state of the circuit breaker.
@@ -1752,19 +1765,12 @@ func (c *Client) GetMetrics() MetricsCollector {
 //	    time.Sleep(30 * time.Second)
 //	}
 func (c *Client) GetCircuitBreakerState() CircuitState {
-	// Return closed state if not initialized or circuit breaker disabled
-	if err := c.ensureInitialized(); err != nil {
-		return CircuitClosed
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	if c.circuitBreaker == nil {
-		return CircuitClosed
-	}
-
-	return c.circuitBreaker.State()
+	return withInitialized(c, CircuitClosed, func(c *Client) CircuitState {
+		if c.circuitBreaker == nil {
+			return CircuitClosed
+		}
+		return c.circuitBreaker.State()
+	})
 }
 
 // ResetCircuitBreaker manually resets the circuit breaker to closed state.
@@ -1806,14 +1812,9 @@ func (c *Client) ResetCircuitBreaker() error {
 //	version := client.RouterVersion()
 //	fmt.Printf("Router version: %d.%d.%d\n", version.major, version.minor, version.micro)
 func (c *Client) RouterVersion() Version {
-	// Return zero-value if not initialized
-	if err := c.ensureInitialized(); err != nil {
-		return Version{}
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.router.version
+	return withInitialized(c, Version{}, func(c *Client) Version {
+		return c.router.version
+	})
 }
 
 // SupportsVersion returns true if the connected router version is at least minVersion.
@@ -1839,13 +1840,9 @@ func (c *Client) RouterVersion() Version {
 //	    return errors.New("router does not support blinding (requires 0.9.43+)")
 //	}
 func (c *Client) SupportsVersion(minVersion Version) bool {
-	if err := c.ensureInitialized(); err != nil {
-		return false
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.router.version.AtLeast(minVersion)
+	return withInitialized(c, false, func(c *Client) bool {
+		return c.router.version.AtLeast(minVersion)
+	})
 }
 
 // RouterCapabilities returns the router's capability flags as a bitmask.
@@ -1866,14 +1863,9 @@ func (c *Client) SupportsVersion(minVersion Version) bool {
 //	    fmt.Println("Router supports hostname lookups")
 //	}
 func (c *Client) RouterCapabilities() uint32 {
-	// Return 0 if not initialized
-	if err := c.ensureInitialized(); err != nil {
-		return 0
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.router.capabilities
+	return withInitialized(c, uint32(0), func(c *Client) uint32 {
+		return c.router.capabilities
+	})
 }
 
 // RouterDate returns the router's timestamp in I2P time format (milliseconds since epoch).
@@ -1891,14 +1883,9 @@ func (c *Client) RouterCapabilities() uint32 {
 //	routerTime := time.Unix(int64(date/1000), int64((date%1000)*1000000))
 //	fmt.Printf("Router time: %v\n", routerTime)
 func (c *Client) RouterDate() uint64 {
-	// Return 0 if not initialized
-	if err := c.ensureInitialized(); err != nil {
-		return 0
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.router.date
+	return withInitialized(c, uint64(0), func(c *Client) uint64 {
+		return c.router.date
+	})
 }
 
 // SupportsHostLookup returns whether the router supports hostname resolution.
@@ -1917,14 +1904,9 @@ func (c *Client) RouterDate() uint64 {
 //	}
 //	client.DestinationLookup(ctx, session, "example.i2p")
 func (c *Client) SupportsHostLookup() bool {
-	// Return false if not initialized
-	if err := c.ensureInitialized(); err != nil {
-		return false
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+	return withInitialized(c, false, func(c *Client) bool {
+		return (c.router.capabilities & ROUTER_CAN_HOST_LOOKUP) == ROUTER_CAN_HOST_LOOKUP
+	})
 }
 
 // SupportsMultiSession returns whether the router supports multi-session contexts.
@@ -1947,17 +1929,11 @@ func (c *Client) SupportsHostLookup() bool {
 //	}
 //	// Safe to create subsessions
 func (c *Client) SupportsMultiSession() bool {
-	// Return false if not initialized
-	if err := c.ensureInitialized(); err != nil {
-		return false
-	}
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	// Multi-session support added in I2CP 0.9.21
-	requiredVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
-	return c.router.version.compare(requiredVersion) >= 0
+	return withInitialized(c, false, func(c *Client) bool {
+		// Multi-session support added in I2CP 0.9.21
+		requiredVersion := Version{major: 0, minor: 9, micro: 21, qualifier: 0}
+		return c.router.version.compare(requiredVersion) >= 0
+	})
 }
 
 // trackError records an error in metrics if enabled.

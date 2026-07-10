@@ -135,7 +135,9 @@ func (c *Client) performProtocolHandshake(ctx context.Context) error {
 	Debug("Sending protocol byte message")
 
 	// Send GetDate message
-	c.msgGetDate(false)
+	if err := c.msgGetDate(false); err != nil {
+		return fmt.Errorf("failed to send GetDateMessage: %w", err)
+	}
 
 	// Receive SetDate response with context checking
 	return c.receiveSetDateWithContext(ctx)

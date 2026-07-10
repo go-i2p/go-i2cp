@@ -8,7 +8,7 @@ import (
 	"github.com/go-i2p/common/base32"
 )
 
-func (c *Client) msgDestLookup(hash []byte, queue bool) {
+func (c *Client) msgDestLookup(hash []byte, queue bool) error {
 	Debug("Sending DestLookupMessage.")
 
 	if err := c.sendSimpleMessage(I2CP_MSG_DEST_LOOKUP, "DestLookupMessage", func(stream *Stream) error {
@@ -16,7 +16,9 @@ func (c *Client) msgDestLookup(hash []byte, queue bool) {
 		return nil
 	}, queue); err != nil {
 		Error("Error while sending DestLookupMessage.")
+		return err
 	}
+	return nil
 }
 
 func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uint8, data []byte, queue bool) error {
@@ -122,8 +124,7 @@ func (c *Client) executeLookupRequest(session *Session, requestId uint32, addres
 	c.lock.Lock()
 	c.lookup[address] = requestId
 	c.lock.Unlock()
-	c.msgDestLookup(hashStream.Bytes(), true)
-	return nil
+	return c.msgDestLookup(hashStream.Bytes(), true)
 }
 
 // validateLookupAddress checks if router supports the address format.

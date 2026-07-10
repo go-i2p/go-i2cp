@@ -144,25 +144,7 @@ func TestClient_TLSPropertyPropagation(t *testing.T) {
 
 // TestClient_TLSDefaultValues tests default TLS configuration values
 func TestClient_TLSDefaultValues(t *testing.T) {
-	client := NewClient(nil)
-
-	tests := []struct {
-		property      string
-		expectedValue string
-	}{
-		{"i2cp.SSL", "false"},
-		{"i2cp.SSL.certFile", ""},
-		{"i2cp.SSL.keyFile", ""},
-		{"i2cp.SSL.caFile", ""},
-		{"i2cp.SSL.insecure", "false"},
-	}
-
-	for _, tt := range tests {
-		if client.properties[tt.property] != tt.expectedValue {
-			t.Errorf("Default property %s = %q, want %q",
-				tt.property, client.properties[tt.property], tt.expectedValue)
-		}
-	}
+	assertDefaultTLSProperties(t, NewClient(nil))
 }
 
 // TestClient_MultipleTLSPropertyChanges tests changing TLS configuration multiple times
