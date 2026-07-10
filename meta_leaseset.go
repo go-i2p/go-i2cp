@@ -55,7 +55,7 @@ func (ml *MetaLease) Type() uint8 {
 
 // SetType sets the LeaseSet type in the flags field.
 func (ml *MetaLease) SetType(leaseSetType uint8) {
-	ml.Flags = (ml.Flags & 0xFFFFF0) | uint32(leaseSetType&0x0F)
+	ml.Flags = (ml.Flags &^ 0x0F) | uint32(leaseSetType&0x0F)
 }
 
 // WriteToStream writes the MetaLease to an I2CP stream in the spec format.
