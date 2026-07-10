@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -466,10 +467,10 @@ func TestMsgGetDate_UsernamePasswordMappingContent(t *testing.T) {
 
 	// Verify the mapping contains expected keys
 	mappingContent := string(mappingBytes[2:])
-	if !containsSubstring(mappingContent, "i2cp.password") {
+	if !strings.Contains(mappingContent, "i2cp.password") {
 		t.Error("Mapping should contain 'i2cp.password' key")
 	}
-	if !containsSubstring(mappingContent, "i2cp.username") {
+	if !strings.Contains(mappingContent, "i2cp.username") {
 		t.Error("Mapping should contain 'i2cp.username' key")
 	}
 

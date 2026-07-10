@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,7 +69,7 @@ func TestOfflineSignature_SetOfflineSignature(t *testing.T) {
 			}
 
 			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !containsSubstring(err.Error(), tt.errContains) {
+				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("SetOfflineSignature() error = %v, want error containing %q", err, tt.errContains)
 				}
 				return
@@ -269,7 +270,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 			}
 
 			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !containsSubstring(err.Error(), tt.errContains) {
+				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("ValidateOfflineSignature() error = %v, want error containing %q", err, tt.errContains)
 				}
 			}
@@ -461,7 +462,7 @@ func TestSessionConfigValidateTimestamp(t *testing.T) {
 				if err == nil {
 					t.Errorf("ValidateTimestamp() expected error containing %q, got nil", tt.errMsg)
 				} else if tt.errMsg != "" {
-					if !containsSubstring(err.Error(), tt.errMsg) {
+					if !strings.Contains(err.Error(), tt.errMsg) {
 						t.Errorf("ValidateTimestamp() error = %v, want error containing %q", err, tt.errMsg)
 					}
 				}

@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -215,7 +216,7 @@ func TestMsgBlindingInfo_Validation(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tt.errorSubstr)
-				} else if tt.errorSubstr != "" && !containsSubstring(err.Error(), tt.errorSubstr) {
+				} else if tt.errorSubstr != "" && !strings.Contains(err.Error(), tt.errorSubstr) {
 					t.Errorf("expected error containing %q, got %q", tt.errorSubstr, err.Error())
 				}
 			} else {

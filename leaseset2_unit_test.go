@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,10 +337,10 @@ func TestLeaseSet2_String(t *testing.T) {
 	}
 
 	// Check that string contains expected fields
-	if !containsSubstring(str, "encrypted") {
+	if !strings.Contains(str, "encrypted") {
 		t.Error("String() should contain 'encrypted' for encrypted LeaseSet")
 	}
-	if !containsSubstring(str, "leases=1") {
+	if !strings.Contains(str, "leases=1") {
 		t.Error("String() should contain lease count")
 	}
 }
@@ -430,7 +431,7 @@ func TestOfflineSignature_String(t *testing.T) {
 		t.Error("String() returned empty string")
 	}
 
-	if !containsSubstring(str, "sigType=7") {
+	if !strings.Contains(str, "sigType=7") {
 		t.Error("String() should contain signing key type")
 	}
 }

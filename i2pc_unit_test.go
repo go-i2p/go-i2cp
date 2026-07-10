@@ -133,7 +133,7 @@ func TestReadPayloadWithGzipHeader_InvalidMagic(t *testing.T) {
 		t.Error("Expected error for invalid gzip magic, got nil")
 	}
 
-	if !containsSubstring(err.Error(), "invalid gzip header") {
+	if !strings.Contains(err.Error(), "invalid gzip header") {
 		t.Errorf("Expected 'invalid gzip header' error, got: %v", err)
 	}
 
@@ -157,7 +157,7 @@ func TestReadPayloadWithGzipHeader_TooShortForHeader(t *testing.T) {
 		t.Error("Expected error for too-short gzip data, got nil")
 	}
 
-	if !containsSubstring(err.Error(), "too short") {
+	if !strings.Contains(err.Error(), "too short") {
 		t.Errorf("Expected 'too short' error, got: %v", err)
 	}
 

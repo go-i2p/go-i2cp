@@ -3,6 +3,7 @@ package go_i2cp
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -239,7 +240,7 @@ func TestCircuitBreakerString(t *testing.T) {
 	}
 
 	// Should contain state information
-	if !containsSubstring(str, "state=") {
+	if !strings.Contains(str, "state=") {
 		t.Error("String() should contain state information")
 	}
 }

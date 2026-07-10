@@ -3,6 +3,7 @@ package go_i2cp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func assertInvalidArgError(t *testing.T, err error, expectedMsg string, checkInv
 		t.Errorf("expected ErrInvalidArgument, got: %v", err)
 	}
 
-	if !containsSubstring(err.Error(), expectedMsg) {
+	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Errorf("expected error message to contain %q, got: %v", expectedMsg, err)
 	}
 }

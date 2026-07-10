@@ -1,6 +1,7 @@
 package go_i2cp
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,7 +52,7 @@ func TestNewPerClientAuthDH(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if !containsSubstring(err.Error(), tt.errorSubstr) {
+				} else if !strings.Contains(err.Error(), tt.errorSubstr) {
 					t.Errorf("expected error containing %q, got %q", tt.errorSubstr, err.Error())
 				}
 			} else {
@@ -102,7 +103,7 @@ func TestNewPerClientAuthPSK(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if !containsSubstring(err.Error(), tt.errorSubstr) {
+				} else if !strings.Contains(err.Error(), tt.errorSubstr) {
 					t.Errorf("expected error containing %q, got %q", tt.errorSubstr, err.Error())
 				}
 			} else {
@@ -529,13 +530,13 @@ func TestBlindingInfo_String(t *testing.T) {
 
 	// Without auth
 	str := info.String()
-	if !containsSubstring(str, "BlindingInfo") {
+	if !strings.Contains(str, "BlindingInfo") {
 		t.Error("expected BlindingInfo in string")
 	}
-	if !containsSubstring(str, "hash") {
+	if !strings.Contains(str, "hash") {
 		t.Error("expected 'hash' endpoint type in string")
 	}
-	if !containsSubstring(str, "no auth") {
+	if !strings.Contains(str, "no auth") {
 		t.Error("expected 'no auth' in string")
 	}
 
@@ -543,14 +544,14 @@ func TestBlindingInfo_String(t *testing.T) {
 	config, _ := NewPerClientAuthDH(make([]byte, 32))
 	info.SetPerClientAuth(config)
 	str = info.String()
-	if !containsSubstring(str, "DH") {
+	if !strings.Contains(str, "DH") {
 		t.Error("expected 'DH' in string with auth")
 	}
 
 	// With password
 	info.LookupPassword = "secret"
 	str = info.String()
-	if !containsSubstring(str, "password") {
+	if !strings.Contains(str, "password") {
 		t.Error("expected 'password' in string with password")
 	}
 }
@@ -593,10 +594,10 @@ func TestHandleHostReplyAuthError(t *testing.T) {
 		t.Run(string(rune(tt.code)), func(t *testing.T) {
 			msg, action := HandleHostReplyAuthError(tt.code)
 
-			if !containsSubstring(msg, tt.expectMessage) {
+			if !strings.Contains(msg, tt.expectMessage) {
 				t.Errorf("expected message containing %q, got %q", tt.expectMessage, msg)
 			}
-			if !containsSubstring(action, tt.expectAction) {
+			if !strings.Contains(action, tt.expectAction) {
 				t.Errorf("expected action containing %q, got %q", tt.expectAction, action)
 			}
 		})
@@ -732,10 +733,10 @@ func TestPerClientAuth_EndToEndPSK(t *testing.T) {
 
 	// Test string representation
 	str := info.String()
-	if !containsSubstring(str, "PSK") {
+	if !strings.Contains(str, "PSK") {
 		t.Error("expected 'PSK' in string representation")
 	}
-	if !containsSubstring(str, "password") {
+	if !strings.Contains(str, "password") {
 		t.Error("expected 'password' in string representation")
 	}
 }
