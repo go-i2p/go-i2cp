@@ -461,15 +461,7 @@ func TestSessionConfigValidateTimestamp(t *testing.T) {
 				if err == nil {
 					t.Errorf("ValidateTimestamp() expected error containing %q, got nil", tt.errMsg)
 				} else if tt.errMsg != "" {
-					// Simple substring check
-					found := false
-					for i := 0; i <= len(err.Error())-len(tt.errMsg); i++ {
-						if err.Error()[i:i+len(tt.errMsg)] == tt.errMsg {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if !containsSubstring(err.Error(), tt.errMsg) {
 						t.Errorf("ValidateTimestamp() error = %v, want error containing %q", err, tt.errMsg)
 					}
 				}

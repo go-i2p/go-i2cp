@@ -895,92 +895,43 @@ func (session *Session) LookupDestinationWithContext(ctx context.Context, addres
 	}, "destination lookup cancelled")
 }
 
-// Helper function to work around visibility issues
+// messageStatusNames maps I2CP MessageStatus values to human-readable names.
+// Note: status 23 is also documented as "LoopbackDenied" in some I2CP
+// references, but this implementation maps it to "SendAccepted" (its
+// send-message-status meaning), matching prior behavior.
+var messageStatusNames = map[uint8]string{
+	0:  "Available",
+	1:  "Accepted",
+	2:  "BestEffortSuccess",
+	4:  "GuaranteedSuccess",
+	6:  "LocalSuccess",
+	23: "SendAccepted",
+	3:  "BestEffortFailure",
+	5:  "GuaranteedFailure",
+	7:  "LocalFailure",
+	8:  "RouterFailure",
+	9:  "NetworkFailure",
+	12: "BadOptions",
+	13: "OverflowFailure",
+	14: "MessageExpired",
+	10: "BadSession",
+	11: "BadMessage",
+	15: "BadLocalLeaseset",
+	16: "NoLocalTunnels",
+	17: "UnsupportedEncryption",
+	18: "BadDestination",
+	19: "BadLeaseset",
+	20: "ExpiredLeaseset",
+	21: "NoLeaseset",
+	22: "MetaLeaseset",
+}
+
+// getMessageStatusName returns the human-readable name for an I2CP message status code.
 func getMessageStatusName(status uint8) string {
-	if name := getMessageSuccessStatusName(status); name != "" {
-		return name
-	}
-	if name := getMessageFailureStatusName(status); name != "" {
-		return name
-	}
-	if name := getMessageErrorStatusName(status); name != "" {
+	if name, ok := messageStatusNames[status]; ok {
 		return name
 	}
 	return fmt.Sprintf("Unknown(%d)", status)
-}
-
-// getMessageSuccessStatusName returns names for successful message delivery statuses.
-func getMessageSuccessStatusName(status uint8) string {
-	switch status {
-	case 0:
-		return "Available"
-	case 1:
-		return "Accepted"
-	case 2:
-		return "BestEffortSuccess"
-	case 4:
-		return "GuaranteedSuccess"
-	case 6:
-		return "LocalSuccess"
-	case 23:
-		return "SendAccepted"
-	default:
-		return ""
-	}
-}
-
-// getMessageFailureStatusName returns names for message delivery failure statuses.
-func getMessageFailureStatusName(status uint8) string {
-	switch status {
-	case 3:
-		return "BestEffortFailure"
-	case 5:
-		return "GuaranteedFailure"
-	case 7:
-		return "LocalFailure"
-	case 8:
-		return "RouterFailure"
-	case 9:
-		return "NetworkFailure"
-	case 12:
-		return "BadOptions"
-	case 13:
-		return "OverflowFailure"
-	case 14:
-		return "MessageExpired"
-	default:
-		return ""
-	}
-}
-
-// getMessageErrorStatusName returns names for message error conditions.
-func getMessageErrorStatusName(status uint8) string {
-	switch status {
-	case 10:
-		return "BadSession"
-	case 11:
-		return "BadMessage"
-	case 15:
-		return "BadLocalLeaseset"
-	case 16:
-		return "NoLocalTunnels"
-	case 17:
-		return "UnsupportedEncryption"
-	case 18:
-		return "BadDestination"
-	case 19:
-		return "BadLeaseset"
-	case 20:
-		return "ExpiredLeaseset"
-	case 21:
-		return "NoLeaseset"
-	case 22:
-		return "MetaLeaseset"
-	case 23:
-		return "LoopbackDenied"
-	default:
-		return ""
-	}
 }
 
 // BlindingScheme returns the current blinding cryptographic scheme

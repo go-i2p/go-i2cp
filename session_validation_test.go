@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+// configureOfflineSigning configures session with a test offline signature
+// (1-hour expiration, zero-filled transient key and signature placeholders)
+// and returns the values used, for tests that only need offline mode enabled
+// without a real, verifiable transient key pair.
+func configureOfflineSigning(t *testing.T, session *Session) (expiration uint32, transientKey, signature []byte) {
+	t.Helper()
+	expiration = uint32(time.Now().Unix() + 3600) // 1 hour from now
+	transientKey = make([]byte, 32)
+	signature = make([]byte, 64)
+	if err := session.config.SetOfflineSignature(expiration, transientKey, signature); err != nil {
+		t.Fatalf("SetOfflineSignature failed: %v", err)
+	}
+	return expiration, transientKey, signature
+}
+
 // TestSession_IsOffline_NotConfigured tests that IsOffline returns false
 // when offline signing is not configured.
 func TestSession_IsOffline_NotConfigured(t *testing.T) {
@@ -24,21 +39,7 @@ func TestSession_IsOffline_Configured(t *testing.T) {
 	client := &Client{crypto: crypto}
 	session := NewSession(client, SessionCallbacks{})
 
-	// Configure offline signing with test values
-	expiration := uint32(time.Now().Unix() + 3600) // 1 hour from now
-	transientKey := make([]byte, 32)
-	for i := range transientKey {
-		transientKey[i] = byte(i)
-	}
-	signature := make([]byte, 64)
-	for i := range signature {
-		signature[i] = byte(i + 100)
-	}
-
-	err := session.config.SetOfflineSignature(expiration, transientKey, signature)
-	if err != nil {
-		t.Fatalf("SetOfflineSignature failed: %v", err)
-	}
+	configureOfflineSigning(t, session)
 
 	if !session.IsOffline() {
 		t.Error("IsOffline() should return true for session with offline signing configured")
@@ -62,11 +63,7 @@ func TestSession_ValidateProtocol_Datagram1Offline(t *testing.T) {
 	client := &Client{crypto: crypto}
 	session := NewSession(client, SessionCallbacks{})
 
-	// Configure offline signing
-	expiration := uint32(time.Now().Unix() + 3600)
-	transientKey := make([]byte, 32)
-	signature := make([]byte, 64)
-	_ = session.config.SetOfflineSignature(expiration, transientKey, signature)
+	configureOfflineSigning(t, session)
 
 	// Datagram1 should fail validation for offline sessions
 	err := session.ValidateProtocol(ProtoDatagram)
@@ -82,11 +79,7 @@ func TestSession_ValidateProtocol_Datagram2Offline(t *testing.T) {
 	client := &Client{crypto: crypto}
 	session := NewSession(client, SessionCallbacks{})
 
-	// Configure offline signing
-	expiration := uint32(time.Now().Unix() + 3600)
-	transientKey := make([]byte, 32)
-	signature := make([]byte, 64)
-	_ = session.config.SetOfflineSignature(expiration, transientKey, signature)
+	configureOfflineSigning(t, session)
 
 	// Datagram2 should be valid for offline sessions
 	err := session.ValidateProtocol(ProtoDatagram2)
@@ -153,10 +146,7 @@ func TestSession_TransientSigningKeyPair_NoKeyPairConfigured(t *testing.T) {
 	session := NewSession(client, SessionCallbacks{})
 
 	// Configure offline signing (without transient key pair)
-	expiration := uint32(time.Now().Unix() + 3600)
-	transientPubKey := make([]byte, 32)
-	signature := make([]byte, 64)
-	_ = session.config.SetOfflineSignature(expiration, transientPubKey, signature)
+	configureOfflineSigning(t, session)
 
 	_, err := session.TransientSigningKeyPair()
 	if err == nil {
