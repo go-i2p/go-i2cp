@@ -54,6 +54,79 @@ const (
 	protocolBidirectional uint8 = 201
 )
 
+// runProcessIOLoop repeatedly calls client.ProcessIO(ctx) until it returns an
+// error or ctx is done, sleeping briefly between iterations to avoid a busy
+// loop. Errors other than ErrClientClosed are logged with label as a prefix
+// to identify which client under test produced them.
+func runProcessIOLoop(t *testing.T, ctx context.Context, client *Client, label string) {
+	for {
+		if err := client.ProcessIO(ctx); err != nil {
+			if err != ErrClientClosed {
+				t.Logf("%s ProcessIO error: %v", label, err)
+			}
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+}
+
+// connectAndCreateSession connects a new Client, creates a Session configured
+// with SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE and the given nickname, and
+// starts a background runProcessIOLoop bounded by ioTimeout for the rest of
+// the test. If ready is non-nil, it waits (10s timeout, failing the test on
+// expiry) for the channel to close - typically signaled by the caller's
+// OnStatus callback on I2CP_SESSION_STATUS_CREATED - before sleeping
+// tunnelWait to allow I2P tunnels to establish. The client and its ProcessIO
+// loop are torn down automatically when the test completes. The returned
+// context is the ProcessIO loop's context, exposed for callers that need to
+// reuse it for further operations bounded by the same deadline (e.g. lookups).
+func connectAndCreateSession(t *testing.T, callbacks SessionCallbacks, nickname string, ioTimeout, tunnelWait time.Duration, ready <-chan struct{}) (*Client, *Session, context.Context) {
+	t.Helper()
+
+	client := NewClient(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("Failed to connect %s client: %v", nickname, err)
+	}
+	t.Cleanup(func() { client.Close() })
+
+	session := NewSession(client, callbacks)
+	session.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
+	session.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, nickname)
+
+	if err := client.CreateSession(ctx, session); err != nil {
+		t.Fatalf("Failed to create %s session: %v", nickname, err)
+	}
+
+	ioCtx, ioCancel := context.WithTimeout(context.Background(), ioTimeout)
+	t.Cleanup(ioCancel)
+	go runProcessIOLoop(t, ioCtx, client, nickname)
+
+	if ready != nil {
+		t.Logf("Waiting for %s session creation...", nickname)
+		select {
+		case <-ready:
+			t.Logf("%s session created with ID: %d", nickname, session.ID())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("Timeout waiting for %s session creation", nickname)
+		}
+	}
+
+	t.Logf("Waiting for %s tunnels to establish...", nickname)
+	time.Sleep(tunnelWait)
+
+	return client, session, ioCtx
+}
+
 // TestSessionLifecycle validates complete session lifecycle including:
 // - Session creation
 // - Status callback invocation (OnStatus)
@@ -141,30 +214,7 @@ func TestSessionLifecycle(t *testing.T) {
 	statusMu.Unlock()
 
 	// Process messages in background
-	errChan := make(chan error, 1)
-	go func() {
-		for {
-			err := client.ProcessIO(ioCtx)
-			if err != nil {
-				if err == ErrClientClosed {
-					errChan <- nil
-					return
-				}
-				errChan <- err
-				return
-			}
-
-			// Small delay to prevent busy loop
-			time.Sleep(100 * time.Millisecond)
-
-			select {
-			case <-ioCtx.Done():
-				errChan <- nil
-				return
-			default:
-			}
-		}
-	}()
+	go runProcessIOLoop(t, ioCtx, client, "session")
 
 	// Wait for session to be fully created by router
 	t.Log("Waiting for router to create session...")
@@ -255,17 +305,6 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	t.Logf("Test payload checksum: %s", hex.EncodeToString(payloadChecksum[:]))
 
 	// Create receiver client and session
-	receiverClient := NewClient(nil)
-	receiverCtx, receiverCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer receiverCancel()
-
-	if err := receiverClient.Connect(receiverCtx); err != nil {
-		t.Fatalf("Failed to connect receiver client: %v", err)
-	}
-	defer receiverClient.Close()
-
-	t.Log("Receiver client connected")
-
 	// Track received messages
 	var (
 		receiverMu       sync.Mutex
@@ -273,11 +312,10 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 		receivedPayload  []byte
 		messageReceived  = make(chan struct{})
 		receiverReady    = make(chan struct{})
-		receiverDest     *Destination
 	)
 
 	// Create receiver session with message callback
-	receiverSession := NewSession(receiverClient, SessionCallbacks{
+	_, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
@@ -306,118 +344,23 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 				close(receiverReady)
 			}
 		},
-	})
+	}, "integration-test-receiver", messageTimeout, 10*time.Second, receiverReady)
 
-	// Configure receiver session
-	receiverSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	receiverSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-receiver")
-
-	if err := receiverClient.CreateSession(receiverCtx, receiverSession); err != nil {
-		t.Fatalf("Failed to create receiver session: %v", err)
-	}
-
-	// Start receiver I/O processing
-	receiverIOCtx, receiverIOCancel := context.WithTimeout(context.Background(), messageTimeout)
-	defer receiverIOCancel()
-
-	go func() {
-		for {
-			if err := receiverClient.ProcessIO(receiverIOCtx); err != nil {
-				if err != ErrClientClosed {
-					t.Logf("Receiver ProcessIO error: %v", err)
-				}
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-
-			select {
-			case <-receiverIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	// Wait for receiver session to be created by router
-	t.Log("Waiting for receiver session creation...")
-	select {
-	case <-receiverReady:
-		t.Logf("Receiver session created with ID: %d", receiverSession.ID())
-		receiverDest = receiverSession.Destination()
-		t.Logf("Receiver destination (B32): %s", receiverDest.b32)
-	case <-time.After(10 * time.Second):
-		t.Fatal("Timeout waiting for receiver session creation")
-	}
-
-	// Give receiver time to establish tunnels
-	t.Log("Waiting for receiver tunnels to establish...")
-	time.Sleep(10 * time.Second)
+	receiverDest := receiverSession.Destination()
+	t.Logf("Receiver destination (B32): %s", receiverDest.b32)
 
 	// Create sender client and session
-	senderClient := NewClient(nil)
-	senderCtx, senderCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer senderCancel()
-
-	if err := senderClient.Connect(senderCtx); err != nil {
-		t.Fatalf("Failed to connect sender client: %v", err)
-	}
-	defer senderClient.Close()
-
-	t.Log("Sender client connected")
-
 	senderReady := make(chan struct{})
-	senderSession := NewSession(senderClient, SessionCallbacks{
+	_, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Sender session status: %d", status)
 			if status == I2CP_SESSION_STATUS_CREATED {
 				close(senderReady)
 			}
 		},
-	})
+	}, "integration-test-sender", messageTimeout, 10*time.Second, senderReady)
 
-	// Configure sender session
-	senderSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	senderSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-sender")
-
-	if err := senderClient.CreateSession(senderCtx, senderSession); err != nil {
-		t.Fatalf("Failed to create sender session: %v", err)
-	}
-
-	// Start sender I/O processing
-	senderIOCtx, senderIOCancel := context.WithTimeout(context.Background(), messageTimeout)
-	defer senderIOCancel()
-
-	go func() {
-		for {
-			if err := senderClient.ProcessIO(senderIOCtx); err != nil {
-				if err != ErrClientClosed {
-					t.Logf("Sender ProcessIO error: %v", err)
-				}
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-
-			select {
-			case <-senderIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	// Wait for sender session to be created by router
-	t.Log("Waiting for sender session creation...")
-	select {
-	case <-senderReady:
-		t.Logf("Sender session created with ID: %d", senderSession.ID())
-		t.Logf("Sender destination (B32): %s", senderSession.Destination().b32)
-	case <-time.After(10 * time.Second):
-		t.Fatal("Timeout waiting for sender session creation")
-	}
-
-	// Give sender time to establish tunnels
-	t.Log("Waiting for sender tunnels to establish...")
-	time.Sleep(10 * time.Second)
+	t.Logf("Sender destination (B32): %s", senderSession.Destination().b32)
 
 	// Send message from sender to receiver
 	t.Log("Sending test message...")
@@ -485,18 +428,6 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 // This test demonstrates the I2P naming/addressing system and how destinations
 // are resolved before communication can occur.
 func TestDestinationLookupAndRouting(t *testing.T) {
-	// Create target client and session (the destination to be looked up)
-	targetClient := NewClient(nil)
-	targetCtx, targetCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer targetCancel()
-
-	if err := targetClient.Connect(targetCtx); err != nil {
-		t.Fatalf("Failed to connect target client: %v", err)
-	}
-	defer targetClient.Close()
-
-	t.Log("Target client connected")
-
 	// Track received messages on target
 	var (
 		targetMu        sync.Mutex
@@ -504,7 +435,8 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		messageReceived = make(chan struct{})
 	)
 
-	targetSession := NewSession(targetClient, SessionCallbacks{
+	// Create target client and session (the destination to be looked up)
+	_, targetSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			targetMu.Lock()
 			defer targetMu.Unlock()
@@ -524,59 +456,13 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Target session status: %d", status)
 		},
-	})
-
-	targetSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	targetSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-target")
-
-	if err := targetClient.CreateSession(targetCtx, targetSession); err != nil {
-		t.Fatalf("Failed to create target session: %v", err)
-	}
+	}, "integration-test-target", 5*time.Minute, 30*time.Second, nil)
 
 	targetDest := targetSession.Destination()
 	targetB32 := targetDest.b32
-	t.Logf("Target session created - ID: %d", targetSession.ID())
 	t.Logf("Target destination (B32): %s", targetB32)
 
-	// Start target I/O processing
-	// Needs long timeout to cover tunnel establishment + lookup retries + message delivery
-	targetIOCtx, targetIOCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer targetIOCancel()
-
-	go func() {
-		for {
-			if err := targetClient.ProcessIO(targetIOCtx); err != nil {
-				if err != ErrClientClosed {
-					t.Logf("Target ProcessIO error: %v", err)
-				}
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-
-			select {
-			case <-targetIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	// Wait for target tunnels to establish and destination to be published
-	t.Log("Waiting for target tunnels to establish...")
-	time.Sleep(30 * time.Second)
-
 	// Create lookup client and session
-	lookupClient := NewClient(nil)
-	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer lookupCancel()
-
-	if err := lookupClient.Connect(lookupCtx); err != nil {
-		t.Fatalf("Failed to connect lookup client: %v", err)
-	}
-	defer lookupClient.Close()
-
-	t.Log("Lookup client connected")
-
 	// Track destination lookups
 	var (
 		lookupMu         sync.Mutex
@@ -584,7 +470,7 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		destinationFound = make(chan struct{})
 	)
 
-	lookupSession := NewSession(lookupClient, SessionCallbacks{
+	lookupClient, lookupSession, lookupIOCtx := connectAndCreateSession(t, SessionCallbacks{
 		OnDestination: func(s *Session, requestId uint32, address string, dest *Destination) {
 			lookupMu.Lock()
 			defer lookupMu.Unlock()
@@ -603,43 +489,7 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Lookup session status: %d", status)
 		},
-	})
-
-	lookupSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	lookupSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-lookup")
-
-	if err := lookupClient.CreateSession(lookupCtx, lookupSession); err != nil {
-		t.Fatalf("Failed to create lookup session: %v", err)
-	}
-
-	t.Logf("Lookup session created - ID: %d", lookupSession.ID())
-
-	// Start lookup I/O processing
-	// Needs long timeout to cover tunnel establishment + lookup retries + message delivery
-	lookupIOCtx, lookupIOCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer lookupIOCancel()
-
-	go func() {
-		for {
-			if err := lookupClient.ProcessIO(lookupIOCtx); err != nil {
-				if err != ErrClientClosed {
-					t.Logf("Lookup ProcessIO error: %v", err)
-				}
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-
-			select {
-			case <-lookupIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	// Give lookup client time to establish tunnels
-	t.Log("Waiting for lookup tunnels to establish...")
-	time.Sleep(20 * time.Second)
+	}, "integration-test-lookup", 5*time.Minute, 20*time.Second, nil)
 
 	// Perform destination lookup by B32 address with retries
 	// Destination publishing to the floodfill DHT can take time
@@ -744,15 +594,6 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 	messageSizes := []int{100, 500, 1000, 5000, 10000}
 
 	// Create receiver
-	receiverClient := NewClient(nil)
-	receiverCtx, receiverCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer receiverCancel()
-
-	if err := receiverClient.Connect(receiverCtx); err != nil {
-		t.Fatalf("Failed to connect receiver: %v", err)
-	}
-	defer receiverClient.Close()
-
 	var (
 		receiverMu       sync.Mutex
 		receivedCount    int
@@ -760,7 +601,7 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 		messagesReceived = make(chan struct{}, messageCount)
 	)
 
-	receiverSession := NewSession(receiverClient, SessionCallbacks{
+	_, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
@@ -784,80 +625,17 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Receiver status: %d", status)
 		},
-	})
-
-	receiverSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	receiverSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-multi-receiver")
-
-	if err := receiverClient.CreateSession(receiverCtx, receiverSession); err != nil {
-		t.Fatalf("Failed to create receiver session: %v", err)
-	}
+	}, "integration-test-multi-receiver", messageTimeout, 10*time.Second, nil)
 
 	receiverDest := receiverSession.Destination()
 	t.Logf("Receiver created: %s", receiverDest.b32)
 
-	// Start receiver I/O
-	receiverIOCtx, receiverIOCancel := context.WithTimeout(context.Background(), messageTimeout)
-	defer receiverIOCancel()
-
-	go func() {
-		for {
-			if err := receiverClient.ProcessIO(receiverIOCtx); err != nil {
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-			select {
-			case <-receiverIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	time.Sleep(10 * time.Second)
-
 	// Create sender
-	senderClient := NewClient(nil)
-	senderCtx, senderCancel := context.WithTimeout(context.Background(), connectionTimeout)
-	defer senderCancel()
-
-	if err := senderClient.Connect(senderCtx); err != nil {
-		t.Fatalf("Failed to connect sender: %v", err)
-	}
-	defer senderClient.Close()
-
-	senderSession := NewSession(senderClient, SessionCallbacks{
+	_, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Sender status: %d", status)
 		},
-	})
-
-	senderSession.config.SetProperty(SESSION_CONFIG_PROP_I2CP_FAST_RECEIVE, "true")
-	senderSession.config.SetProperty(SESSION_CONFIG_PROP_OUTBOUND_NICKNAME, "integration-test-multi-sender")
-
-	if err := senderClient.CreateSession(senderCtx, senderSession); err != nil {
-		t.Fatalf("Failed to create sender session: %v", err)
-	}
-
-	// Start sender I/O
-	senderIOCtx, senderIOCancel := context.WithTimeout(context.Background(), messageTimeout)
-	defer senderIOCancel()
-
-	go func() {
-		for {
-			if err := senderClient.ProcessIO(senderIOCtx); err != nil {
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-			select {
-			case <-senderIOCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-
-	time.Sleep(10 * time.Second)
+	}, "integration-test-multi-sender", messageTimeout, 10*time.Second, nil)
 
 	// Send multiple messages with different sizes
 	t.Log("Sending multiple messages...")
