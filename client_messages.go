@@ -301,9 +301,7 @@ func (c *Client) readPayloadMessageHeader(stream *Stream) (*Session, error) {
 	}
 	_ = messageId // Message ID is router-generated, currently unused
 
-	c.lock.Lock()
-	session, ok := c.sessions[sessionId]
-	c.lock.Unlock()
+	session, ok := c.findSession(sessionId)
 
 	if !ok {
 		Fatal("Session id %d does not match any of our currently initiated sessions by %p", sessionId, c)
@@ -443,9 +441,7 @@ func readMessageStatusFields(stream *Stream) (uint16, uint32, uint8, uint32, uin
 
 // dispatchStatusToSession finds the session and dispatches message status to it.
 func (c *Client) dispatchStatusToSession(sessionId uint16, messageId uint32, status uint8, size, nonce uint32) {
-	c.lock.Lock()
-	sess := c.sessions[sessionId]
-	c.lock.Unlock()
+	sess, _ := c.findSession(sessionId)
 
 	if sess != nil {
 		sess.dispatchMessageStatus(messageId, SessionMessageStatus(status), size, nonce)
@@ -1075,9 +1071,7 @@ func (c *Client) recordLeaseSetRequest(sessionId uint16, tunnels uint8) {
 
 // getSessionForVariableLease retrieves the session for a RequestVariableLeaseSet message.
 func (c *Client) getSessionForVariableLease(sessionId uint16) (*Session, error) {
-	c.lock.Lock()
-	sess := c.sessions[sessionId]
-	c.lock.Unlock()
+	sess, _ := c.findSession(sessionId)
 	if sess == nil {
 		Error("Session with id %d doesn't exist for RequestVariableLeaseSet", sessionId)
 		return nil, fmt.Errorf("session not found")
@@ -1334,9 +1328,7 @@ func (c *Client) readReconfigureSessionData(stream *Stream) (*Session, map[strin
 		return nil, nil, err
 	}
 
-	c.lock.Lock()
-	sess := c.sessions[sessionId]
-	c.lock.Unlock()
+	sess, _ := c.findSession(sessionId)
 
 	if sess == nil {
 		Error("ReconfigureSessionMessage received for unknown session ID %d", sessionId)
