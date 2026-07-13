@@ -418,6 +418,75 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	t.Log("Bidirectional data transfer test completed successfully")
 }
 
+// performDestinationLookupWithRetries attempts to lookup a destination by B32 address,
+// with exponential backoff retry logic. The destinationFound channel is signaled by the
+// OnDestination callback when a destination is resolved. The caller's lookedUpDest variable
+// (captured by closure in the callback) will be updated with the resolved destination.
+func performDestinationLookupWithRetries(t *testing.T, client *Client, session *Session, ctx context.Context, targetB32 string, destinationFound <-chan struct{}, lookupMu *sync.Mutex, _ *Destination) {
+	t.Helper()
+
+	const maxLookupAttempts = 5
+	const lookupRetryDelay = 15 * time.Second
+
+	var lookupSuccess bool
+	for attempt := 1; attempt <= maxLookupAttempts; attempt++ {
+		t.Logf("Looking up destination (attempt %d/%d): %s", attempt, maxLookupAttempts, targetB32)
+		requestId, err := client.DestinationLookup(ctx, session, targetB32)
+		if err != nil {
+			t.Fatalf("Failed to initiate destination lookup: %v", err)
+		}
+
+		t.Logf("Destination lookup initiated - requestId: %d", requestId)
+
+		select {
+		case <-destinationFound:
+			t.Log("Destination lookup successful")
+			lookupSuccess = true
+		case <-time.After(operationTimeout):
+			if attempt < maxLookupAttempts {
+				t.Logf("Lookup attempt %d timed out, retrying in %v...", attempt, lookupRetryDelay)
+				time.Sleep(lookupRetryDelay)
+			}
+		}
+		if lookupSuccess {
+			break
+		}
+	}
+	if !lookupSuccess {
+		t.Fatal("All destination lookup attempts timed out")
+	}
+}
+
+// verifyDestinationMatch asserts that the looked-up destination matches the target destination.
+func verifyDestinationMatch(t *testing.T, lookedUpB32, targetB32 string) {
+	t.Helper()
+
+	if lookedUpB32 != targetB32 {
+		t.Errorf("Looked-up destination mismatch: expected %s, got %s", targetB32, lookedUpB32)
+	} else {
+		t.Log("Looked-up destination matches target destination")
+	}
+}
+
+// verifyMessageDelivery waits for a message to be received and verifies the count.
+func verifyMessageDelivery(t *testing.T, messageReceived <-chan struct{}, targetMu *sync.Mutex, targetMessages *int) {
+	t.Helper()
+
+	select {
+	case <-messageReceived:
+		t.Log("Message delivered successfully to looked-up destination")
+	case <-time.After(messageTimeout):
+		t.Fatal("Timeout waiting for message delivery to looked-up destination")
+	}
+
+	targetMu.Lock()
+	defer targetMu.Unlock()
+
+	if *targetMessages != 1 {
+		t.Errorf("Expected 1 message on target, got %d", *targetMessages)
+	}
+}
+
 // TestDestinationLookupAndRouting validates destination lookup and message routing:
 // - Creates a destination to be looked up
 // - Performs lookup using DestinationLookup
@@ -463,7 +532,6 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	t.Logf("Target destination (B32): %s", targetB32)
 
 	// Create lookup client and session
-	// Track destination lookups
 	var (
 		lookupMu         sync.Mutex
 		lookedUpDest     *Destination
@@ -492,37 +560,7 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	}, "integration-test-lookup", 5*time.Minute, 20*time.Second, nil)
 
 	// Perform destination lookup by B32 address with retries
-	// Destination publishing to the floodfill DHT can take time
-	const maxLookupAttempts = 5
-	const lookupRetryDelay = 15 * time.Second
-
-	var lookupSuccess bool
-	for attempt := 1; attempt <= maxLookupAttempts; attempt++ {
-		t.Logf("Looking up destination (attempt %d/%d): %s", attempt, maxLookupAttempts, targetB32)
-		requestId, err := lookupClient.DestinationLookup(lookupIOCtx, lookupSession, targetB32)
-		if err != nil {
-			t.Fatalf("Failed to initiate destination lookup: %v", err)
-		}
-
-		t.Logf("Destination lookup initiated - requestId: %d", requestId)
-
-		select {
-		case <-destinationFound:
-			t.Log("Destination lookup successful")
-			lookupSuccess = true
-		case <-time.After(operationTimeout):
-			if attempt < maxLookupAttempts {
-				t.Logf("Lookup attempt %d timed out, retrying in %v...", attempt, lookupRetryDelay)
-				time.Sleep(lookupRetryDelay)
-			}
-		}
-		if lookupSuccess {
-			break
-		}
-	}
-	if !lookupSuccess {
-		t.Fatal("All destination lookup attempts timed out")
-	}
+	performDestinationLookupWithRetries(t, lookupClient, lookupSession, lookupIOCtx, targetB32, destinationFound, &lookupMu, lookedUpDest)
 
 	// Verify looked-up destination matches target
 	lookupMu.Lock()
@@ -530,15 +568,10 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 		lookupMu.Unlock()
 		t.Fatal("Destination lookup returned nil")
 	}
-
 	lookedUpB32 := lookedUpDest.b32
 	lookupMu.Unlock()
 
-	if lookedUpB32 != targetB32 {
-		t.Errorf("Looked-up destination mismatch: expected %s, got %s", targetB32, lookedUpB32)
-	} else {
-		t.Log("Looked-up destination matches target destination")
-	}
+	verifyDestinationMatch(t, lookedUpB32, targetB32)
 
 	// Send message to looked-up destination
 	t.Log("Sending message to looked-up destination...")
@@ -562,21 +595,8 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 
 	t.Log("Message sent, waiting for delivery...")
 
-	// Wait for message delivery
-	select {
-	case <-messageReceived:
-		t.Log("Message delivered successfully to looked-up destination")
-	case <-time.After(messageTimeout):
-		t.Fatal("Timeout waiting for message delivery to looked-up destination")
-	}
-
-	// Verify message was received
-	targetMu.Lock()
-	defer targetMu.Unlock()
-
-	if targetMessages != 1 {
-		t.Errorf("Expected 1 message on target, got %d", targetMessages)
-	}
+	// Wait for message delivery and verify
+	verifyMessageDelivery(t, messageReceived, &targetMu, &targetMessages)
 
 	t.Log("Destination lookup and routing test completed successfully")
 }

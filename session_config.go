@@ -285,22 +285,6 @@ func buildSessionWireMessage(config *SessionConfig, timestamp uint64) *Stream {
 	return wireMessage
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// max returns the maximum of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // signSessionConfig generates a signature over session config data
 // per I2CP specification - uses Ed25519 signatures exclusively
 func (config *SessionConfig) signSessionConfig(data []byte, crypto *Crypto) ([]byte, error) {

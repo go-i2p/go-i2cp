@@ -470,12 +470,7 @@ func getSignatureLength(dest *Destination) int {
 		return 0
 	}
 
-	// Check the signature key pair algorithm type if available
-	if dest.sgk.algorithmType == ED25519_SHA256 {
-		return 64 // Ed25519 signature
-	}
-
-	// Default to Ed25519 (all new destinations use Ed25519)
+	// All destinations currently use Ed25519 signatures (64 bytes)
 	return 64
 }
 

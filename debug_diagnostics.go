@@ -64,32 +64,25 @@ const (
 	SessionStateDisconnected
 )
 
+var sessionStateNames = map[SessionState]string{
+	SessionStatePending:           "PENDING",
+	SessionStateCreated:           "CREATED",
+	SessionStateAwaitingLeaseSet:  "AWAITING_LEASESET",
+	SessionStateLeaseSetRequested: "LEASESET_REQUESTED",
+	SessionStateLeaseSetSent:      "LEASESET_SENT",
+	SessionStateActive:            "ACTIVE",
+	SessionStateDestroying:        "DESTROYING",
+	SessionStateDestroyed:         "DESTROYED",
+	SessionStateRejected:          "REJECTED",
+	SessionStateDisconnected:      "DISCONNECTED",
+}
+
 // String returns a human-readable name for the session state.
 func (s SessionState) String() string {
-	switch s {
-	case SessionStatePending:
-		return "PENDING"
-	case SessionStateCreated:
-		return "CREATED"
-	case SessionStateAwaitingLeaseSet:
-		return "AWAITING_LEASESET"
-	case SessionStateLeaseSetRequested:
-		return "LEASESET_REQUESTED"
-	case SessionStateLeaseSetSent:
-		return "LEASESET_SENT"
-	case SessionStateActive:
-		return "ACTIVE"
-	case SessionStateDestroying:
-		return "DESTROYING"
-	case SessionStateDestroyed:
-		return "DESTROYED"
-	case SessionStateRejected:
-		return "REJECTED"
-	case SessionStateDisconnected:
-		return "DISCONNECTED"
-	default:
-		return fmt.Sprintf("UNKNOWN(%d)", s)
+	if name, ok := sessionStateNames[s]; ok {
+		return name
 	}
+	return fmt.Sprintf("UNKNOWN(%d)", s)
 }
 
 // SessionStateTracker tracks the lifecycle state of I2CP sessions for debugging.
@@ -771,12 +764,4 @@ func (c *Client) PrintFullDiagnostics() {
 	}
 
 	Info("==========================================")
-}
-
-// Helper to find minimum of two integers (for Go versions without built-in min)
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

@@ -2,6 +2,7 @@ package go_i2cp
 
 import (
 	"encoding/base64"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -183,7 +184,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Valid complete configuration",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(futureExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(futureExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY, base64.StdEncoding.EncodeToString([]byte("key")))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE, base64.StdEncoding.EncodeToString([]byte("sig")))
 			},
@@ -201,7 +202,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Incomplete - missing transient key",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(futureExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(futureExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE, base64.StdEncoding.EncodeToString([]byte("sig")))
 			},
 			wantErr:     true,
@@ -210,7 +211,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Incomplete - missing signature",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(futureExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(futureExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY, base64.StdEncoding.EncodeToString([]byte("key")))
 			},
 			wantErr:     true,
@@ -219,7 +220,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Expired timestamp",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(pastExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(pastExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY, base64.StdEncoding.EncodeToString([]byte("key")))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE, base64.StdEncoding.EncodeToString([]byte("sig")))
 			},
@@ -229,7 +230,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Invalid base64 transient key",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(futureExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(futureExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY, "not-valid-base64!!!")
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE, base64.StdEncoding.EncodeToString([]byte("sig")))
 			},
@@ -239,7 +240,7 @@ func TestOfflineSignature_ValidateOfflineSignature(t *testing.T) {
 		{
 			name: "Invalid base64 signature",
 			setupFunc: func(c *SessionConfig) {
-				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, formatUint32(futureExp))
+				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_EXPIRATION, strconv.FormatUint(uint64(futureExp), 10))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_TRANSIENT_PUBLIC_KEY, base64.StdEncoding.EncodeToString([]byte("key")))
 				c.SetProperty(SESSION_CONFIG_PROP_I2CP_LEASESET_OFFLINE_SIGNATURE, "not-valid-base64!!!")
 			},
@@ -366,21 +367,6 @@ func TestOfflineSignature_PropertyConstants(t *testing.T) {
 }
 
 // Helper functions
-
-func formatUint32(v uint32) string {
-	return string([]byte{
-		byte('0' + (v/1000000000)%10),
-		byte('0' + (v/100000000)%10),
-		byte('0' + (v/10000000)%10),
-		byte('0' + (v/1000000)%10),
-		byte('0' + (v/100000)%10),
-		byte('0' + (v/10000)%10),
-		byte('0' + (v/1000)%10),
-		byte('0' + (v/100)%10),
-		byte('0' + (v/10)%10),
-		byte('0' + v%10),
-	})
-}
 
 // --- merged from session_config_timestamp_test.go ---
 

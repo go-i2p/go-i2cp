@@ -14,6 +14,7 @@
 package go_i2cp
 
 import (
+	"bytes"
 	"fmt"
 
 	cryptox25519 "github.com/go-i2p/crypto/curve25519"
@@ -69,7 +70,7 @@ func validateX25519KeyPair(privKeyBytes, pubKeyBytes []byte) error {
 		return fmt.Errorf("failed to convert public key to x25519.PublicKey")
 	}
 
-	if !bytesEqual(expectedPubKey, pubKeyBytes) {
+	if !bytes.Equal(expectedPubKey, pubKeyBytes) {
 		return fmt.Errorf("public key does not match private key")
 	}
 
@@ -98,19 +99,6 @@ func X25519KeyPairFromStream(stream *Stream) (*X25519KeyPair, error) {
 		privateKey:    cryptox25519.Curve25519PrivateKey(privKeyBytes),
 		publicKey:     cryptox25519.Curve25519PublicKey(pubKeyBytes),
 	}, nil
-}
-
-// bytesEqual compares two byte slices for equality
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // X25519PublicKeyFromStream reads only the public key from a stream

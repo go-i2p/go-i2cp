@@ -1,5 +1,45 @@
 package go_i2cp
 
+var (
+	sessionManagementNames = map[uint8]string{
+		I2CP_MSG_CREATE_SESSION:      "CreateSession",
+		I2CP_MSG_RECONFIGURE_SESSION: "ReconfigureSession",
+		I2CP_MSG_DESTROY_SESSION:     "DestroySession",
+		I2CP_MSG_SESSION_STATUS:      "SessionStatus",
+		I2CP_MSG_DISCONNECT:          "Disconnect",
+		I2CP_MSG_ANY:                 "ANY (receive any type)",
+	}
+
+	dataTransferNames = map[uint8]string{
+		I2CP_MSG_SEND_MESSAGE:          "SendMessage",
+		I2CP_MSG_SEND_MESSAGE_EXPIRES:  "SendMessageExpires",
+		I2CP_MSG_PAYLOAD_MESSAGE:       "PayloadMessage",
+		I2CP_MSG_MESSAGE_STATUS:        "MessageStatus",
+		I2CP_MSG_RECEIVE_MESSAGE_BEGIN: "ReceiveMessageBegin (deprecated)",
+		I2CP_MSG_RECEIVE_MESSAGE_END:   "ReceiveMessageEnd (deprecated)",
+		I2CP_MSG_GET_BANDWIDTH_LIMITS:  "GetBandwidthLimits",
+		I2CP_MSG_BANDWIDTH_LIMITS:      "BandwidthLimits",
+		I2CP_MSG_REPORT_ABUSE:          "ReportAbuse (deprecated)",
+	}
+
+	destinationLookupNames = map[uint8]string{
+		I2CP_MSG_DEST_LOOKUP: "DestLookup (deprecated)",
+		I2CP_MSG_DEST_REPLY:  "DestReply (deprecated)",
+		I2CP_MSG_HOST_LOOKUP: "HostLookup",
+		I2CP_MSG_HOST_REPLY:  "HostReply",
+	}
+
+	leaseSetNames = map[uint8]string{
+		I2CP_MSG_CREATE_LEASE_SET:          "CreateLeaseSet",
+		I2CP_MSG_CREATE_LEASE_SET2:         "CreateLeaseSet2",
+		I2CP_MSG_REQUEST_LEASESET:          "RequestLeaseSet (deprecated)",
+		I2CP_MSG_REQUEST_VARIABLE_LEASESET: "RequestVariableLeaseSet",
+		I2CP_MSG_BLINDING_INFO:             "BlindingInfo",
+		I2CP_MSG_SET_DATE:                  "SetDate",
+		I2CP_MSG_GET_DATE:                  "GetDate",
+	}
+)
+
 // getMessageTypeName returns a human-readable name for I2CP message types.
 // This is useful for wire-level debugging and logging.
 func getMessageTypeName(msgType uint8) string {
@@ -20,84 +60,32 @@ func getMessageTypeName(msgType uint8) string {
 
 // getSessionManagementMessageName returns names for session lifecycle messages.
 func getSessionManagementMessageName(msgType uint8) string {
-	switch msgType {
-	case I2CP_MSG_CREATE_SESSION:
-		return "CreateSession"
-	case I2CP_MSG_RECONFIGURE_SESSION:
-		return "ReconfigureSession"
-	case I2CP_MSG_DESTROY_SESSION:
-		return "DestroySession"
-	case I2CP_MSG_SESSION_STATUS:
-		return "SessionStatus"
-	case I2CP_MSG_DISCONNECT:
-		return "Disconnect"
-	case I2CP_MSG_ANY:
-		return "ANY (receive any type)"
-	default:
-		return ""
+	if name, ok := sessionManagementNames[msgType]; ok {
+		return name
 	}
+	return ""
 }
 
 // getDataTransferMessageName returns names for data transfer and messaging types.
 func getDataTransferMessageName(msgType uint8) string {
-	switch msgType {
-	case I2CP_MSG_SEND_MESSAGE:
-		return "SendMessage"
-	case I2CP_MSG_SEND_MESSAGE_EXPIRES:
-		return "SendMessageExpires"
-	case I2CP_MSG_PAYLOAD_MESSAGE:
-		return "PayloadMessage"
-	case I2CP_MSG_MESSAGE_STATUS:
-		return "MessageStatus"
-	case I2CP_MSG_RECEIVE_MESSAGE_BEGIN:
-		return "ReceiveMessageBegin (deprecated)"
-	case I2CP_MSG_RECEIVE_MESSAGE_END:
-		return "ReceiveMessageEnd (deprecated)"
-	case I2CP_MSG_GET_BANDWIDTH_LIMITS:
-		return "GetBandwidthLimits"
-	case I2CP_MSG_BANDWIDTH_LIMITS:
-		return "BandwidthLimits"
-	case I2CP_MSG_REPORT_ABUSE:
-		return "ReportAbuse (deprecated)"
-	default:
-		return ""
+	if name, ok := dataTransferNames[msgType]; ok {
+		return name
 	}
+	return ""
 }
 
 // getDestinationLookupMessageName returns names for destination and host lookup messages.
 func getDestinationLookupMessageName(msgType uint8) string {
-	switch msgType {
-	case I2CP_MSG_DEST_LOOKUP:
-		return "DestLookup (deprecated)"
-	case I2CP_MSG_DEST_REPLY:
-		return "DestReply (deprecated)"
-	case I2CP_MSG_HOST_LOOKUP:
-		return "HostLookup"
-	case I2CP_MSG_HOST_REPLY:
-		return "HostReply"
-	default:
-		return ""
+	if name, ok := destinationLookupNames[msgType]; ok {
+		return name
 	}
+	return ""
 }
 
 // getLeaseSetMessageName returns names for LeaseSet creation and management messages.
 func getLeaseSetMessageName(msgType uint8) string {
-	switch msgType {
-	case I2CP_MSG_CREATE_LEASE_SET:
-		return "CreateLeaseSet"
-	case I2CP_MSG_CREATE_LEASE_SET2:
-		return "CreateLeaseSet2"
-	case I2CP_MSG_REQUEST_LEASESET:
-		return "RequestLeaseSet (deprecated)"
-	case I2CP_MSG_REQUEST_VARIABLE_LEASESET:
-		return "RequestVariableLeaseSet"
-	case I2CP_MSG_BLINDING_INFO:
-		return "BlindingInfo"
-	case I2CP_MSG_SET_DATE:
-		return "SetDate"
-	case I2CP_MSG_GET_DATE:
-		return "GetDate"
-	default:
-		return ""
+	if name, ok := leaseSetNames[msgType]; ok {
+		return name
 	}
+	return ""
 }

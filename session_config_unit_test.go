@@ -675,7 +675,7 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	dataToVerify.WriteUint64(creationDate)
 
 	t.Logf("Data to verify length: %d bytes", dataToVerify.Len())
-	t.Logf("Data to verify (first 64 bytes): %x", dataToVerify.Bytes()[:min64(64, dataToVerify.Len())])
+	t.Logf("Data to verify (first 64 bytes): %x", dataToVerify.Bytes()[:min(64, dataToVerify.Len())])
 
 	// Verify Ed25519 signature using the destination's public key
 	if dest.sgk.ed25519KeyPair == nil {
@@ -688,13 +688,6 @@ func TestSessionConfigSignatureGeneration(t *testing.T) {
 	}
 
 	t.Log("Signature verification succeeded")
-}
-
-func min64(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // TestSessionConfigSignatureFormat verifies the signature has correct format
