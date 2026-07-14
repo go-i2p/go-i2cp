@@ -868,21 +868,6 @@ func (c *Client) configurePrimarySubsessionForSession(sessionID uint16, sess *Se
 	}
 }
 
-// configurePrimarySubsession sets up primary/subsession tracking per I2CP spec.
-// Deprecated: Use configurePrimarySubsessionForSession instead for thread safety.
-func (c *Client) configurePrimarySubsession(sessionID uint16) {
-	c.sessionMu.RLock()
-	sess := c.currentSession
-	c.sessionMu.RUnlock()
-
-	if sess == nil {
-		Error("configurePrimarySubsession called with nil currentSession")
-		return
-	}
-
-	c.configurePrimarySubsessionForSession(sessionID, sess)
-}
-
 // trackSessionCreatedState updates state tracker for newly created session.
 func (c *Client) trackSessionCreatedState(sessionID uint16) {
 	if c.stateTracker == nil || !c.stateTracker.IsEnabled() {

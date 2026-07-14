@@ -19,7 +19,14 @@ func TestMessageTracking_Basic(t *testing.T) {
 
 	// Track a message
 	nonce := uint32(12345)
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{
+		Nonce:       nonce,
+		Destination: dest,
+		Protocol:    1,
+		SrcPort:     80,
+		DestPort:    443,
+		PayloadSize: 1024,
+	})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -62,13 +69,27 @@ func TestMessageTracking_DuplicateNonce(t *testing.T) {
 	nonce := uint32(99999)
 
 	// Track first message
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{
+		Nonce:       nonce,
+		Destination: dest,
+		Protocol:    1,
+		SrcPort:     80,
+		DestPort:    443,
+		PayloadSize: 1024,
+	})
 	if err != nil {
 		t.Fatalf("First TrackMessage failed: %v", err)
 	}
 
 	// Attempt to track duplicate
-	err = session.TrackMessage(nonce, dest, 2, 81, 444, 2048, 0, 0)
+	err = session.TrackMessage(&PendingMessage{
+		Nonce:       nonce,
+		Destination: dest,
+		Protocol:    2,
+		SrcPort:     81,
+		DestPort:    444,
+		PayloadSize: 2048,
+	})
 	if err == nil {
 		t.Fatal("Duplicate nonce should be rejected")
 	}
@@ -87,7 +108,7 @@ func TestMessageTracking_Complete(t *testing.T) {
 	nonce := uint32(54321)
 
 	// Track message
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -160,7 +181,7 @@ func TestMessageTracking_GetPendingMessages(t *testing.T) {
 	// Track multiple messages
 	nonces := []uint32{1001, 1002, 1003}
 	for i, nonce := range nonces {
-		err = session.TrackMessage(nonce, dest, uint8(i+1), uint16(80+i), uint16(443+i), uint32(1024*(i+1)), 0, 0)
+		err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: uint8(i+1), SrcPort: uint16(80+i), DestPort: uint16(443+i), PayloadSize: uint32(1024*(i+1))})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}
@@ -198,7 +219,7 @@ func TestMessageTracking_ClearPendingMessages(t *testing.T) {
 
 	// Track multiple messages
 	for i := uint32(0); i < 5; i++ {
-		err = session.TrackMessage(2000+i, dest, 1, 80, 443, 1024, 0, 0)
+		err = session.TrackMessage(&PendingMessage{Nonce: 2000+i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}
@@ -236,7 +257,7 @@ func TestMessageTracking_WithExpiration(t *testing.T) {
 	expiration := uint64(60)
 
 	// Track message with expiration
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, flags, expiration)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024, Flags: flags, Expiration: expiration})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -276,7 +297,7 @@ func TestMessageTracking_Concurrency(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < messagesPerGoroutine; i++ {
 				nonce := uint32(goroutineID*messagesPerGoroutine + i)
-				_ = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+				_ = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 			}
 		}(g)
 	}
@@ -321,7 +342,7 @@ func TestMessageTracking_SessionClose(t *testing.T) {
 
 	// Track messages
 	for i := uint32(0); i < 3; i++ {
-		err = session.TrackMessage(4000+i, dest, 1, 80, 443, 1024, 0, 0)
+		err = session.TrackMessage(&PendingMessage{Nonce: 4000+i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}
@@ -371,7 +392,7 @@ func TestMessageTracking_DispatchMessageStatus(t *testing.T) {
 	nonce := uint32(5000)
 
 	// Track message
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -494,7 +515,7 @@ func TestMessageTracking_MultipleStatuses(t *testing.T) {
 	nonce := uint32(6000)
 
 	// Track message
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -534,7 +555,7 @@ func TestPendingMessage_Fields(t *testing.T) {
 	expiration := uint64(120)
 
 	// Track with all fields
-	err = session.TrackMessage(nonce, dest, protocol, srcPort, destPort, payloadSize, flags, expiration)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: protocol, SrcPort: srcPort, DestPort: destPort, PayloadSize: payloadSize, Flags: flags, Expiration: expiration})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}
@@ -597,7 +618,7 @@ func TestMessageTracking_ContextCancellation(t *testing.T) {
 
 	// Track message
 	nonce := uint32(8000)
-	err = session.TrackMessage(nonce, dest, 1, 80, 443, 1024, 0, 0)
+	err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 	if err != nil {
 		t.Fatalf("TrackMessage failed: %v", err)
 	}

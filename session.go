@@ -134,7 +134,14 @@ func (session *Session) SendMessage(destination *Destination, protocol uint8, sr
 		session.id, protocol, srcPort, destPort, nonce)
 
 	// Track message for delivery status (ignore errors if already tracked)
-	_ = session.TrackMessage(nonce, destination, protocol, srcPort, destPort, uint32(payload.Len()), 0, 0)
+	_ = session.TrackMessage(&PendingMessage{
+		Nonce:       nonce,
+		Destination: destination,
+		Protocol:    protocol,
+		SrcPort:     srcPort,
+		DestPort:    destPort,
+		PayloadSize: uint32(payload.Len()),
+	})
 
 	return session.client.msgSendMessage(session, destination, protocol, srcPort, destPort, payload, nonce, true)
 }
@@ -812,7 +819,16 @@ func (session *Session) SendMessageExpires(dest *Destination, protocol uint8, sr
 		session.id, protocol, srcPort, destPort, flags, expirationSeconds, nonce)
 
 	// Track message for delivery status (ignore errors if already tracked)
-	_ = session.TrackMessage(nonce, dest, protocol, srcPort, destPort, uint32(payload.Len()), flags, expirationSeconds)
+	_ = session.TrackMessage(&PendingMessage{
+		Nonce:       nonce,
+		Destination: dest,
+		Protocol:    protocol,
+		SrcPort:     srcPort,
+		DestPort:    destPort,
+		PayloadSize: uint32(payload.Len()),
+		Flags:       flags,
+		Expiration:  expirationSeconds,
+	})
 
 	return session.client.msgSendMessageExpires(session, dest, protocol, srcPort, destPort, payload, nonce, flags, expirationSeconds, true)
 }
@@ -847,8 +863,22 @@ func (session *Session) LookupDestination(address string, timeout time.Duration)
 		return err
 	}
 
+	// CRITICAL FIX: Register the lookup request in the client's pending-lookup table
+	// so that when the router's HostReplyMessage arrives, it can dispatch to OnDestination callback.
+	// Without this registration, the reply is silently discarded (see Finding 3 in I2CP_COMPLIANCE_AUDIT.md).
+	session.client.lock.Lock()
+	session.client.lookupReq[requestId] = LookupEntry{address: address, session: session, lookupType: lookupType}
+	session.client.lock.Unlock()
+
 	timeoutMs := uint32(timeout.Milliseconds())
-	return session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true)
+	if err := session.client.msgHostLookup(session, requestId, timeoutMs, lookupType, lookupDataBytes, true); err != nil {
+		// Cleanup on failure
+		session.client.lock.Lock()
+		delete(session.client.lookupReq, requestId)
+		session.client.lock.Unlock()
+		return err
+	}
+	return nil
 }
 
 // validateLookupRequest validates session state and address for lookup.
@@ -1023,7 +1053,11 @@ func (session *Session) IsBlindingEnabled() bool {
 // TrackMessage registers a message for delivery tracking
 // per I2CP specification - tracks messages from send to status callback (type 22)
 // Returns error if nonce is already being tracked
-func (session *Session) TrackMessage(nonce uint32, dest *Destination, protocol uint8, srcPort, destPort uint16, payloadSize uint32, flags uint16, expiration uint64) error {
+func (session *Session) TrackMessage(pending *PendingMessage) error {
+	if pending == nil {
+		return fmt.Errorf("pending message cannot be nil")
+	}
+
 	session.messageMu.Lock()
 	defer session.messageMu.Unlock()
 
@@ -1033,27 +1067,18 @@ func (session *Session) TrackMessage(nonce uint32, dest *Destination, protocol u
 	}
 
 	// Check for duplicate nonce
-	if _, exists := session.pendingMessages[nonce]; exists {
-		return fmt.Errorf("message with nonce %d is already being tracked", nonce)
+	if _, exists := session.pendingMessages[pending.Nonce]; exists {
+		return fmt.Errorf("message with nonce %d is already being tracked", pending.Nonce)
 	}
 
-	// Create pending message
-	pending := &PendingMessage{
-		Nonce:       nonce,
-		Destination: dest,
-		Protocol:    protocol,
-		SrcPort:     srcPort,
-		DestPort:    destPort,
-		PayloadSize: payloadSize,
-		SentAt:      time.Now(),
-		Status:      0, // 0 indicates pending
-		Flags:       flags,
-		Expiration:  expiration,
+	// Set sent timestamp if not already set
+	if pending.SentAt.IsZero() {
+		pending.SentAt = time.Now()
 	}
 
-	session.pendingMessages[nonce] = pending
+	session.pendingMessages[pending.Nonce] = pending
 	Debug("Tracking message for session %d: nonce=%d, protocol=%d, srcPort=%d, destPort=%d, size=%d",
-		session.id, nonce, protocol, srcPort, destPort, payloadSize)
+		session.id, pending.Nonce, pending.Protocol, pending.SrcPort, pending.DestPort, pending.PayloadSize)
 
 	return nil
 }

@@ -49,8 +49,21 @@ func (c *Client) msgHostLookup(sess *Session, requestId, timeout uint32, typ uin
 		stream.WriteUint32(requestId)
 		stream.WriteUint32(timeout)
 		stream.WriteByte(typ)
-		if typ == HOST_LOOKUP_TYPE_HASH {
+
+		// Per SPEC.md § HostLookupMessage: every request type must include the lookup key
+		// (SHA-256 Hash or hostname String or Destination) at the end of the message
+		switch typ {
+		case HOST_LOOKUP_TYPE_HASH, HOST_LOOKUP_TYPE_HASH_WITH_OPTIONS:
+			// Hash types: write raw 32-byte hash
 			stream.Write(data)
+		case HOST_LOOKUP_TYPE_HOSTNAME, HOST_LOOKUP_TYPE_HOSTNAME_WITH_OPTIONS:
+			// Hostname types: write as length-prefixed I2CP String
+			stream.WriteLenPrefixedString(string(data))
+		case HOST_LOOKUP_TYPE_DEST_WITH_OPTIONS:
+			// Destination type: write as length-prefixed Destination
+			stream.WriteLenPrefixedString(string(data))
+		default:
+			return fmt.Errorf("unsupported host lookup type: %d", typ)
 		}
 		return nil
 	}, queue)

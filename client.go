@@ -14,15 +14,25 @@ import (
 type ClientProperty int
 
 const (
+	// CLIENT_PROP_ROUTER_ADDRESS specifies the I2P router's host or IP address (default: 127.0.0.1)
 	CLIENT_PROP_ROUTER_ADDRESS ClientProperty = iota
+	// CLIENT_PROP_ROUTER_PORT specifies the I2P router's I2CP port (default: 7654)
 	CLIENT_PROP_ROUTER_PORT
+	// CLIENT_PROP_ROUTER_USE_TLS enables TLS/SSL connection to the router (default: false)
 	CLIENT_PROP_ROUTER_USE_TLS
+	// CLIENT_PROP_USERNAME specifies username for HTTP Basic authentication
 	CLIENT_PROP_USERNAME
+	// CLIENT_PROP_PASSWORD specifies password for HTTP Basic authentication
 	CLIENT_PROP_PASSWORD
+	// CLIENT_PROP_TLS_CERT_FILE specifies path to client TLS certificate (PEM format)
 	CLIENT_PROP_TLS_CERT_FILE
+	// CLIENT_PROP_TLS_KEY_FILE specifies path to client TLS private key (PEM format)
 	CLIENT_PROP_TLS_KEY_FILE
+	// CLIENT_PROP_TLS_CA_FILE specifies path to CA certificate for router verification (PEM format)
 	CLIENT_PROP_TLS_CA_FILE
+	// CLIENT_PROP_TLS_INSECURE disables TLS certificate verification (dangerous, for testing only)
 	CLIENT_PROP_TLS_INSECURE
+	// NR_OF_I2CP_CLIENT_PROPERTIES is the number of client properties (for bounds checking)
 	NR_OF_I2CP_CLIENT_PROPERTIES
 )
 
@@ -67,6 +77,10 @@ var defaultProperties = map[string]string{
 	"outbound.backupQuantity": "0", // Number of backup outbound tunnels
 }
 
+// Client represents an I2CP protocol client for communicating with an I2P router.
+// It manages connections, sessions, message routing, and state synchronization with the router.
+// Client is thread-safe for concurrent access to public APIs.
+// Most methods require a prior successful Connect() call.
 type Client struct {
 	callbacks       *ClientCallBacks
 	properties      map[string]string
@@ -588,12 +602,14 @@ func (c *Client) writeAuthenticationMapping() {
 		Debug("Using TLS certificate authentication (method 2)")
 
 	case AUTH_METHOD_NONE:
-		c.messageStream.WriteMapping(map[string]string{})
-		Debug("Using no authentication (method 0) - sending empty mapping for 0.9.11+ compliance")
-
+		fallthrough // No authentication - send empty mapping
 	default:
-		Warning("Unknown authentication method %d, using no authentication with empty mapping", authMethod)
 		c.messageStream.WriteMapping(map[string]string{})
+		if authMethod == AUTH_METHOD_NONE {
+			Debug("Using no authentication (method 0) - sending empty mapping for 0.9.11+ compliance")
+		} else {
+			Warning("Unknown authentication method %d, using no authentication with empty mapping", authMethod)
+		}
 	}
 }
 
@@ -1362,8 +1378,22 @@ func (c *Client) msgSendMessageExpires(sess *Session, dest *Destination, protoco
 
 	return c.sendSimpleMessage(I2CP_MSG_SEND_MESSAGE_EXPIRES, "SendMessageExpiresMessage", func(stream *Stream) error {
 		c.buildSendMessageStream(stream, sess, dest, compressedPayload, nonce)
-		stream.WriteUint16(flags)
-		stream.WriteUint64(expirationSeconds)
+
+		// Per SPEC.md § SendMessageExpiresMessage: the upper two bytes of the 8-byte Date field
+		// are redefined to contain flags. Pack as: (flags << 48) | (expirationMs & 0xFFFFFFFFFFFF)
+		// Convert expirationSeconds (relative duration) to absolute epoch milliseconds
+		expirationMs := uint64(time.Now().UnixMilli()) + (expirationSeconds * 1000)
+
+		// Truncate to 48 bits and pack flags in upper 16 bits (two bytes)
+		// Ensure expiration doesn't exceed 48-bit max (281474976710655 ms ≈ year 10889)
+		if expirationMs > 0xFFFFFFFFFFFF {
+			Warning("Expiration %d ms exceeds 48-bit max, clamping to maximum value", expirationMs)
+			expirationMs = 0xFFFFFFFFFFFF
+		}
+
+		combined := (uint64(flags) << 48) | (expirationMs & 0xFFFFFFFFFFFF)
+		stream.WriteUint64(combined)
+
 		return c.validateMessageSize(compressedPayload.Len())
 	}, queue)
 }
