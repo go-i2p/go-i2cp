@@ -149,6 +149,48 @@ type Client struct {
 	protocolDebugger *ProtocolDebugger // nil = debugging disabled, use EnableDebugging() to enable
 }
 
+// FUTURE REFACTORING OPPORTUNITY: Client struct field grouping
+//
+// The Client struct has grown to 25+ fields spanning multiple concerns. Future refactoring
+// could improve maintainability by grouping related fields into logical sub-structs.
+// This would require careful API migration but would benefit long-term code clarity.
+//
+// Proposed groupings:
+//
+//   1. Connection/Network Management
+//      - tcp, outputStream, receiveStream, messageStream, messageStreamMu
+//      - connected, outputQueue
+//
+//   2. Router Information & State
+//      - router, routerVersion, routerVersionMu
+//      - routerTimeDelta, routerTimeMu (router time synchronization)
+//
+//   3. Session Management
+//      - sessions, n_sessions, currentSession, sessionMu
+//      - primarySessionID (multi-session support tracking)
+//
+//   4. Destination Lookup
+//      - lookup, lookupReq, lookupRequestId
+//
+//   5. Connection Resilience
+//      - reconnectEnabled, reconnectAttempts, reconnectMaxRetries
+//      - reconnectBackoff, reconnectMu
+//      - circuitBreaker (optional circuit breaking)
+//
+//   6. Message Optimization
+//      - batchEnabled, batchFlushTimer, batchSizeThreshold
+//      - batchTicker, batchMu
+//
+//   7. Diagnostics & Monitoring
+//      - metrics, messageStats, stateTracker, protocolDebugger
+//
+// Migration strategy (if implemented):
+// - Create ClientNetworking, ClientRouter, ClientSessions, etc. as embedded fields
+// - Update all accessor methods to delegate through embedded fields
+// - Preserve public API by keeping field access patterns identical
+// - Migrate one logical group at a time to minimize risk
+// - Add helper methods for cross-struct field access patterns
+
 var defaultConfigFile = "/.i2cp.conf"
 
 // NewClient creates a new i2p client with the specified callbacks
