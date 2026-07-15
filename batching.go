@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+// withBatchLock executes the given function while holding the batch lock.
+// Helper to reduce Lock/Unlock/defer repetition across 3 entry points.
+func (c *Client) withBatchLock(fn func()) {
+	c.batchMu.Lock()
+	defer c.batchMu.Unlock()
+	fn()
+}
+
+// withBatchLockBool executes the given function while holding the batch lock and returns a bool.
+func (c *Client) withBatchLockBool(fn func() bool) bool {
+	c.batchMu.Lock()
+	defer c.batchMu.Unlock()
+	return fn()
+}
+
 // EnableBatching enables message batching with the specified flush timer and size threshold.
 // flushTimer: duration to wait before flushing batch (e.g., 10ms)
 // sizeThreshold: size in bytes to trigger immediate flush (e.g., 16KB)
@@ -15,24 +30,23 @@ func (c *Client) EnableBatching(flushTimer time.Duration, sizeThreshold int) {
 		return
 	}
 
-	c.batchMu.Lock()
-	defer c.batchMu.Unlock()
+	c.withBatchLock(func() {
+		if c.batchEnabled {
+			Warning("Message batching already enabled")
+			return
+		}
 
-	if c.batchEnabled {
-		Warning("Message batching already enabled")
-		return
-	}
+		c.batchFlushTimer = flushTimer
+		c.batchSizeThreshold = sizeThreshold
+		c.batchEnabled = true
 
-	c.batchFlushTimer = flushTimer
-	c.batchSizeThreshold = sizeThreshold
-	c.batchEnabled = true
+		// Start background flush ticker
+		c.batchTicker = time.NewTicker(flushTimer)
+		c.wg.Add(1)
+		go c.batchFlushWorker()
 
-	// Start background flush ticker
-	c.batchTicker = time.NewTicker(flushTimer)
-	c.wg.Add(1)
-	go c.batchFlushWorker()
-
-	Info("Message batching enabled (timer=%v, threshold=%d bytes)", flushTimer, sizeThreshold)
+		Info("Message batching enabled (timer=%v, threshold=%d bytes)", flushTimer, sizeThreshold)
+	})
 }
 
 // DisableBatching disables message batching and stops the flush timer.
@@ -43,28 +57,29 @@ func (c *Client) DisableBatching() error {
 		return nil
 	}
 
-	c.batchMu.Lock()
-	defer c.batchMu.Unlock()
+	var flushErr error
+	c.withBatchLock(func() {
+		if !c.batchEnabled {
+			return
+		}
 
-	if !c.batchEnabled {
-		return nil
-	}
+		// Stop ticker
+		if c.batchTicker != nil {
+			c.batchTicker.Stop()
+			c.batchTicker = nil
+		}
 
-	// Stop ticker
-	if c.batchTicker != nil {
-		c.batchTicker.Stop()
-		c.batchTicker = nil
-	}
+		c.batchEnabled = false
 
-	c.batchEnabled = false
+		// Flush any remaining messages
+		if err := c.flushOutputQueue(); err != nil {
+			flushErr = fmt.Errorf("failed to flush queue during disable: %w", err)
+			return
+		}
 
-	// Flush any remaining messages
-	if err := c.flushOutputQueue(); err != nil {
-		return fmt.Errorf("failed to flush queue during disable: %w", err)
-	}
-
-	Info("Message batching disabled")
-	return nil
+		Info("Message batching disabled")
+	})
+	return flushErr
 }
 
 // IsBatchingEnabled returns whether message batching is currently enabled.
@@ -74,9 +89,9 @@ func (c *Client) IsBatchingEnabled() bool {
 		return false
 	}
 
-	c.batchMu.Lock()
-	defer c.batchMu.Unlock()
-	return c.batchEnabled
+	return c.withBatchLockBool(func() bool {
+		return c.batchEnabled
+	})
 }
 
 // batchFlushWorker runs in a background goroutine and periodically flushes the output queue.

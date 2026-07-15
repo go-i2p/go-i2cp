@@ -59,6 +59,50 @@ func NewCircuitBreaker(maxFailures int, resetTimeout time.Duration) *CircuitBrea
 	}
 }
 
+// withLock executes the given function while holding the circuit breaker lock.
+// This helper eliminates repetition of Lock/Unlock/defer patterns across 7 methods.
+func (cb *CircuitBreaker) withLock(fn func()) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	fn()
+}
+
+// withLockReturn executes the given function while holding the lock and returns its value.
+// Generic helper for methods that return a single value while protected by the lock.
+func (cb *CircuitBreaker) withLockReturn(fn func() interface{}) interface{} {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return fn()
+}
+
+// withLockCircuitState executes the given function while holding the lock and returns CircuitState.
+func (cb *CircuitBreaker) withLockCircuitState(fn func() CircuitState) CircuitState {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return fn()
+}
+
+// withLockInt executes the given function while holding the lock and returns an int.
+func (cb *CircuitBreaker) withLockInt(fn func() int) int {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return fn()
+}
+
+// withLockString executes the given function while holding the lock and returns a string.
+func (cb *CircuitBreaker) withLockString(fn func() string) string {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return fn()
+}
+
+// withLockError executes the given function while holding the lock and returns an error.
+func (cb *CircuitBreaker) withLockError(fn func() error) error {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return fn()
+}
+
 // Execute runs the given function if the circuit breaker allows it.
 // Returns an error if the circuit is open or if the function fails.
 //
@@ -93,43 +137,41 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 // beforeRequest checks if the circuit allows the request.
 // Returns an error if the circuit is open.
 func (cb *CircuitBreaker) beforeRequest() error {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
+	return cb.withLockError(func() error {
+		switch cb.state {
+		case CircuitOpen:
+			// Check if we should transition to half-open
+			if time.Since(cb.lastFailure) > cb.resetTimeout {
+				cb.state = CircuitHalfOpen
+				Debug("Circuit breaker transitioning to half-open state")
+				return nil
+			}
+			return fmt.Errorf("circuit breaker is open (last failure: %v ago)",
+				time.Since(cb.lastFailure).Round(time.Second))
 
-	switch cb.state {
-	case CircuitOpen:
-		// Check if we should transition to half-open
-		if time.Since(cb.lastFailure) > cb.resetTimeout {
-			cb.state = CircuitHalfOpen
-			Debug("Circuit breaker transitioning to half-open state")
+		case CircuitHalfOpen:
+			// Allow one request in half-open state
 			return nil
+
+		case CircuitClosed:
+			// Normal operation
+			return nil
+
+		default:
+			return fmt.Errorf("circuit breaker in unknown state: %s", cb.state)
 		}
-		return fmt.Errorf("circuit breaker is open (last failure: %v ago)",
-			time.Since(cb.lastFailure).Round(time.Second))
-
-	case CircuitHalfOpen:
-		// Allow one request in half-open state
-		return nil
-
-	case CircuitClosed:
-		// Normal operation
-		return nil
-
-	default:
-		return fmt.Errorf("circuit breaker in unknown state: %s", cb.state)
-	}
+	})
 }
 
 // afterRequest records the result of a request and updates circuit state.
 func (cb *CircuitBreaker) afterRequest(err error) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	if err != nil {
-		cb.recordFailure()
-	} else {
-		cb.recordSuccess()
-	}
+	cb.withLock(func() {
+		if err != nil {
+			cb.recordFailure()
+		} else {
+			cb.recordSuccess()
+		}
+	})
 }
 
 // recordFailure increments the failure count and opens circuit if threshold reached.
@@ -169,9 +211,9 @@ func (cb *CircuitBreaker) recordSuccess() {
 
 // State returns the current state of the circuit breaker.
 func (cb *CircuitBreaker) State() CircuitState {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.state
+	return cb.withLockCircuitState(func() CircuitState {
+		return cb.state
+	})
 }
 
 // IsOpen returns true if the circuit is currently open.
@@ -191,34 +233,34 @@ func (cb *CircuitBreaker) IsHalfOpen() bool {
 
 // Failures returns the current failure count.
 func (cb *CircuitBreaker) Failures() int {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.failures
+	return cb.withLockInt(func() int {
+		return cb.failures
+	})
 }
 
 // Reset manually resets the circuit breaker to closed state with zero failures.
 // This is useful for testing or manual intervention.
 func (cb *CircuitBreaker) Reset() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.state = CircuitClosed
-	cb.failures = 0
-	Debug("Circuit breaker manually reset")
+	cb.withLock(func() {
+		cb.state = CircuitClosed
+		cb.failures = 0
+		Debug("Circuit breaker manually reset")
+	})
 }
 
 // RecordFailure records an external failure in the circuit breaker.
 // This is used for operations not wrapped with Execute(), such as receive errors.
 func (cb *CircuitBreaker) RecordFailure() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.recordFailure()
+	cb.withLock(func() {
+		cb.recordFailure()
+	})
 }
 
 // String returns a human-readable representation of the circuit breaker state.
 func (cb *CircuitBreaker) String() string {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return fmt.Sprintf("CircuitBreaker{state=%s, failures=%d/%d, lastFailure=%v}",
-		cb.state, cb.failures, cb.maxFailures,
-		time.Since(cb.lastFailure).Round(time.Second))
+	return cb.withLockString(func() string {
+		return fmt.Sprintf("CircuitBreaker{state=%s, failures=%d/%d, lastFailure=%v}",
+			cb.state, cb.failures, cb.maxFailures,
+			time.Since(cb.lastFailure).Round(time.Second))
+	})
 }

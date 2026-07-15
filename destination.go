@@ -84,10 +84,16 @@ func createEd25519SigningKeyPair(signingKeyPadded []byte) (SignatureKeyPair, err
 		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 public key: %w", err)
 	}
 
+	return wrapEd25519SignatureKeyPair(ed25519KeyPair), nil
+}
+
+// wrapEd25519SignatureKeyPair wraps an Ed25519KeyPair in a SignatureKeyPair.
+// Helper to reduce duplication of the Ed25519 wrapping pattern.
+func wrapEd25519SignatureKeyPair(ed25519KeyPair *Ed25519KeyPair) SignatureKeyPair {
 	return SignatureKeyPair{
 		algorithmType:  ED25519_SHA256,
 		ed25519KeyPair: ed25519KeyPair,
-	}, nil
+	}
 }
 
 // NewDestinationFromMessage reads a destination from an I2CP message stream.
@@ -206,14 +212,12 @@ func readDestinationEd25519KeyPair(stream *Stream) (SignatureKeyPair, error) {
 		return SignatureKeyPair{}, fmt.Errorf("failed to create Ed25519 public key: %w", err)
 	}
 
-	return SignatureKeyPair{
+	keyPair := &Ed25519KeyPair{
 		algorithmType: ED25519_SHA256,
-		ed25519KeyPair: &Ed25519KeyPair{
-			algorithmType: ED25519_SHA256,
-			privateKey:    privKey,
-			publicKey:     pubKey,
-		},
-	}, nil
+		privateKey:    privKey,
+		publicKey:     pubKey,
+	}
+	return wrapEd25519SignatureKeyPair(keyPair), nil
 }
 
 // readDestinationEncryptionKey reads and validates the encryption public key.
