@@ -173,6 +173,9 @@ func createAndWaitSubsession(t *testing.T, client *Client, ctx context.Context, 
 // DestroySession message as usual. This will not destroy the primary session
 // or stop the I2CP connection."
 func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
 	defer cancel()
 
@@ -261,6 +264,9 @@ func TestSubsessionDestruction_IndividualCleanup(t *testing.T) {
 // Per I2CP § Destroying Subsessions: "Destroying the primary session will, however,
 // destroy all subsessions and stop the I2CP connection."
 func TestSubsessionDestruction_PrimaryDestroysAll(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
 	defer cancel()
 
@@ -317,6 +323,9 @@ func TestSubsessionDestruction_PrimaryDestroysAll(t *testing.T) {
 // TestSubsessionDestruction_MultipleSequential tests creating and destroying
 // multiple subsessions sequentially while keeping the primary active.
 func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	client, ctx, cancel := connectMultiSessionClient(t, 2*subsessionTestTimeout)
 	defer cancel()
 
@@ -387,6 +396,9 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 // TestSubsessionCleanup_ResourceVerification verifies that subsession cleanup
 // properly releases all resources to prevent memory leaks.
 func TestSubsessionCleanup_ResourceVerification(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	client, ctx, cancel := connectMultiSessionClient(t, subsessionTestTimeout)
 	defer cancel()
 

@@ -136,6 +136,9 @@ func connectAndCreateSession(t *testing.T, callbacks SessionCallbacks, nickname 
 // This test demonstrates the fundamental I2CP session management operations
 // that form the foundation for all I2P communications.
 func TestSessionLifecycle(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	// Track callback invocations for validation
 	var (
 		statusMu       sync.Mutex
@@ -297,6 +300,9 @@ func TestSessionLifecycle(t *testing.T) {
 // This test demonstrates actual I2P network communication over the anonymous
 // network, proving the library can successfully route messages between destinations.
 func TestBidirectionalDataTransfer(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	// Test payload with checksum for integrity verification
 	testPayload := []byte("Hello from go-i2cp integration test! This is a test message for bidirectional data transfer.")
 	payloadChecksum := sha256.Sum256(testPayload)
@@ -497,6 +503,9 @@ func verifyMessageDelivery(t *testing.T, messageReceived <-chan struct{}, target
 // This test demonstrates the I2P naming/addressing system and how destinations
 // are resolved before communication can occur.
 func TestDestinationLookupAndRouting(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	// Track received messages on target
 	var (
 		targetMu        sync.Mutex
@@ -610,6 +619,9 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 // - Data integrity across multiple transfers
 // - Protocol identifier handling
 func TestMultipleMessagesWithIntegrity(t *testing.T) {
+	// Wait for I2CP server and tunnel readiness
+	waitForI2CPReadiness(t)
+
 	const messageCount = 5
 	messageSizes := []int{100, 500, 1000, 5000, 10000}
 
