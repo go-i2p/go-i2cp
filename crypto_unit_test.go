@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+// testRoundTripKeyPair is a shared helper for testing key-type round-trip serialization.
+// It tests writing a key pair to a stream, reading it back, and verifying restoration works.
+// Params:
+//   - t: testing.T instance
+//   - write: function that writes the key pair to a stream and returns error
+//   - read: function that reads the key pair from a stream and returns (restored, error)
+//   - publicKeyCompare: function that compares public keys and returns true if equal
+func testRoundTripKeyPair(t *testing.T, write func(*Stream) error, read func(*Stream) (interface{}, error), publicKeyCompare func(interface{}) bool) {
+	// Write to stream
+	stream := NewStream(make([]byte, 0, 1024))
+	if err := write(stream); err != nil {
+		t.Fatalf("Failed to write key pair to stream: %v", err)
+	}
+
+	// Read back from stream
+	readStream := NewStream(stream.Bytes())
+	restored, err := read(readStream)
+	if err != nil {
+		t.Fatalf("Failed to read key pair from stream: %v", err)
+	}
+
+	// Verify public keys match
+	if !publicKeyCompare(restored) {
+		t.Error("Public keys don't match after stream serialization")
+	}
+}
+
 // TestEd25519KeyPair tests Ed25519 signature operations
 func TestEd25519KeyPair(t *testing.T) {
 	// Generate a new Ed25519 key pair
@@ -35,24 +62,20 @@ func TestEd25519KeyPair(t *testing.T) {
 		t.Error("Signature verification should have failed for wrong message")
 	}
 
-	// Test stream serialization
+	// Test stream serialization using helper
+	testRoundTripKeyPair(t,
+		func(stream *Stream) error { return kp.WriteToStream(stream) },
+		func(stream *Stream) (interface{}, error) { return Ed25519KeyPairFromStream(stream) },
+		func(restored interface{}) bool {
+			kp2 := restored.(*Ed25519KeyPair)
+			return bytes.Equal(kp.PublicKey(), kp2.PublicKey())
+		})
+
+	// Additional verification: test that restored key pair works
 	stream := NewStream(make([]byte, 0, 1024))
-	err = kp.WriteToStream(stream)
-	if err != nil {
-		t.Fatalf("Failed to write key pair to stream: %v", err)
-	}
-
-	// Read back from stream
+	kp.WriteToStream(stream)
 	readStream := NewStream(stream.Bytes())
-	kp2, err := Ed25519KeyPairFromStream(readStream)
-	if err != nil {
-		t.Fatalf("Failed to read key pair from stream: %v", err)
-	}
-
-	// Test that the restored key pair works
-	if !bytes.Equal(kp.PublicKey(), kp2.PublicKey()) {
-		t.Error("Public keys don't match after stream serialization")
-	}
+	kp2, _ := Ed25519KeyPairFromStream(readStream)
 
 	signature2, err := kp2.Sign(message)
 	if err != nil {
@@ -98,24 +121,20 @@ func TestX25519KeyPair(t *testing.T) {
 		t.Error("Shared secrets don't match")
 	}
 
-	// Test stream serialization
+	// Test stream serialization using helper
+	testRoundTripKeyPair(t,
+		func(stream *Stream) error { return alice.WriteToStream(stream) },
+		func(stream *Stream) (interface{}, error) { return X25519KeyPairFromStream(stream) },
+		func(restored interface{}) bool {
+			alice2 := restored.(*X25519KeyPair)
+			return alice.PublicKey() == alice2.PublicKey()
+		})
+
+	// Additional verification: test that restored key pair works
 	stream := NewStream(make([]byte, 0, 1024))
-	err = alice.WriteToStream(stream)
-	if err != nil {
-		t.Fatalf("Failed to write key pair to stream: %v", err)
-	}
-
-	// Read back from stream
+	alice.WriteToStream(stream)
 	readStream := NewStream(stream.Bytes())
-	alice2, err := X25519KeyPairFromStream(readStream)
-	if err != nil {
-		t.Fatalf("Failed to read key pair from stream: %v", err)
-	}
-
-	// Test that the restored key pair works
-	if alice.PublicKey() != alice2.PublicKey() {
-		t.Error("Public keys don't match after stream serialization")
-	}
+	alice2, _ := X25519KeyPairFromStream(readStream)
 
 	sharedSecretAlice2, err := alice2.GenerateSharedSecret(bob.PublicKey())
 	if err != nil {

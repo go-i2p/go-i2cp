@@ -59,6 +59,21 @@ type Crypto struct {
 	rng io.Reader // Random number generator (crypto/rand.Reader)
 }
 
+// algorithmTyped is an optional interface for types that implement the I2CP
+// cryptographic algorithm type pattern. Types implementing this interface
+// can be used interchangeably in contexts where algorithm type identification
+// is needed.
+//
+// Implementations:
+//   - Ed25519KeyPair
+//   - X25519KeyPair
+//   - ChaCha20Poly1305Cipher
+type algorithmTyped interface {
+	// AlgorithmType returns the I2CP algorithm type constant for the receiver.
+	// See protocol constants (e.g., ED25519_SHA256, X25519, CHACHA20_POLY1305).
+	AlgorithmType() uint32
+}
+
 // readAlgorithmType reads and validates an algorithm type from the stream.
 // It verifies that the read value matches the expected constant.
 // Returns the algorithm type if valid, or an error if the read fails or the type doesn't match.
