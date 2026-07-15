@@ -286,29 +286,29 @@ func (tcp *Tcp) CanRead() bool {
 	// Use buffered reader's Peek() for non-destructive data availability check
 	// This fixes the critical bug where CanRead() consumed bytes from the stream
 	if reader != nil {
-		return canReadBuffered(tcp, conn, reader)
+		return tcp.canReadBuffered(conn, reader)
 	}
 
 	// Fallback for unbuffered connection (should not occur in normal operation)
-	return canReadUnbuffered(tcp, conn)
+	return tcp.canReadUnbuffered()
 }
 
 // canReadBuffered checks if data is available using buffered reader's Peek.
 // Returns true if data is available, false otherwise.
-func canReadBuffered(tcp *Tcp, conn net.Conn, reader *bufio.Reader) bool {
-	err := peekBufferedData(conn, reader)
+func (tcp *Tcp) canReadBuffered(conn net.Conn, reader *bufio.Reader) bool {
+	err := tcp.peekBufferedData(conn, reader)
 
 	if err == nil {
 		// Data is available and buffered
 		return true
 	}
 
-	return handleReadError(tcp, err)
+	return tcp.handleReadError(err)
 }
 
 // peekBufferedData attempts to peek at one byte with a timeout to avoid blocking.
 // Returns nil if data is available, error otherwise.
-func peekBufferedData(conn net.Conn, reader *bufio.Reader) error {
+func (tcp *Tcp) peekBufferedData(conn net.Conn, reader *bufio.Reader) error {
 	// Set a read deadline to prevent blocking indefinitely.
 	// Using 100ms instead of 1ms for more reliable timeout handling.
 	// This prevents CanRead() from hanging on closed or unresponsive connections.
@@ -335,7 +335,7 @@ func peekBufferedData(conn net.Conn, reader *bufio.Reader) error {
 
 // handleReadError processes errors from read operations and determines availability.
 // Returns false for EOF, timeout, or other errors.
-func handleReadError(tcp *Tcp, err error) bool {
+func (tcp *Tcp) handleReadError(err error) bool {
 	// Handle EOF (connection closed)
 	if err == io.EOF {
 		if tcp.address != nil {
@@ -356,7 +356,7 @@ func handleReadError(tcp *Tcp, err error) bool {
 
 // canReadUnbuffered is a fallback for when the buffered reader is not initialized.
 // Returns false to fail safe rather than consuming data from the stream.
-func canReadUnbuffered(tcp *Tcp, conn net.Conn) bool {
+func (tcp *Tcp) canReadUnbuffered() bool {
 	Warning("CanRead: buffered reader not initialized, failing safe to prevent data consumption")
 	return false
 }

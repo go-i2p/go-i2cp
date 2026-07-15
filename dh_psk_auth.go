@@ -331,9 +331,9 @@ func AuthenticateForBlindedDestination(scheme uint8, clientKey, serverPublicKey 
 //   - blindedSigType: Signature type used for blinding
 //   - expiration: Expiration time (seconds since epoch)
 //
-// configureBlindingAuth derives a per-client auth key and attaches it to a BlindingInfo.
-// This is the shared implementation for all Create*BlindingInfo* convenience functions.
-func configureBlindingAuth(info *BlindingInfo, scheme uint8, key1, key2 [32]byte, schemeName string) (*BlindingInfo, error) {
+// newBlindingInfoWithAuth is the internal constructor for creating BlindingInfo with per-client auth.
+// It consolidates all 4 public Create*BlindingInfo* functions to avoid code duplication.
+func newBlindingInfoWithAuth(info *BlindingInfo, scheme uint8, key1, key2 [32]byte, schemeName string) (*BlindingInfo, error) {
 	decryptionKey, err := DerivePerClientAuthKey(scheme, key1, key2)
 	if err != nil {
 		return nil, fmt.Errorf("%s authentication failed: %w", schemeName, err)
@@ -355,7 +355,7 @@ func CreateDHBlindingInfo(
 	if err != nil {
 		return nil, err
 	}
-	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
+	return newBlindingInfoWithAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
 }
 
 // CreatePSKBlindingInfo creates a complete BlindingInfo with PSK authentication
@@ -378,7 +378,7 @@ func CreatePSKBlindingInfo(
 	if err != nil {
 		return nil, err
 	}
-	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
+	return newBlindingInfoWithAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
 }
 
 // CreateDHBlindingInfoForHostname creates BlindingInfo with DH auth for a hostname endpoint.
@@ -392,7 +392,7 @@ func CreateDHBlindingInfoForHostname(
 	if err != nil {
 		return nil, err
 	}
-	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
+	return newBlindingInfoWithAuth(info, BLINDING_AUTH_SCHEME_DH, clientPrivateKey, serverPublicKey, "DH")
 }
 
 // CreatePSKBlindingInfoForHostname creates BlindingInfo with PSK auth for a hostname endpoint.
@@ -406,7 +406,7 @@ func CreatePSKBlindingInfoForHostname(
 	if err != nil {
 		return nil, err
 	}
-	return configureBlindingAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
+	return newBlindingInfoWithAuth(info, BLINDING_AUTH_SCHEME_PSK, preSharedKey, [32]byte{}, "PSK")
 }
 
 // VerifyDHSharedSecret verifies that a DH shared secret can be derived from the given keys.

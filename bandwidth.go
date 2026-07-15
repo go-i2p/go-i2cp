@@ -71,38 +71,44 @@ func (b *BandwidthLimits) String() string {
 		b.BurstTime)
 }
 
+// kbpsToBytesPerSec converts kilobytes per second to bytes per second.
+// Helper function used by all BytesPerSecond getter methods to avoid duplication.
+func kbpsToBytesPerSec(kbps uint32) int {
+	return int(kbps) * 1024
+}
+
 // InboundBytesPerSecond returns the client inbound limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) InboundBytesPerSecond() int {
-	return int(b.ClientInbound) * 1024
+	return kbpsToBytesPerSec(b.ClientInbound)
 }
 
 // OutboundBytesPerSecond returns the client outbound limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) OutboundBytesPerSecond() int {
-	return int(b.ClientOutbound) * 1024
+	return kbpsToBytesPerSec(b.ClientOutbound)
 }
 
 // RouterInboundBytesPerSecond returns the router inbound limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) RouterInboundBytesPerSecond() int {
-	return int(b.RouterInbound) * 1024
+	return kbpsToBytesPerSec(b.RouterInbound)
 }
 
 // RouterOutboundBytesPerSecond returns the router outbound limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) RouterOutboundBytesPerSecond() int {
-	return int(b.RouterOutbound) * 1024
+	return kbpsToBytesPerSec(b.RouterOutbound)
 }
 
 // RouterInboundBurstBytesPerSecond returns the router inbound burst limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) RouterInboundBurstBytesPerSecond() int {
-	return int(b.RouterInboundBurst) * 1024
+	return kbpsToBytesPerSec(b.RouterInboundBurst)
 }
 
 // RouterOutboundBurstBytesPerSecond returns the router outbound burst limit in bytes per second.
 // Converts from KBps (as transmitted in I2CP protocol) to bytes/sec.
 func (b *BandwidthLimits) RouterOutboundBurstBytesPerSecond() int {
-	return int(b.RouterOutboundBurst) * 1024
+	return kbpsToBytesPerSec(b.RouterOutboundBurst)
 }
