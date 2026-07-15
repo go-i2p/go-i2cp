@@ -438,10 +438,14 @@ func TestBlindingCrypto_Integration(t *testing.T) {
 
 // BenchmarkDeriveBlindingFactor benchmarks blinding factor derivation.
 func BenchmarkDeriveBlindingFactor(b *testing.B) {
-	secret := make([]byte, 32)
-	for i := range secret {
-		secret[i] = byte(i)
+	crypto := NewCrypto()
+	dest, err := NewDestination(crypto)
+	if err != nil {
+		b.Fatalf("Failed to create destination: %v", err)
 	}
+
+	keyPair, _ := dest.SigningKeyPair()
+	_, _, secret := getTestKeys(keyPair)
 	date := kdf.GetCurrentBlindingDate()
 
 	b.ResetTimer()

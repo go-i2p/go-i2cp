@@ -6,6 +6,10 @@ import (
 	"github.com/go-i2p/logger"
 )
 
+// LoggerTags defines the type for logger tags
+// Deprecated: Tags are now formatted as strings using fmt.Sprintf
+type LoggerTags = uint32
+
 var logInstance = logger.GetGoI2PLogger()
 
 // LogInit initializes the logger with the specified level
