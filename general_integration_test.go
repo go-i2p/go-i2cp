@@ -316,7 +316,7 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 		receiverMu       sync.Mutex
 		receivedMessages int
 		receivedPayload  []byte
-		messageReceived  = make(chan struct{})
+		messageReceived  = make(chan struct{}, 1)
 		receiverReady    = make(chan struct{})
 	)
 
