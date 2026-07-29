@@ -69,8 +69,8 @@ var defaultProperties = map[string]string{
 	// Tunnel configuration (I2CP defaults for anonymity/performance balance)
 	// Higher values = more anonymity but more overhead
 	// 3 tunnels with 3 hops each provides strong anonymity
-	"inbound.quantity":        "1", // Number of inbound tunnels
-	"inbound.length":          "1", // Hops per inbound tunnel
+	"inbound.quantity":        "3", // Number of inbound tunnels
+	"inbound.length":          "3", // Hops per inbound tunnel
 	"outbound.quantity":       "3", // Number of outbound tunnels
 	"outbound.length":         "3", // Hops per outbound tunnel
 	"inbound.backupQuantity":  "0", // Number of backup inbound tunnels
