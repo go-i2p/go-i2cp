@@ -91,6 +91,9 @@ func connectAndCreateSession(t *testing.T, callbacks SessionCallbacks, nickname 
 	t.Helper()
 
 	client := NewClient(nil)
+	if err := client.EnableDebugging(&DebugConfig{EnableStateTracking: true}); err != nil {
+		t.Fatalf("Failed to enable session state tracking for %s: %v", nickname, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 	defer cancel()
 
@@ -125,6 +128,32 @@ func connectAndCreateSession(t *testing.T, callbacks SessionCallbacks, nickname 
 	time.Sleep(tunnelWait)
 
 	return client, session, ioCtx
+}
+
+func waitForLeaseSetSent(t *testing.T, client *Client, session *Session) {
+	t.Helper()
+
+	tracker := client.GetStateTracker()
+	if tracker == nil {
+		t.Fatal("session state tracker is not available")
+	}
+
+	deadline := time.NewTimer(messageTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if state, ok := tracker.GetState(session.ID()); ok && state == SessionStateLeaseSetSent {
+				t.Logf("Session %d reached LeaseSetSent", session.ID())
+				return
+			}
+		case <-deadline.C:
+			t.Fatalf("Session %d did not reach LeaseSetSent", session.ID())
+		}
+	}
 }
 
 // TestSessionLifecycle validates complete session lifecycle including:
@@ -321,7 +350,7 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 	)
 
 	// Create receiver session with message callback
-	_, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
+	receiverClient, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
@@ -357,14 +386,17 @@ func TestBidirectionalDataTransfer(t *testing.T) {
 
 	// Create sender client and session
 	senderReady := make(chan struct{})
-	_, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
+	senderClient, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Sender session status: %d", status)
 			if status == I2CP_SESSION_STATUS_CREATED {
 				close(senderReady)
 			}
 		},
-	}, "integration-test-sender", messageTimeout, 10*time.Second, senderReady)
+	}, "integration-test-sender", messageTimeout, 20*time.Second, senderReady)
+
+	waitForLeaseSetSent(t, receiverClient, receiverSession)
+	waitForLeaseSetSent(t, senderClient, senderSession)
 
 	t.Logf("Sender destination (B32): %s", senderSession.Destination().b32)
 
@@ -510,7 +542,7 @@ func TestDestinationLookupAndRouting(t *testing.T) {
 	var (
 		targetMu        sync.Mutex
 		targetMessages  int
-		messageReceived = make(chan struct{})
+		messageReceived = make(chan struct{}, 1)
 	)
 
 	// Create target client and session (the destination to be looked up)
@@ -633,7 +665,7 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 		messagesReceived = make(chan struct{}, messageCount)
 	)
 
-	_, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
+	receiverClient, receiverSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnMessage: func(s *Session, srcDest *Destination, protocol uint8, srcPort, destPort uint16, payload *Stream) {
 			receiverMu.Lock()
 			defer receiverMu.Unlock()
@@ -663,11 +695,14 @@ func TestMultipleMessagesWithIntegrity(t *testing.T) {
 	t.Logf("Receiver created: %s", receiverDest.b32)
 
 	// Create sender
-	_, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
+	senderClient, senderSession, _ := connectAndCreateSession(t, SessionCallbacks{
 		OnStatus: func(s *Session, status SessionStatus) {
 			t.Logf("Sender status: %d", status)
 		},
-	}, "integration-test-multi-sender", messageTimeout, 10*time.Second, nil)
+	}, "integration-test-multi-sender", messageTimeout, 20*time.Second, nil)
+
+	waitForLeaseSetSent(t, receiverClient, receiverSession)
+	waitForLeaseSetSent(t, senderClient, senderSession)
 
 	// Send multiple messages with different sizes
 	t.Log("Sending multiple messages...")
