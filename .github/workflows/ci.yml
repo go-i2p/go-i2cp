@@ -32,32 +32,9 @@ jobs:
       - uses: go-i2p/i2p-provider/.github/actions/i2p-router@main
         with:
           backend: ${{ matrix.backend }}
-        env:
-            # This tells the go-i2p backend to actually spit out logs.
-            # You can also use 'warn' or 'error', but 'debug' is best for CI failures.
-            DEBUG_I2P: debug
 
       - name: Run go-i2cp test suite
         run: go test -v -timeout 20m -count=1 ./...
-
-        # 1. Conditionally dump logs directly to the GitHub Actions UI
-      - name: Dump router logs to console
-        if: failure()
-        run: |
-          echo "=== Hunting for router logs ==="
-          find . -name "*.log" -type f -exec echo -e "\n\n=== {} ===" \; -exec cat {} \;
-          find /tmp -name "*.log" -type f -exec echo -e "\n\n=== {} ===" \; -exec cat {} \;
-
-      # 2. Upload them as downloadable artifacts for easier reading
-      - name: Upload logs as artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: i2p-router-logs-${{ matrix.backend }}
-          path: |
-                **/*.log
-                /tmp/**/*.log
-          retention-days: 5
 
       - uses: go-i2p/i2p-provider/.github/actions/i2p-router-stop@main
         if: always()
