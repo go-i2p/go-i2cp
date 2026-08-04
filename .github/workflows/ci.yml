@@ -40,7 +40,7 @@ jobs:
         if: failure()
         run: |
           echo "=== GO-I2P ROUTER LOGS ==="
-          cat /tmp/i2p-router-state/router.log
+          find /tmp $GITHUB_WORKSPACE -name "go-i2p.log" -type f -exec cat {} +
 
       - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router-stop@main
         if: always()
