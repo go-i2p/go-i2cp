@@ -29,12 +29,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: go-i2p/i2p-provider/.github/actions/i2p-router@main
+      - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router@main
         with:
           backend: ${{ matrix.backend }}
 
       - name: Run go-i2cp test suite
         run: go test -v -timeout 20m -count=1 ./...
 
-      - uses: go-i2p/i2p-provider/.github/actions/i2p-router-stop@main
+      - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router-stop@main
         if: always()
