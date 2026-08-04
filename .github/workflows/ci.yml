@@ -36,5 +36,11 @@ jobs:
       - name: Run go-i2cp test suite
         run: go test -v -timeout 20m -count=1 ./...
 
+      - name: Dump Router Logs on Failure
+        if: failure()
+        run: |
+          echo "=== GO-I2P ROUTER LOGS ==="
+          cat /tmp/i2p-router-state/router.log
+
       - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router-stop@main
         if: always()
