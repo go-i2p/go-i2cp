@@ -329,6 +329,10 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 	client, ctx, cancel := connectMultiSessionClient(t, 2*subsessionTestTimeout)
 	defer cancel()
 
+	// Enable auto-reconnect to handle router disconnections during sequential subsession operations
+	// Some Java I2P routers may close the connection after multiple subsession destructions
+	client.EnableAutoReconnect(5, time.Second)
+
 	ioCanceled := startProcessIOLoop(ctx, client)
 	primary := createAndWaitPrimarySession(t, client, ctx, cancel, ioCanceled, "primary-sequential-test")
 
@@ -380,6 +384,22 @@ func TestSubsessionDestruction_MultipleSequential(t *testing.T) {
 		// Optional diagnostic only (non-fatal):
 		if client.tcp.conn == nil {
 			t.Logf("TCP connection is nil after subsession %d destruction (backend may have disconnected/reconnected)", i+1)
+
+			// Wait for auto-reconnect to complete before creating next subsession
+			// This handles Java I2P router behavior where connection may be closed after multiple subsession destructions
+			reconnectCtx, reconnectCancel := context.WithTimeout(ctx, 10*time.Second)
+			defer reconnectCancel()
+
+			// Wait until connection is re-established
+			for client.tcp.conn == nil {
+				select {
+				case <-reconnectCtx.Done():
+					t.Fatalf("Timeout waiting for auto-reconnect after subsession %d destruction", i+1)
+				case <-time.After(100 * time.Millisecond):
+					// Continue waiting
+				}
+			}
+			t.Logf("Auto-reconnect completed, connection re-established")
 		}
 
 		t.Logf("Subsession %d destroyed successfully", i+1)
