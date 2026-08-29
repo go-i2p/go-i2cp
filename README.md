@@ -2,6 +2,8 @@
 
 A low-level Go implementation of the I2P Client Protocol (I2CP) for building anonymous services and applications.
 
+We are currently implementing cross-router testing in CI to identify issues in our I2CP library and differences in I2P router behavior at the I2CP level.
+
 ## Features
 
 - **87% I2CP Protocol Compliance** (22/24 message types)
