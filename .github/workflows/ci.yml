@@ -29,17 +29,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router@main
+      - uses: go-i2p/i2p-provider/.github/actions/i2p-router@main
         with:
           backend: ${{ matrix.backend }}
 
       - name: Run go-i2cp test suite
         run: go test -v -timeout 20m -count=1 ./...
 
-      - name: Dump Router Logs on Failure
-        if: failure()
-        run: |
-          echo "=== GO-I2P ROUTER LOGS ==="
-          find /tmp $GITHUB_WORKSPACE -type f \( -name "go-i2p.log" -o -name "router.log" \) -exec echo -e "\n\n--- Contents of {} ---" \; -exec cat {} +
-      - uses: Nick2k4L/i2p-provider/.github/actions/i2p-router-stop@main
+      - uses: go-i2p/i2p-provider/.github/actions/i2p-router-stop@main
         if: always()
