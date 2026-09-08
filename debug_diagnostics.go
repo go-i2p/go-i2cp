@@ -608,7 +608,8 @@ func (pd *ProtocolDebugger) DiagnosticReport() string {
 		start = 0
 	}
 	for _, msg := range pd.messageLog[start:] {
-		rb.Section("  [%s] %s %s (%d bytes)",
+		rb.Section(
+			"  [%s] %s %s (%d bytes)",
 			msg.Timestamp.Format("15:04:05.000"),
 			msg.Direction,
 			msg.TypeName,

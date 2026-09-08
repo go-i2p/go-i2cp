@@ -181,7 +181,7 @@ func TestMessageTracking_GetPendingMessages(t *testing.T) {
 	// Track multiple messages
 	nonces := []uint32{1001, 1002, 1003}
 	for i, nonce := range nonces {
-		err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: uint8(i+1), SrcPort: uint16(80+i), DestPort: uint16(443+i), PayloadSize: uint32(1024*(i+1))})
+		err = session.TrackMessage(&PendingMessage{Nonce: nonce, Destination: dest, Protocol: uint8(i + 1), SrcPort: uint16(80 + i), DestPort: uint16(443 + i), PayloadSize: uint32(1024 * (i + 1))})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}
@@ -219,7 +219,7 @@ func TestMessageTracking_ClearPendingMessages(t *testing.T) {
 
 	// Track multiple messages
 	for i := uint32(0); i < 5; i++ {
-		err = session.TrackMessage(&PendingMessage{Nonce: 2000+i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
+		err = session.TrackMessage(&PendingMessage{Nonce: 2000 + i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}
@@ -342,7 +342,7 @@ func TestMessageTracking_SessionClose(t *testing.T) {
 
 	// Track messages
 	for i := uint32(0); i < 3; i++ {
-		err = session.TrackMessage(&PendingMessage{Nonce: 4000+i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
+		err = session.TrackMessage(&PendingMessage{Nonce: 4000 + i, Destination: dest, Protocol: 1, SrcPort: 80, DestPort: 443, PayloadSize: 1024})
 		if err != nil {
 			t.Fatalf("TrackMessage %d failed: %v", i, err)
 		}

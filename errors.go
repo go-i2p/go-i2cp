@@ -234,7 +234,7 @@ func NewProtocolError(message string, code int, fatal bool) error {
 // implemented by many network errors. The second return value reports whether the
 // assertion succeeded; callers must apply their own default when it did not, since
 // IsTemporary and isTemporary intentionally differ (fail-closed vs. fail-open).
-func checkTemporary(err error) (isTemp bool, ok bool) {
+func checkTemporary(err error) (isTemp, ok bool) {
 	type temporary interface {
 		Temporary() bool
 	}

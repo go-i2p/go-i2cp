@@ -83,7 +83,7 @@ func startProcessIOLoop(ctx context.Context, client *Client) <-chan struct{} {
 // waitForSessionCreated blocks until created is closed (signalling
 // I2CP_SESSION_STATUS_CREATED) or a 30 second timeout elapses. On timeout it
 // cancels ctx, drains ioCanceled, and fails the test with failMsg.
-func waitForSessionCreated(t *testing.T, cancel context.CancelFunc, ioCanceled <-chan struct{}, created <-chan struct{}, failMsg string) {
+func waitForSessionCreated(t *testing.T, cancel context.CancelFunc, ioCanceled, created <-chan struct{}, failMsg string) {
 	t.Helper()
 
 	select {
