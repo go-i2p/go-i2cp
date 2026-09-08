@@ -1,4 +1,4 @@
-Release notes for: `go-i2cp` Version `0.1.70000`
+Release notes for: `go-i2cp` Version `0.1.70001`
 ==============================================
 
 This file is generated automatically in order to keep git tags in sync.
