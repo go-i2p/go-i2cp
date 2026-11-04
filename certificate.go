@@ -65,15 +65,19 @@ func validateCertificateFormat(certType uint8, length uint16) error {
 
 // buildCertificateBytes constructs the complete certificate byte array for parsing.
 func buildCertificateBytes(stream *Stream, certType uint8, length uint16) ([]byte, error) {
+	// ensures we are not reading more than what is left
+	if int(length) > stream.Len() {
+		return nil, ErrMessageParsing
+	}
+
 	certBytes := make([]byte, 3+length)
 	certBytes[0] = certType
 	certBytes[1] = byte(length >> 8)
 	certBytes[2] = byte(length)
 
 	if length > 0 {
-		_, err := stream.Read(certBytes[3:])
-		if err != nil {
-			return nil, err
+		if n, err := stream.Read(certBytes[3:]); err != nil || n != int(length) {
+			return nil, ErrMessageParsing
 		}
 	}
 	return certBytes, nil
