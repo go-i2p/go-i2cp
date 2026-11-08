@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -274,6 +275,7 @@ func (c *Client) onMsgPayload(stream *Stream) {
 
 // extractSourceDestination extracts source destination for repliable datagrams.
 func (c *Client) extractSourceDestination(protocol uint8, payload *bytes.Buffer) (*Destination, *bytes.Buffer, error) {
+	// Streaming payloads are decoded and authenticated by go-streaming.
 	if protocol != 17 {
 		Debug("Received payload with protocol %d (no embedded source destination)", protocol)
 		return nil, payload, nil
@@ -395,11 +397,20 @@ func (c *Client) parseRepliableDatagramPayload(payload *bytes.Buffer) (*Destinat
 		return nil, nil, fmt.Errorf("failed to parse source destination from datagram: %w", err)
 	}
 
-	// Skip Ed25519 signature (64 bytes)
-	const ed25519SignatureSize = 64
-	sig := make([]byte, ed25519SignatureSize)
-	if _, err := payloadStream.Read(sig); err != nil {
+	// Destination parsing rejects signing types other than Ed25519.
+	sigKey := srcDest.SigningPublicKey()
+	if sigKey == nil {
+		return nil, nil, fmt.Errorf("source destination has no signing public key")
+	}
+
+	// Read the signature, then verify it before the datagram is accepted.
+	sig := make([]byte, ed25519.SignatureSize)
+	if _, err := io.ReadFull(payloadStream, sig); err != nil {
 		return nil, nil, fmt.Errorf("failed to read signature: %w", err)
+	}
+
+	if !sigKey.Verify(payloadStream.Bytes(), sig) {
+		return nil, nil, fmt.Errorf("repliable datagram signature verification failed")
 	}
 
 	// Remaining bytes are the actual payload

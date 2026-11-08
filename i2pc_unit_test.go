@@ -379,8 +379,17 @@ func TestParseRepliableDatagramPayload_Success(t *testing.T) {
 	}
 	datagramPayload.Write(destStream.Bytes())
 
-	// Write fake signature (64 zeros - just for parsing test)
-	signature := make([]byte, 64)
+	// Sign the actual payload with the test destination's signing key, per
+	// the Datagram1 spec: the signature covers the payload following the
+	// signature field.
+	signingKey, err := testDest.SigningKeyPair()
+	if err != nil {
+		t.Fatalf("Failed to get signing key pair: %v", err)
+	}
+	signature, err := signingKey.Sign(actualPayload)
+	if err != nil {
+		t.Fatalf("Failed to sign payload: %v", err)
+	}
 	datagramPayload.Write(signature)
 
 	// Write actual payload
@@ -407,6 +416,78 @@ func TestParseRepliableDatagramPayload_Success(t *testing.T) {
 
 	t.Logf("Successfully parsed repliable datagram from %s with %d byte payload",
 		srcDest.Base32()[:20], remainingPayload.Len())
+}
+
+// TestParseRepliableDatagramPayload_ForgedSignature tests that a repliable
+// datagram whose signature does not verify under the claimed source
+// destination is rejected before it reaches the application. This covers the
+// spoofing attack where an attacker sends a datagram claiming to be from a
+// destination they do not control.
+func TestParseRepliableDatagramPayload_ForgedSignature(t *testing.T) {
+	client := NewClient(nil)
+
+	// The destination the attacker claims to be.
+	claimedDest, err := NewDestination(client.crypto)
+	if err != nil {
+		t.Fatalf("Failed to create claimed destination: %v", err)
+	}
+
+	// The attacker's real destination, used to forge the signature.
+	attackerDest, err := NewDestination(client.crypto)
+	if err != nil {
+		t.Fatalf("Failed to create attacker destination: %v", err)
+	}
+	if claimedDest.Base32() == attackerDest.Base32() {
+		t.Fatal("Test setup error: claimed and attacker destinations must differ")
+	}
+
+	actualPayload := []byte("payload attributed to the claimed destination")
+
+	// buildEnvelope wraps the claimed destination, a signature, and the
+	// payload in a Datagram1 envelope.
+	buildEnvelope := func(signature []byte) *bytes.Buffer {
+		var envelope bytes.Buffer
+		destStream := NewStream(make([]byte, 0, 512))
+		if err := claimedDest.WriteToMessage(destStream); err != nil {
+			t.Fatalf("Failed to write destination: %v", err)
+		}
+		envelope.Write(destStream.Bytes())
+		envelope.Write(signature)
+		envelope.Write(actualPayload)
+		return &envelope
+	}
+
+	t.Run("signature by different destination", func(t *testing.T) {
+		attackerKey, err := attackerDest.SigningKeyPair()
+		if err != nil {
+			t.Fatalf("Failed to get attacker signing key pair: %v", err)
+		}
+		forgedSig, err := attackerKey.Sign(actualPayload)
+		if err != nil {
+			t.Fatalf("Failed to create forged signature: %v", err)
+		}
+
+		srcDest, remainingPayload, err := client.parseRepliableDatagramPayload(buildEnvelope(forgedSig))
+		if err == nil {
+			t.Fatal("Expected error for forged signature, got nil")
+		}
+		if srcDest != nil {
+			t.Errorf("Expected nil source destination, got %s", srcDest.Base32())
+		}
+		if remainingPayload != nil {
+			t.Errorf("Expected nil payload for rejected datagram, got %d bytes", remainingPayload.Len())
+		}
+	})
+
+	t.Run("all-zero signature", func(t *testing.T) {
+		srcDest, _, err := client.parseRepliableDatagramPayload(buildEnvelope(make([]byte, 64)))
+		if err == nil {
+			t.Fatal("Expected error for all-zero signature, got nil")
+		}
+		if srcDest != nil {
+			t.Error("Expected nil source destination, got non-nil")
+		}
+	})
 }
 
 // TestParseRepliableDatagramPayload_TruncatedDestination tests handling when

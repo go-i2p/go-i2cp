@@ -1492,6 +1492,12 @@ func (c *Client) validateMessageSize(compressedSize int) error {
 //	defer cancel()
 //	err := client.ProcessIO(ctx)
 func (c *Client) ProcessIO(ctx context.Context) error {
+	defer func() {
+		if r := recover(); r != nil {
+			Error("Panic in ProcessIO, dropping message cycle")
+		}
+	}()
+
 	if err := c.validateProcessIOContext(ctx); err != nil {
 		return err
 	}
