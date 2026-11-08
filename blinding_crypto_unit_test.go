@@ -69,14 +69,10 @@ func newTestClientAndSession(t *testing.T, callbacks SessionCallbacks) (*Client,
 
 // TestDeriveBlindingFactor tests the basic blinding factor derivation.
 func TestDeriveBlindingFactor(t *testing.T) {
-	secret := make([]byte, 32)
-	for i := range secret {
-		secret[i] = byte(i)
-	}
-
+	signingPubKey := testSigningPubKey(0x10)
 	date := "2025-11-24"
 
-	alpha, err := DeriveBlindingFactor(secret, date)
+	alpha, err := DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -87,8 +83,13 @@ func TestDeriveBlindingFactor(t *testing.T) {
 		t.Error("Derived blinding factor is all zeros")
 	}
 
+	// Verify alpha is a canonical little-endian scalar (< group order L).
+	if alpha[31]&0x80 != 0 {
+		t.Error("Derived blinding factor is not reduced mod L")
+	}
+
 	// Verify deterministic: same inputs produce same output
-	alpha2, err := DeriveBlindingFactor(secret, date)
+	alpha2, err := DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("Second DeriveBlindingFactor failed: %v", err)
 	}
@@ -97,47 +98,83 @@ func TestDeriveBlindingFactor(t *testing.T) {
 	}
 
 	// Verify different dates produce different factors
-	alpha3, err := DeriveBlindingFactor(secret, "2025-11-25")
+	alpha3, err := DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-25")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor with different date failed: %v", err)
 	}
 	if alpha == alpha3 {
 		t.Error("Different dates should produce different blinding factors")
 	}
+
+	// Verify different secrets produce different factors
+	alpha4, err := DeriveBlindingFactor(signingPubKey[:], "other secret", BlindingSigTypeEd25519, date)
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor with different secret failed: %v", err)
+	}
+	if alpha == alpha4 {
+		t.Error("Different secrets should produce different blinding factors")
+	}
+
+	// Verify the factor is bound to the destination's signing public key
+	alpha5, err := DeriveBlindingFactor(testSigningPubKey(0x20)[:], testBlindingSecret, BlindingSigTypeEd25519, date)
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor with different public key failed: %v", err)
+	}
+	if alpha == alpha5 {
+		t.Error("Different signing public keys should produce different blinding factors")
+	}
 }
 
 // TestDeriveBlindingFactor_InvalidInputs tests error handling for invalid inputs.
 func TestDeriveBlindingFactor_InvalidInputs(t *testing.T) {
-	validSecret := make([]byte, 32)
+	signingPubKey := testSigningPubKey(0x10)
 
-	// Test short secret
-	shortSecret := make([]byte, 16)
-	_, err := DeriveBlindingFactor(shortSecret, "2025-11-24")
+	// Test wrong signing public key length
+	_, err := DeriveBlindingFactor(signingPubKey[:16], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err == nil {
-		t.Error("Expected error for short secret")
+		t.Error("Expected error for signing public key that is not 32 bytes")
+	}
+
+	// Test unsupported signature type
+	_, err = DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, 99, "2025-11-24")
+	if err == nil {
+		t.Error("Expected error for unsupported signature type")
 	}
 
 	// Test invalid date format
-	_, err = DeriveBlindingFactor(validSecret, "invalid-date")
+	_, err = DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, "invalid-date")
 	if err == nil {
 		t.Error("Expected error for invalid date format")
 	}
 
 	// Test invalid date values
-	_, err = DeriveBlindingFactor(validSecret, "2025-02-30")
+	_, err = DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-02-30")
 	if err == nil {
 		t.Error("Expected error for invalid date values (Feb 30)")
 	}
 }
 
-// TestDeriveBlindingFactorForToday tests derivation for current date.
-func TestDeriveBlindingFactorForToday(t *testing.T) {
-	secret := make([]byte, 32)
-	for i := range secret {
-		secret[i] = byte(i)
+// TestDeriveBlindingFactor_EmptySecret tests that an empty secret is accepted,
+// matching I2P where the blinding secret is optional.
+func TestDeriveBlindingFactor_EmptySecret(t *testing.T) {
+	signingPubKey := testSigningPubKey(0x10)
+
+	alpha, err := DeriveBlindingFactor(signingPubKey[:], "", BlindingSigTypeEd25519, "2025-11-24")
+	if err != nil {
+		t.Fatalf("DeriveBlindingFactor with empty secret failed: %v", err)
 	}
 
-	alpha, err := DeriveBlindingFactorForToday(secret)
+	var zero [32]byte
+	if alpha == zero {
+		t.Error("Derived blinding factor is all zeros")
+	}
+}
+
+// TestDeriveBlindingFactorForToday tests derivation for current date.
+func TestDeriveBlindingFactorForToday(t *testing.T) {
+	signingPubKey := testSigningPubKey(0x30)
+
+	alpha, err := DeriveBlindingFactorForToday(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactorForToday failed: %v", err)
 	}
@@ -150,7 +187,7 @@ func TestDeriveBlindingFactorForToday(t *testing.T) {
 
 	// Verify matches manual derivation with today's date
 	today := GetCurrentBlindingDate()
-	alpha2, err := DeriveBlindingFactor(secret, today)
+	alpha2, err := DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, today)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -161,21 +198,18 @@ func TestDeriveBlindingFactorForToday(t *testing.T) {
 
 // TestDeriveBlindingFactorWithTimestamp tests timestamp-based derivation.
 func TestDeriveBlindingFactorWithTimestamp(t *testing.T) {
-	secret := make([]byte, 32)
-	for i := range secret {
-		secret[i] = byte(i)
-	}
+	signingPubKey := testSigningPubKey(0x40)
 
 	// Use a known timestamp (2024-11-24 12:00:00 UTC)
 	timestamp := int64(1732449600)
 
-	alpha, err := DeriveBlindingFactorWithTimestamp(secret, timestamp)
+	alpha, err := DeriveBlindingFactorWithTimestamp(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, timestamp)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactorWithTimestamp failed: %v", err)
 	}
 
 	// Verify matches date-based derivation (timestamp is 2024-11-24)
-	alpha2, err := DeriveBlindingFactor(secret, "2024-11-24")
+	alpha2, err := DeriveBlindingFactor(signingPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2024-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -186,10 +220,10 @@ func TestDeriveBlindingFactorWithTimestamp(t *testing.T) {
 
 // TestBlindPublicKey tests public key blinding.
 func TestBlindPublicKey(t *testing.T) {
-	publicKey, _, secret := setupBlindingTestKeys(t)
+	publicKey, _ := setupBlindingTestKeys(t)
 
 	// Derive blinding factor
-	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
+	alpha, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -217,10 +251,10 @@ func TestBlindPublicKey(t *testing.T) {
 
 // TestBlindUnblindRoundTrip tests that unblinding reverses blinding.
 func TestBlindUnblindRoundTrip(t *testing.T) {
-	publicKey, _, secret := setupBlindingTestKeys(t)
+	publicKey, _ := setupBlindingTestKeys(t)
 
 	// Derive blinding factor
-	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
+	alpha, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -243,16 +277,19 @@ func TestBlindUnblindRoundTrip(t *testing.T) {
 
 // TestDeriveBlindingKeys tests the convenience function for deriving blinding keys.
 func TestDeriveBlindingKeys(t *testing.T) {
-	publicKey, _, secret := setupBlindingTestKeys(t)
+	publicKey, _ := setupBlindingTestKeys(t)
 
 	// Test with explicit date
-	result, err := DeriveBlindingKeys(secret, publicKey, "2025-11-24")
+	result, err := DeriveBlindingKeys(publicKey, testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingKeys failed: %v", err)
 	}
 
 	if result.Date != "2025-11-24" {
 		t.Errorf("Expected date 2025-11-24, got %s", result.Date)
+	}
+	if result.SigType != BlindingSigTypeEd25519 {
+		t.Errorf("Expected sig type %d, got %d", BlindingSigTypeEd25519, result.SigType)
 	}
 	if result.HasPrivateKey {
 		t.Error("Expected HasPrivateKey to be false")
@@ -267,7 +304,7 @@ func TestDeriveBlindingKeys(t *testing.T) {
 	}
 
 	// Test with empty date (uses today)
-	result2, err := DeriveBlindingKeys(secret, publicKey, "")
+	result2, err := DeriveBlindingKeys(publicKey, testBlindingSecret, BlindingSigTypeEd25519, "")
 	if err != nil {
 		t.Fatalf("DeriveBlindingKeys with empty date failed: %v", err)
 	}
@@ -279,9 +316,9 @@ func TestDeriveBlindingKeys(t *testing.T) {
 
 // TestDeriveBlindingKeysWithPrivate tests derivation including private key blinding.
 func TestDeriveBlindingKeysWithPrivate(t *testing.T) {
-	publicKey, privateKey, secret := setupBlindingTestKeys(t)
+	publicKey, privateKey := setupBlindingTestKeys(t)
 
-	result, err := DeriveBlindingKeysWithPrivate(secret, publicKey, privateKey, "2025-11-24")
+	result, err := DeriveBlindingKeysWithPrivate(publicKey, privateKey, testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingKeysWithPrivate failed: %v", err)
 	}
