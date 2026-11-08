@@ -6,9 +6,15 @@
 // The implementation delegates to github.com/go-i2p/crypto/kdf and ed25519 packages
 // which provide I2P-compliant blinding operations per Proposal 123.
 //
+// The blinding factor (alpha) is derived with kdf.DeriveBlindingFactorI2P, the
+// spec-conformant implementation of net.i2p.crypto.Blinding.generateAlpha. Note
+// that alpha is bound to the destination's signing public key, so the same secret
+// and date produce a different alpha for every destination.
+//
 // Blinding workflow:
 //  1. Service publishes encrypted LeaseSet with blinded destination
-//  2. Client derives blinding factor from secret + date
+//  2. Client derives blinding factor from the destination's signing public key,
+//     the shared secret, the signing type and the date
 //  3. Client blinds destination's public key with the factor
 //  4. Router uses blinded key to locate encrypted LeaseSet
 //  5. Client decrypts LeaseSet using derived keys
@@ -25,10 +31,30 @@ import (
 	"github.com/go-i2p/crypto/kdf"
 )
 
+const (
+	// blindingDateFormat is the calendar-date layout accepted and produced by
+	// the blinding helpers. The crypto layer derives its own yyyyMMdd value from
+	// the time.Time these helpers build, so the two always agree.
+	blindingDateFormat = "2006-01-02"
+)
+
+// Signature type codes accepted as the blinding KDF's "sigtype-in" value. Blinding
+// always yields a RedDSA key, so the sigtype-out is fixed by the crypto layer and
+// only the original destination's signing type needs to be supplied here.
+const (
+	// BlindingSigTypeEd25519 (7) is the standard Ed25519 signing type, which is
+	// what every I2CP destination supported by this package uses.
+	BlindingSigTypeEd25519 uint16 = kdf.SigTypeEdDSASha512Ed25519
+	// BlindingSigTypeRedDSA (11) is the RedDSA signing type of an already-blinded
+	// destination, used when re-blinding a blinded key.
+	BlindingSigTypeRedDSA uint16 = kdf.SigTypeRedDSASha512Ed25519
+)
+
 // BlindingKeyDerivation holds derived blinding keys for accessing encrypted LeaseSets.
 // This structure contains all the cryptographic material needed to access a blinded destination.
 type BlindingKeyDerivation struct {
-	// Alpha is the 32-byte blinding factor derived from secret + date
+	// Alpha is the 32-byte blinding factor derived from the destination's signing
+	// public key, the secret, the signing type and the date
 	Alpha [32]byte
 
 	// BlindedPublicKey is the destination's public key after blinding
@@ -41,45 +67,75 @@ type BlindingKeyDerivation struct {
 	// Date is the date used for derivation (for verification/debugging)
 	Date string
 
+	// SigType is the signing type used as the blinding KDF's sigtype-in value.
+	// It is recorded so callers can re-derive or verify the same alpha.
+	SigType uint16
+
 	// HasPrivateKey indicates whether BlindedPrivateKey is populated
 	HasPrivateKey bool
 }
 
-// DeriveBlindingFactor derives a blinding factor (alpha) from a secret and date.
+// DeriveBlindingFactor derives a blinding factor (alpha) for a destination.
 // This creates a unique per-day blinding factor for EncryptedLeaseSet rotation.
 //
-// The derivation uses HKDF-SHA256 with the date as salt, producing a 32-byte
-// canonical Ed25519 scalar suitable for key blinding.
+// The derivation is the I2P-conformant one performed by kdf.DeriveBlindingFactorI2P:
+//
+//	salt  = SHA256("I2PGenerateAlpha" || signingPubKey || sigType || 0x000b)
+//	ikm   = yyyyMMdd(GMT) || secret
+//	alpha = HKDF-SHA256(salt, ikm, "i2pblinding1", 64) reduced mod L
+//
+// Because the destination's signing public key is mixed into the salt, alpha is
+// bound to that destination: the same secret and date yield a different alpha for
+// a different key.
 //
 // Parameters:
-//   - secret: Secret key material (at least 32 bytes, typically from private key seed)
-//   - date: Date in "YYYY-MM-DD" format (use kdf.GetCurrentBlindingDate() for today)
+//   - signingPubKey: the destination's 32-byte signing public key
+//   - secret: shared secret (UTF-8 text in I2P; may be empty)
+//   - sigType: signing type of the destination, BlindingSigTypeEd25519 or BlindingSigTypeRedDSA
+//   - date: date in "YYYY-MM-DD" format (use GetCurrentBlindingDate() for today)
 //
 // Returns:
-//   - alpha: 32-byte blinding factor
-//   - error: If secret is too short or date format is invalid
+//   - alpha: 32-byte canonical little-endian blinding factor
+//   - error: If signingPubKey is not 32 bytes, sigType is unsupported, or the
+//     date format is invalid
 //
 // Example:
 //
-//	secret := privateKey.Seed()
-//	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
+//	alpha, err := DeriveBlindingFactor(signingPubKey, "my secret", BlindingSigTypeEd25519, "2025-11-24")
 //	if err != nil {
 //	    return err
 //	}
-func DeriveBlindingFactor(secret []byte, date string) ([32]byte, error) {
-	return kdf.DeriveBlindingFactor(secret, date)
+func DeriveBlindingFactor(signingPubKey []byte, secret string, sigType uint16, date string) ([32]byte, error) {
+	t, err := parseBlindingDate(date)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return kdf.DeriveBlindingFactorI2P(signingPubKey, secret, sigType, t)
 }
 
 // DeriveBlindingFactorForToday derives a blinding factor for the current UTC date.
 // This is a convenience wrapper for DeriveBlindingFactor with today's date.
-func DeriveBlindingFactorForToday(secret []byte) ([32]byte, error) {
-	return kdf.DeriveBlindingFactor(secret, kdf.GetCurrentBlindingDate())
+func DeriveBlindingFactorForToday(signingPubKey []byte, secret string, sigType uint16) ([32]byte, error) {
+	return DeriveBlindingFactor(signingPubKey, secret, sigType, GetCurrentBlindingDate())
 }
 
 // DeriveBlindingFactorWithTimestamp derives a blinding factor from a Unix timestamp.
-// The timestamp is converted to a UTC date in YYYY-MM-DD format.
-func DeriveBlindingFactorWithTimestamp(secret []byte, unixTimestamp int64) ([32]byte, error) {
-	return kdf.DeriveBlindingFactorWithTimestamp(secret, unixTimestamp)
+// The timestamp is converted to a UTC date, which is the rotation period used by
+// the derivation.
+func DeriveBlindingFactorWithTimestamp(signingPubKey []byte, secret string, sigType uint16, unixTimestamp int64) ([32]byte, error) {
+	return kdf.DeriveBlindingFactorI2P(signingPubKey, secret, sigType, time.Unix(unixTimestamp, 0).UTC())
+}
+
+// parseBlindingDate converts a "YYYY-MM-DD" blinding date into the UTC midnight
+// time.Time the crypto layer derives its yyyyMMdd value from. It rejects dates
+// that are malformed or out of calendar range so that callers keep getting an
+// error rather than silently blinding with the wrong period.
+func parseBlindingDate(date string) (time.Time, error) {
+	t, err := time.Parse(blindingDateFormat, date)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid blinding date %q: %w", date, err)
+	}
+	return t.UTC(), nil
 }
 
 // BlindPublicKey blinds an Ed25519 public key using a blinding factor.
@@ -133,23 +189,26 @@ func UnblindPublicKey(blindedPublicKey, alpha [32]byte) ([32]byte, error) {
 	return cryptoed25519.UnblindPublicKey(blindedPublicKey, alpha)
 }
 
-// DeriveBlindingKeys derives blinding factor and blinds a public key.
-// This is a convenience function that combines DeriveBlindingFactor and BlindPublicKey.
+// DeriveBlindingKeys derives the blinding factor for a destination and blinds its
+// signing public key. This is a convenience function that combines
+// DeriveBlindingFactor and BlindPublicKey.
 //
 // Parameters:
-//   - secret: Secret key material (at least 32 bytes)
-//   - publicKey: 32-byte Ed25519 public key to blind
+//   - publicKey: the destination's 32-byte signing public key, which both binds
+//     the derivation and is blinded
+//   - secret: shared secret (may be empty)
+//   - sigType: signing type of the destination, BlindingSigTypeEd25519 or BlindingSigTypeRedDSA
 //   - date: Date in "YYYY-MM-DD" format (or empty for today)
 //
 // Returns:
 //   - BlindingKeyDerivation containing alpha and blinded public key
 //   - Error if derivation fails
-func DeriveBlindingKeys(secret []byte, publicKey [32]byte, date string) (*BlindingKeyDerivation, error) {
+func DeriveBlindingKeys(publicKey [32]byte, secret string, sigType uint16, date string) (*BlindingKeyDerivation, error) {
 	if date == "" {
-		date = kdf.GetCurrentBlindingDate()
+		date = GetCurrentBlindingDate()
 	}
 
-	alpha, err := kdf.DeriveBlindingFactor(secret, date)
+	alpha, err := DeriveBlindingFactor(publicKey[:], secret, sigType, date)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive blinding factor: %w", err)
 	}
@@ -163,6 +222,7 @@ func DeriveBlindingKeys(secret []byte, publicKey [32]byte, date string) (*Blindi
 		Alpha:            alpha,
 		BlindedPublicKey: blindedPubKey,
 		Date:             date,
+		SigType:          sigType,
 		HasPrivateKey:    false,
 	}, nil
 }
@@ -171,20 +231,21 @@ func DeriveBlindingKeys(secret []byte, publicKey [32]byte, date string) (*Blindi
 // This is used by services that need to sign with blinded keys.
 //
 // Parameters:
-//   - secret: Secret key material (at least 32 bytes)
-//   - publicKey: 32-byte Ed25519 public key
+//   - publicKey: the destination's 32-byte signing public key, which binds the derivation
 //   - privateKey: 64-byte Ed25519 private key
+//   - secret: shared secret (may be empty)
+//   - sigType: signing type of the destination, BlindingSigTypeEd25519 or BlindingSigTypeRedDSA
 //   - date: Date in "YYYY-MM-DD" format (or empty for today)
 //
 // Returns:
 //   - BlindingKeyDerivation containing alpha, blinded public and private keys
 //   - Error if derivation fails
-func DeriveBlindingKeysWithPrivate(secret []byte, publicKey [32]byte, privateKey [64]byte, date string) (*BlindingKeyDerivation, error) {
+func DeriveBlindingKeysWithPrivate(publicKey [32]byte, privateKey [64]byte, secret string, sigType uint16, date string) (*BlindingKeyDerivation, error) {
 	if date == "" {
-		date = kdf.GetCurrentBlindingDate()
+		date = GetCurrentBlindingDate()
 	}
 
-	alpha, err := kdf.DeriveBlindingFactor(secret, date)
+	alpha, err := DeriveBlindingFactor(publicKey[:], secret, sigType, date)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive blinding factor: %w", err)
 	}
@@ -204,18 +265,21 @@ func DeriveBlindingKeysWithPrivate(secret []byte, publicKey [32]byte, privateKey
 		BlindedPublicKey:  blindedPubKey,
 		BlindedPrivateKey: blindedPrivKey,
 		Date:              date,
+		SigType:           sigType,
 		HasPrivateKey:     true,
 	}, nil
 }
 
 // GetCurrentBlindingDate returns today's date in UTC formatted for blinding (YYYY-MM-DD).
 func GetCurrentBlindingDate() string {
-	return kdf.GetCurrentBlindingDate()
+	return FormatDateForBlinding(time.Now().UTC())
 }
 
 // FormatDateForBlinding formats a time.Time as YYYY-MM-DD for blinding factor derivation.
+// The value is converted to UTC first, since the I2P blinding rotation period is the
+// GMT day.
 func FormatDateForBlinding(t time.Time) string {
-	return kdf.FormatDateForBlinding(t)
+	return t.UTC().Format(blindingDateFormat)
 }
 
 // Session methods for blinding key derivation
@@ -232,6 +296,25 @@ func FormatDateForBlinding(t time.Time) string {
 //   - BlindingKeyDerivation with alpha and blinded keys
 //   - Error if session has no destination or derivation fails
 func (s *Session) DeriveBlindingKeysForDestination(date string) (*BlindingKeyDerivation, error) {
+	return s.DeriveBlindingKeysForDestinationWithSecret("", date)
+}
+
+// DeriveBlindingKeysForDestinationWithSecret derives blinding keys for this
+// session's destination using a shared secret.
+//
+// The secret is the optional UTF-8 string mixed into the blinding KDF input (the
+// "password" a service chooses for its blinded LeaseSet). It is not key material:
+// a client can only reproduce the blinded destination if it knows the same secret,
+// so pass an empty string for an unauthenticated blinded destination.
+//
+// Parameters:
+//   - secret: shared secret mixed into the derivation (may be empty)
+//   - date: Date in "YYYY-MM-DD" format (or empty for today)
+//
+// Returns:
+//   - BlindingKeyDerivation with alpha and blinded keys
+//   - Error if session has no destination or derivation fails
+func (s *Session) DeriveBlindingKeysForDestinationWithSecret(secret, date string) (*BlindingKeyDerivation, error) {
 	if err := s.ensureInitialized(); err != nil {
 		return nil, err
 	}
@@ -241,28 +324,25 @@ func (s *Session) DeriveBlindingKeysForDestination(date string) (*BlindingKeyDer
 		return nil, fmt.Errorf("session has no destination")
 	}
 
-	// Get the signing key pair for secret derivation
+	// Get the signing key pair; its public key binds the derivation while its
+	// private key is blinded alongside it so the service can sign as the
+	// blinded destination.
 	keyPair, err := dest.SigningKeyPair()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get signing key pair: %w", err)
 	}
 
-	// Get the keys via accessor methods
 	privKey := keyPair.PrivateKey()
 	pubKey := keyPair.PublicKey()
 
-	// Use the private key seed as the secret for blinding factor derivation
-	secret := privKey[:32] // Ed25519 seed is first 32 bytes
-
-	// Get the public key
 	var publicKey [32]byte
 	copy(publicKey[:], pubKey[:])
 
-	// Derive blinding keys with private key for signing
 	var privateKey [64]byte
 	copy(privateKey[:], privKey[:])
 
-	return DeriveBlindingKeysWithPrivate(secret, publicKey, privateKey, date)
+	// I2CP destinations always use the Ed25519 (7) signing type.
+	return DeriveBlindingKeysWithPrivate(publicKey, privateKey, secret, BlindingSigTypeEd25519, date)
 }
 
 // StoreBlindingInfo stores received blinding parameters in the session.

@@ -5,22 +5,34 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/go-i2p/crypto/kdf"
 )
 
+// testBlindingSecret is the shared secret mixed into the blinding KDF by tests.
+// I2P blinding secrets are UTF-8 text (and may be empty), not key material.
+const testBlindingSecret = "go-i2cp blinding test secret"
+
+// testSigningPubKey returns a deterministic 32-byte signing public key for tests
+// that exercise the blinding KDF in isolation. The derivation only requires a
+// 32-byte value, it does not validate the point.
+func testSigningPubKey(seed byte) [32]byte {
+	var key [32]byte
+	for i := range key {
+		key[i] = seed + byte(i)
+	}
+	return key
+}
+
 // getTestKeys extracts public and private keys from an Ed25519KeyPair for testing.
-func getTestKeys(keyPair *Ed25519KeyPair) (publicKey [32]byte, privateKey [64]byte, secret []byte) {
+func getTestKeys(keyPair *Ed25519KeyPair) (publicKey [32]byte, privateKey [64]byte) {
 	pubKey := keyPair.PublicKey()
 	privKey := keyPair.PrivateKey()
 	copy(publicKey[:], pubKey[:])
 	copy(privateKey[:], privKey[:])
-	secret = privKey[:32]
-	return publicKey, privateKey, secret
+	return publicKey, privateKey
 }
 
 // setupBlindingTestKeys creates a destination and extracts its Ed25519 keys for blinding tests.
-func setupBlindingTestKeys(t *testing.T) (publicKey [32]byte, privateKey [64]byte, secret []byte) {
+func setupBlindingTestKeys(t *testing.T) (publicKey [32]byte, privateKey [64]byte) {
 	t.Helper()
 	crypto := NewCrypto()
 	dest, err := NewDestination(crypto)
