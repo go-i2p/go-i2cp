@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-i2p/crypto/kdf"
 )
 
 // testBlindingSecret is the shared secret mixed into the blinding KDF by tests.
@@ -116,7 +118,8 @@ func TestDeriveBlindingFactor(t *testing.T) {
 	}
 
 	// Verify the factor is bound to the destination's signing public key
-	alpha5, err := DeriveBlindingFactor(testSigningPubKey(0x20)[:], testBlindingSecret, BlindingSigTypeEd25519, date)
+	otherSigningPubKey := testSigningPubKey(0x20)
+	alpha5, err := DeriveBlindingFactor(otherSigningPubKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor with different public key failed: %v", err)
 	}
@@ -335,9 +338,9 @@ func TestDeriveBlindingKeysWithPrivate(t *testing.T) {
 
 // TestVerifyBlindedDestination tests blinded destination verification.
 func TestVerifyBlindedDestination(t *testing.T) {
-	publicKey, _, secret := setupBlindingTestKeys(t)
+	publicKey, _ := setupBlindingTestKeys(t)
 
-	alpha, err := DeriveBlindingFactor(secret, "2025-11-24")
+	alpha, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -451,19 +454,19 @@ func TestSessionStoreBlindingInfo_NilParams(t *testing.T) {
 
 // TestBlindingCrypto_Integration tests the full blinding workflow.
 func TestBlindingCrypto_Integration(t *testing.T) {
-	// Simulate a service creating a blinded destination
-	publicKey, privateKey, secret := setupBlindingTestKeys(t)
+	// Simulate a service creating a blinded destination.
+	publicKey, privateKey := setupBlindingTestKeys(t)
 	date := "2025-11-24"
 
 	// 2. Service derives blinding keys for the day
-	serviceKeys, err := DeriveBlindingKeysWithPrivate(secret, publicKey, privateKey, date)
+	serviceKeys, err := DeriveBlindingKeysWithPrivate(publicKey, privateKey, testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("Service DeriveBlindingKeysWithPrivate failed: %v", err)
 	}
 
 	// 3. Client also derives the blinding factor from shared secret
 	// (In practice, client would derive from destination's known public info)
-	clientAlpha, err := DeriveBlindingFactor(secret, date)
+	clientAlpha, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("Client DeriveBlindingFactor failed: %v", err)
 	}
