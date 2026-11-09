@@ -497,12 +497,12 @@ func BenchmarkDeriveBlindingFactor(b *testing.B) {
 	}
 
 	keyPair, _ := dest.SigningKeyPair()
-	_, _, secret := getTestKeys(keyPair)
+	publicKey, _ := getTestKeys(keyPair)
 	date := kdf.GetCurrentBlindingDate()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = DeriveBlindingFactor(secret, date)
+		_, _ = DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	}
 }
 
@@ -515,8 +515,8 @@ func BenchmarkBlindPublicKey(b *testing.B) {
 	}
 
 	keyPair, _ := dest.SigningKeyPair()
-	publicKey, _, secret := getTestKeys(keyPair)
-	alpha, _ := DeriveBlindingFactor(secret, "2025-11-24")
+	publicKey, _ := getTestKeys(keyPair)
+	alpha, _ := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -533,11 +533,11 @@ func BenchmarkDeriveBlindingKeys(b *testing.B) {
 	}
 
 	keyPair, _ := dest.SigningKeyPair()
-	publicKey, _, secret := getTestKeys(keyPair)
+	publicKey, _ := getTestKeys(keyPair)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = DeriveBlindingKeys(secret, publicKey, "2025-11-24")
+		_, _ = DeriveBlindingKeys(publicKey, testBlindingSecret, BlindingSigTypeEd25519, "2025-11-24")
 	}
 }
 
@@ -1039,10 +1039,10 @@ func TestOnMsgBlindingInfo_InvalidData(t *testing.T) {
 // Note: blinded keys use [scalar][pubkey] format and cannot be used with
 // crypto/ed25519.Sign directly (see go-i2p/crypto documentation).
 func TestBlindPrivateKey_SignAndVerify(t *testing.T) {
-	publicKey, privateKey, secret := setupBlindingTestKeys(t)
+	publicKey, privateKey := setupBlindingTestKeys(t)
 
 	date := "2025-06-01"
-	alpha, err := DeriveBlindingFactor(secret, date)
+	alpha, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, date)
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
@@ -1083,13 +1083,13 @@ func TestBlindPrivateKey_SignAndVerify(t *testing.T) {
 // TestBlindPrivateKey_DifferentAlphaProducesDifferentKey ensures different blinding
 // factors produce different blinded private keys.
 func TestBlindPrivateKey_DifferentAlphaProducesDifferentKey(t *testing.T) {
-	_, privateKey, secret := setupBlindingTestKeys(t)
+	publicKey, privateKey := setupBlindingTestKeys(t)
 
-	alpha1, err := DeriveBlindingFactor(secret, "2025-06-01")
+	alpha1, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-06-01")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
-	alpha2, err := DeriveBlindingFactor(secret, "2025-06-02")
+	alpha2, err := DeriveBlindingFactor(publicKey[:], testBlindingSecret, BlindingSigTypeEd25519, "2025-06-02")
 	if err != nil {
 		t.Fatalf("DeriveBlindingFactor failed: %v", err)
 	}
