@@ -5,8 +5,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/go-i2p/crypto/kdf"
 )
 
 // testBlindingSecret is the shared secret mixed into the blinding KDF by tests.
@@ -498,7 +496,7 @@ func BenchmarkDeriveBlindingFactor(b *testing.B) {
 
 	keyPair, _ := dest.SigningKeyPair()
 	publicKey, _ := getTestKeys(keyPair)
-	date := kdf.GetCurrentBlindingDate()
+	date := GetCurrentBlindingDate()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
