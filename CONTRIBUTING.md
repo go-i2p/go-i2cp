@@ -56,6 +56,29 @@ go test -race ./...
 
 Use table-driven tests for message parsing. Test both happy paths and error cases.
 
+### Integration tests
+
+Integration tests (`*_integration_test.go`) require a router with I2CP listening on
+`127.0.0.1:7654`, so they hang out with the rest of the suite. Use the containerized
+setup, which starts a go-i2p router and runs everything against it:
+
+```bash
+./run_docker_tests.sh                 # all tests
+./run_docker_tests.sh -run TestSubsessionDestruction -v
+```
+
+Each test calls `waitForI2CPReadiness`, which waits once per test binary for the
+router's tunnels to build (60s by default). Tune or skip that grace period:
+
+```bash
+GO_I2CP_TUNNEL_GRACE=10s go test -timeout 10m ./...   # shorter wait
+go test -short ./...                                   # skip the wait entirely
+```
+
+Tunnels stay up for the life of the router, so the wait happens once, not per test.
+If you start a router yourself, give it a couple of minutes before running tests, or
+the first readiness gate absorbs the wait.
+
 ## Pull Request Checklist
 
 Before submitting:
